@@ -30,7 +30,8 @@ export const BAR_STUDENTS = ['Flavienne Winjisna', 'Brigida Aoulati', 'Maria Fra
 // nikoli (kuhinjski student, po pomoti dodan v bar). Barski študenti od
 // septembra 2026 naprej (glej usesSepPattern / BAR_STUDENTS).
 export function getActiveBarStaff(year: number, month: number): string[] {
-  const core: string[] = ['Alex', 'Fransia', 'Sandia', 'Walas']
+  const fransiaActive = year < 2026 || (year === 2026 && month <= 9)
+  const core: string[] = fransiaActive ? ['Alex', 'Fransia', 'Sandia', 'Walas'] : ['Alex', 'Sandia', 'Walas']
   const jonnyActive = year < 2026 || (year === 2026 && month <= 8)
   const withJonny = jonnyActive ? [...core, 'Jonny'] : core
   const students = year > 2026 || (year === 2026 && month >= 9) ? [...BAR_STUDENTS] : []
@@ -327,6 +328,11 @@ const BAR_MANUAL_EXTRA_OVERRIDES: Record<string, Partial<Record<BarStaff, BarExt
   return year > 2026 || (year === 2026 && month >= 9)
   }
 
+  // Od oktobra 2026 Fransia ne dela več v baru.
+  function usesOctPattern(year: number, month: number): boolean {
+  return year > 2026 || (year === 2026 && month >= 10)
+  }
+
 /**
  * Generate the bar schedule for a whole month.
  *
@@ -364,7 +370,51 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
       const pos = ((globalDay % 7) + 7) % 7
       const evenWeek = Math.floor(globalDay / 7) % 2 === 0
 
-      if (usesSepPattern(year, month)) {
+      if (usesOctPattern(year, month)) {
+        // --- Oktober 2026 naprej: Fransia NE dela več v baru ---
+        // Mentorji Alex/Sandia/Walas (6+1, prosti dnevi pos 0/2/3). Ko delajo vsi
+        // trije: en mentor na smeno — večer fant (tedensko menjava), drugi fant
+        // jutro, Sandia opoldne. Ko je en mentor prost: jutro + večer mentor,
+        // opoldne pokrije študentka (prekrivanje 11-12:30 in 15:30-17 z mentorjem).
+        fransia = 'OFF'
+        if (pos === WEEKLY_OFF_SLOT.Alex) {
+          alex = 'OFF'
+          sandia = 'MORNING'
+          walas = 'EVENING'
+        } else if (pos === WEEKLY_OFF_SLOT.Walas) {
+          walas = 'OFF'
+          sandia = 'MORNING'
+          alex = 'EVENING'
+        } else if (pos === WEEKLY_OFF_SLOT.Sandia) {
+          sandia = 'OFF'
+          if (evenWeek) {
+            walas = 'EVENING'
+            alex = 'MORNING'
+          } else {
+            alex = 'EVENING'
+            walas = 'MORNING'
+          }
+        } else {
+          sandia = 'MIDDAY'
+          if (evenWeek) {
+            walas = 'EVENING'
+            alex = 'MORNING'
+          } else {
+            alex = 'EVENING'
+            walas = 'MORNING'
+          }
+        }
+
+        // Študentke: po ena na smeno (jutro/opoldne/večer), tedensko rotirajo,
+        // da vsaka dela vse smene; vsaka 1 prost dan na teden (pos 4/5/6 — takrat
+        // so vsi trije mentorji v službi). Zvečer nikoli več kot ena študentka.
+        const weekIndex = Math.floor(globalDay / 7)
+        const rot: BarShift[] = ['MORNING', 'MIDDAY', 'EVENING']
+        const offIdx = pos >= 4 && pos <= 6 ? pos - 4 : -1
+        BAR_STUDENTS.forEach((name, i) => {
+          studentShifts[name] = i === offIdx ? 'OFF' : rot[(i + weekIndex) % 3]
+        })
+      } else if (usesSepPattern(year, month)) {
         // --- September 2026 onward ---
         // Fransia ONLY midday. Alex/Sandia/Walas across morning+evening.
         // Sandia works evening regularly (on no-off days), always with a boy
