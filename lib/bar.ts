@@ -383,8 +383,13 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
           walas = 'EVENING'
         } else if (pos === WEEKLY_OFF_SLOT.Walas) {
           walas = 'OFF'
-          sandia = 'MORNING'
-          alex = 'EVENING'
+          if (evenWeek) {
+            sandia = 'EVENING'
+            alex = 'MORNING'
+          } else {
+            sandia = 'MORNING'
+            alex = 'EVENING'
+          }
         } else if (pos === WEEKLY_OFF_SLOT.Sandia) {
           sandia = 'OFF'
           if (evenWeek) {
@@ -395,13 +400,15 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
             walas = 'MORNING'
           }
         } else {
-          sandia = 'MIDDAY'
+          // Vsi trije v službi: Alex opoldne, Sandia + Walas si delita jutro/večer
+          // (tedenska menjava, da Sandia dela tako jutra kot večere).
+          alex = 'MIDDAY'
           if (evenWeek) {
-            walas = 'EVENING'
-            alex = 'MORNING'
-          } else {
-            alex = 'EVENING'
+            sandia = 'EVENING'
             walas = 'MORNING'
+          } else {
+            sandia = 'MORNING'
+            walas = 'EVENING'
           }
         }
 
