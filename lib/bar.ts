@@ -376,33 +376,21 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
         // trije: en mentor na smeno — večer fant (tedensko menjava), drugi fant
         // jutro, Sandia opoldne. Ko je en mentor prost: jutro + večer mentor,
         // opoldne pokrije študentka (prekrivanje 11-12:30 in 15:30-17 z mentorjem).
+        // Alex = delavec, vedno OPOLDNE (edini na opoldanski smeni).
+        // Mentorja Walas/Sandia: jutro + večer (tedenska menjava).
+        // Ko je en mentor prost, drugi mentor dela večer, Alex pa jutro (opoldne prazno).
+        // Ko je Alex prost, opoldanske smene ni.
         fransia = 'OFF'
-        if (pos === WEEKLY_OFF_SLOT.Alex) {
-          alex = 'OFF'
-          sandia = 'MORNING'
-          walas = 'EVENING'
-        } else if (pos === WEEKLY_OFF_SLOT.Walas) {
+        if (pos === WEEKLY_OFF_SLOT.Walas) {
           walas = 'OFF'
-          if (evenWeek) {
-            sandia = 'EVENING'
-            alex = 'MORNING'
-          } else {
-            sandia = 'MORNING'
-            alex = 'EVENING'
-          }
+          sandia = 'EVENING'
+          alex = 'MORNING'
         } else if (pos === WEEKLY_OFF_SLOT.Sandia) {
           sandia = 'OFF'
-          if (evenWeek) {
-            walas = 'EVENING'
-            alex = 'MORNING'
-          } else {
-            alex = 'EVENING'
-            walas = 'MORNING'
-          }
+          walas = 'EVENING'
+          alex = 'MORNING'
         } else {
-          // Vsi trije v službi: Alex opoldne, Sandia + Walas si delita jutro/večer
-          // (tedenska menjava, da Sandia dela tako jutra kot večere).
-          alex = 'MIDDAY'
+          alex = pos === WEEKLY_OFF_SLOT.Alex ? 'OFF' : 'MIDDAY'
           if (evenWeek) {
             sandia = 'EVENING'
             walas = 'MORNING'
@@ -412,14 +400,15 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
           }
         }
 
-        // Študentke: po ena na smeno (jutro/opoldne/večer), tedensko rotirajo,
-        // da vsaka dela vse smene; vsaka 1 prost dan na teden (pos 4/5/6 — takrat
-        // so vsi trije mentorji v službi). Zvečer nikoli več kot ena študentka.
+        // Študentke: NIKOLI opoldne. Jutro največ 1 (z mentorjem), večer do 2
+        // (z mentorjem → skupaj 3). Tedensko rotira, katera je zjutraj; vsaka ima
+        // 1 prost dan na teden (pos 4/5/6).
         const weekIndex = Math.floor(globalDay / 7)
-        const rot: BarShift[] = ['MORNING', 'MIDDAY', 'EVENING']
         const offIdx = pos >= 4 && pos <= 6 ? pos - 4 : -1
+        let morningIdx = ((weekIndex % 3) + 3) % 3
+        if (morningIdx === offIdx) morningIdx = (morningIdx + 1) % 3
         BAR_STUDENTS.forEach((name, i) => {
-          studentShifts[name] = i === offIdx ? 'OFF' : rot[(i + weekIndex) % 3]
+          studentShifts[name] = i === offIdx ? 'OFF' : i === morningIdx ? 'MORNING' : 'EVENING'
         })
       } else if (usesSepPattern(year, month)) {
         // --- September 2026 onward ---
