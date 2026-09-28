@@ -380,17 +380,28 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
         // Mentorja Walas/Sandia: jutro + večer (tedenska menjava).
         // Ko je en mentor prost, drugi mentor dela večer, Alex pa jutro (opoldne prazno).
         // Ko je Alex prost, opoldanske smene ni.
+        // Opoldne NIKOLI brez delavca: Alex vedno opoldne; ko je Alex prost,
+        // gre opoldne en mentor (tedenska menjava), drugi večer.
         fransia = 'OFF'
         if (pos === WEEKLY_OFF_SLOT.Walas) {
           walas = 'OFF'
           sandia = 'EVENING'
-          alex = 'MORNING'
+          alex = 'MIDDAY'
         } else if (pos === WEEKLY_OFF_SLOT.Sandia) {
           sandia = 'OFF'
           walas = 'EVENING'
-          alex = 'MORNING'
+          alex = 'MIDDAY'
+        } else if (pos === WEEKLY_OFF_SLOT.Alex) {
+          alex = 'OFF'
+          if (evenWeek) {
+            sandia = 'MIDDAY'
+            walas = 'EVENING'
+          } else {
+            walas = 'MIDDAY'
+            sandia = 'EVENING'
+          }
         } else {
-          alex = pos === WEEKLY_OFF_SLOT.Alex ? 'OFF' : 'MIDDAY'
+          alex = 'MIDDAY'
           if (evenWeek) {
             sandia = 'EVENING'
             walas = 'MORNING'
