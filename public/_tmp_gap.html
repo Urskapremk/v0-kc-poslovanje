@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Certificate of Internship — HIMDY Ainaty Sandia</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,500&family=Great+Vibes&display=swap');
+  :root {
+    --ink: #23291f;
+    --muted: #6a6f63;
+    --line: #2f3a33;
+    --green: #4a7a3a;
+    --gold: #b08d3f;
+    --paper: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: #e9e9e4;
+    color: var(--ink);
+    font-family: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+    padding: 24px;
+    display: flex;
+    justify-content: center;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "liga" 1, "clig" 1, "kern" 1;
+  }
+  .page {
+    width: 210mm;
+    min-height: 297mm;
+    background: var(--paper);
+    padding: 11mm;
+    position: relative;
+  }
+  /* Dvojni okrasni okvir s prirezanimi koti (SVG) prek cele strani */
+  .frame-border {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .frame {
+    position: relative;
+    min-height: calc(297mm - 22mm);
+    padding: 16mm 20mm 15mm;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    overflow: hidden;
+  }
+  /* Vodni znak (zbledeli logo/palma sredinsko) */
+  .watermark {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 118mm;
+    opacity: 0.045;
+    filter: grayscale(1);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .palm-wm-svg { width: 118mm; height: auto; color: var(--green); }
+
+  /* Vsa vsebina nad vodnim znakom */
+  .frame > *:not(.watermark) { position: relative; z-index: 1; }
+
+  .logo { width: 168px; height: auto; margin-bottom: 2px; }
+
+  .lodge { font-size: 16px; letter-spacing: 5px; font-weight: 600; margin-top: 10px; color: var(--ink); }
+  .location { font-size: 11.5px; letter-spacing: 4px; color: var(--muted); margin-top: 5px; }
+
+  .rule-diamond { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 14px 0; width: 210px; }
+  .rule-diamond .ln { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--line) 45%, var(--line) 55%, transparent); opacity: .7; }
+  .rule-diamond .dm { color: var(--gold); font-size: 10px; letter-spacing: 3px; }
+
+  .title-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 2px 0; }
+  .title-rule { display: flex; align-items: center; gap: 10px; flex: 0 0 66px; }
+  .title-rule .ln { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, var(--line) 45%, var(--line) 55%, transparent); opacity: .7; }
+  .title-rule .dm { color: var(--gold); font-size: 9px; }
+  .cert-title { font-size: 23px; letter-spacing: 7px; font-weight: 600; text-transform: uppercase; white-space: nowrap; text-indent: 7px; }
+
+  .intro { font-size: 16px; font-style: italic; color: var(--muted); margin-top: 10px; letter-spacing: .3px; }
+
+  .name-wrap { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 18px 0 6px; }
+  .name { font-family: 'Great Vibes', cursive; font-size: 38px; color: var(--ink); line-height: 1.2; padding: 0 6px; text-wrap: balance; }
+  .sprig { width: 60px; height: 20px; opacity: .85; }
+
+  .body { max-width: 150mm; }
+  .para { font-size: 16px; line-height: 1.62; color: var(--ink); margin: 15px 0; text-wrap: pretty; hyphens: none; }
+  .para:first-child { margin-top: 2px; }
+  .conclusion { font-size: 16px; font-weight: 700; color: var(--ink); margin: 20px 0 2px; text-wrap: balance; }
+
+  .sign .done { font-size: 14px; color: var(--muted); margin-bottom: 4px; font-variant-numeric: oldstyle-nums; }
+  .palm { width: 84px; height: 46px; display: block; margin: 2px auto 4px; color: var(--ink); }
+  .sign .who { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .sign .role { font-size: 13px; color: var(--ink); margin-top: 1px; letter-spacing: 1px; }
+  .sign .comp { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+  /* Prilagodljivi razmiki, ki enakomerno zapolnijo A4 stran */
+  .grow { flex: 1 1 auto; min-height: 6px; }
+  .head-gap { height: 26mm; }
+
+  /* Natisni barvna ozadja/gradiente/okraske TOČNO kot v predogledu */
+  html, body, .page, .frame, .frame-border, .title-rule .ln, .divider, .watermark, .name, .cert-title {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page { size: A4 portrait; margin: 0; }
+  @media print {
+    body { background: #fff; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .page { width: 100%; min-height: 100vh; padding: 9mm; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    
+    <svg class="frame-border" viewBox="0 0 210 297" preserveAspectRatio="none" fill="none" stroke="var(--line)">
+      <path d="M 18.87 8.13 Q 20.00 7.00 21.60 7.00 L 188.40 7.00 Q 190.00 7.00 191.13 8.13 L 201.87 18.87 Q 203.00 20.00 203.00 21.60 L 203.00 275.40 Q 203.00 277.00 201.87 278.13 L 191.13 288.87 Q 190.00 290.00 188.40 290.00 L 21.60 290.00 Q 20.00 290.00 18.87 288.87 L 8.13 278.13 Q 7.00 277.00 7.00 275.40 L 7.00 21.60 Q 7.00 20.00 8.13 18.87 Z" stroke-width="0.22"/>
+      <path d="M 20.51 11.99 Q 21.50 11.00 22.90 11.00 L 187.10 11.00 Q 188.50 11.00 189.49 11.99 L 198.01 20.51 Q 199.00 21.50 199.00 22.90 L 199.00 274.10 Q 199.00 275.50 198.01 276.49 L 189.49 285.01 Q 188.50 286.00 187.10 286.00 L 22.90 286.00 Q 21.50 286.00 20.51 285.01 L 11.99 276.49 Q 11.00 275.50 11.00 274.10 L 11.00 22.90 Q 11.00 21.50 11.99 20.51 Z" stroke-width="0.35"/>
+      <g stroke-width="0.5" stroke-linecap="round">
+        <g>
+    <path d="M 33 11 C 26 11 21 12.4 19.2 15.8 C 18.1 17.9 19.2 20.2 21.6 20.2 C 20 20.2 18.9 19 18.9 17.4"/>
+    <path d="M 11 33 C 11 26 12.4 21 15.8 19.2 C 17.9 18.1 20.2 19.2 20.2 21.6 C 20.2 20 19 18.9 17.4 18.9"/>
+    <path d="M 15 15 l1.5 -1.5 1.5 1.5 -1.5 1.5 z" fill="var(--gold)" stroke="none"/></g>
+        <g transform="translate(210,0) scale(-1,1)">
+    <path d="M 33 11 C 26 11 21 12.4 19.2 15.8 C 18.1 17.9 19.2 20.2 21.6 20.2 C 20 20.2 18.9 19 18.9 17.4"/>
+    <path d="M 11 33 C 11 26 12.4 21 15.8 19.2 C 17.9 18.1 20.2 19.2 20.2 21.6 C 20.2 20 19 18.9 17.4 18.9"/>
+    <path d="M 15 15 l1.5 -1.5 1.5 1.5 -1.5 1.5 z" fill="var(--gold)" stroke="none"/></g>
+        <g transform="translate(0,297) scale(1,-1)">
+    <path d="M 33 11 C 26 11 21 12.4 19.2 15.8 C 18.1 17.9 19.2 20.2 21.6 20.2 C 20 20.2 18.9 19 18.9 17.4"/>
+    <path d="M 11 33 C 11 26 12.4 21 15.8 19.2 C 17.9 18.1 20.2 19.2 20.2 21.6 C 20.2 20 19 18.9 17.4 18.9"/>
+    <path d="M 15 15 l1.5 -1.5 1.5 1.5 -1.5 1.5 z" fill="var(--gold)" stroke="none"/></g>
+        <g transform="translate(210,297) scale(-1,-1)">
+    <path d="M 33 11 C 26 11 21 12.4 19.2 15.8 C 18.1 17.9 19.2 20.2 21.6 20.2 C 20 20.2 18.9 19 18.9 17.4"/>
+    <path d="M 11 33 C 11 26 12.4 21 15.8 19.2 C 17.9 18.1 20.2 19.2 20.2 21.6 C 20.2 20 19 18.9 17.4 18.9"/>
+    <path d="M 15 15 l1.5 -1.5 1.5 1.5 -1.5 1.5 z" fill="var(--gold)" stroke="none"/></g>
+      </g>
+    </svg>
+    <div class="frame">
+      <div class="watermark palm-wm">
+    <svg class="palm-wm-svg" viewBox="0 0 80 46" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round">
+      <path d="M40 45 C40 30 40 20 40 12"/>
+      <path d="M40 12 Q 23.436005912074897 5.754553739168198 18.9 7.5"/><path d="M40 12 Q 24.577460449078526 3.139889989981956 19.2 2.3"/><path d="M40 12 Q 26.386268805997993 0.4889300010269677 20.8 -3.0"/><path d="M40 12 Q 28.8817669554571 -2.025182902794926 23.8 -8.1"/><path d="M40 12 Q 32.03815240366855 -4.223599029668669 28.1 -12.4"/><path d="M40 12 Q 35.78319992288273 -5.933491926428864 33.6 -15.9"/><path d="M40 12 Q 40 -7 40.0 -18.0"/><path d="M40 12 Q 44.21680007711727 -5.933491926428864 46.4 -15.9"/><path d="M40 12 Q 47.96184759633145 -4.223599029668671 51.9 -12.4"/><path d="M40 12 Q 51.118233044542905 -2.025182902794924 56.2 -8.1"/><path d="M40 12 Q 53.61373119400201 0.4889300010269695 59.2 -3.0"/><path d="M40 12 Q 55.42253955092147 3.139889989981956 60.8 2.3"/><path d="M40 12 Q 56.5639940879251 5.754553739168198 61.1 7.5"/>
+    </svg></div>
+
+      
+      <div class="lodge">KOMBA CABANA LODGE</div>
+      <div class="location">NOSY KOMBA · MADAGASCAR</div>
+
+      <div class="head-gap"></div>
+
+      <div class="rule-diamond"><span class="ln"></span><span class="dm">&#9671;&#9670;&#9671;</span><span class="ln"></span></div>
+
+      <div class="title-row">
+        <span class="title-rule l"><span class="dm">&#9670;</span><span class="ln"></span></span>
+        <span class="cert-title">Certificate of Internship</span>
+        <span class="title-rule r"><span class="ln"></span><span class="dm">&#9670;</span></span>
+      </div>
+
+      <div class="intro">This is to certify that</div>
+      <div class="name-wrap">
+        <span class="name">Himdy Ainaty Sandia</span>
+      </div>
+
+      <div class="rule-diamond"><span class="ln"></span><span class="dm">&#9671;&#9670;&#9671;</span><span class="ln"></span></div>
+
+      <div class="grow"></div>
+
+      <div class="body">
+        <p class="para">has successfully completed her internship as a waitress at the restaurant of <strong>Komba Cabana Lodge</strong>.</p><p class="para">During this period, she demonstrated seriousness, motivation, professionalism and an excellent sense of customer service.</p><p class="para">She actively participated in welcoming guests, preparing tables, serving food and beverages, and in the smooth daily operation of the restaurant.</p><p class="para">Thanks to her dedication and commitment, she has acquired valuable practical skills in the field of hospitality, service and restaurant operations.</p>
+        <p class="conclusion">The internship was completed successfully and to our entire satisfaction.</p>
+      </div>
+
+      <div class="grow"></div>
+
+      <div class="rule-diamond"><span class="ln"></span><span class="dm">&#9671;&#9670;&#9671;</span><span class="ln"></span></div>
+
+      <div class="sign">
+        <div class="done">Done at Nosy Komba, on June 9, 2026</div>
+        <div class="who">Borut Retelj</div>
+        <div class="role">CEO</div>
+        <div class="comp">Komba Cabana Tourism SARL</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

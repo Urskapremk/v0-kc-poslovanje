@@ -1,0 +1,6 @@
+import { writeFileSync, readFileSync } from 'fs'
+import { buildCertificateHtml } from '../lib/certifikat-doc.ts'
+let logo
+try { logo = 'data:image/png;base64,' + readFileSync('public/images/komba-logo-color.png').toString('base64') } catch {}
+const html = buildCertificateHtml({ studentName:'RABENANDRASANA Francel', roleLabel:'waitress', bodyParagraphs:['has successfully completed her internship as a waitress at the restaurant of Komba Cabana Lodge.','During this period, she demonstrated seriousness, motivation, professionalism and an excellent sense of customer service.','She actively participated in welcoming guests, preparing tables, serving food and beverages.','Thanks to her dedication she has acquired valuable practical skills.'], conclusion:'The internship was completed successfully and to our entire satisfaction.', place:'Nosy Komba', dateLabel:'June 9, 2026', signatoryName:'Borut Retelj', signatoryTitle:'CEO', company:'Komba Cabana Tourism SARL', lodgeName:'KOMBA CABANA LODGE', locationLine:'NOSY KOMBA \u00b7 MADAGASCAR', logoDataUrl:logo })
+writeFileSync('public/_tmp_font.html', html); console.log('written', html.length)
