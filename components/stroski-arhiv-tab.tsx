@@ -24,7 +24,8 @@ import {
   type BankMatch,
 } from '@/app/actions/stroski-arhiv'
 import { getExchangeRate } from '@/app/actions/komba'
-import { addFixedAsset, getFixedAssetReceiptIds } from '@/app/actions/statistics'
+import { addFixedAsset, getFixedAssetReceiptIds, getAssetCostReceiptLinks } from '@/app/actions/statistics'
+import { ReceiptToAssetPanel } from './assets-in-progress'
 import { STROSEK_CATEGORIES, CATEGORY_LABELS, type StrosekCategory } from '@/lib/stroski-categories'
 import StroskiReceiptCaptureModal from './stroski-receipt-capture-modal'
 
@@ -178,6 +179,8 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
   const [assetSaving, setAssetSaving] = useState(false)
   const [assetDoneId, setAssetDoneId] = useState<string | null>(null)
   const [assetReceiptIds, setAssetReceiptIds] = useState<string[]>([])
+  const [wipForId, setWipForId] = useState<string | null>(null)
+  const [wipLinks, setWipLinks] = useState<Record<string, { assetName: string; status: string }>>({})
 
   // Ogled strani (lightbox)
   const [viewer, setViewer] = useState<{ pages: { pathname: string; fileName: string | null }[]; index: number; title: string } | null>(null)
@@ -189,6 +192,9 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
       setAccountingDraft(e)
     }).catch(() => {})
     getFixedAssetReceiptIds().then(setAssetReceiptIds).catch(() => {})
+    getAssetCostReceiptLinks()
+      .then((links) => setWipLinks(Object.fromEntries(links.map((l) => [l.receiptId, { assetName: l.assetName, status: l.status }]))))
+      .catch(() => {})
   }, [])
 
   function toggleSelect(id: string) {
@@ -1013,6 +1019,11 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
                                   <Layers className="h-3 w-3" /> Osnovno sredstvo
                                 </span>
                               )}
+                              {wipLinks[r.id] && (
+                                <span className="mt-0.5 flex max-w-[180px] items-center gap-1 truncate rounded-full bg-[#c59b5b]/15 px-1.5 py-0.5 text-[10px] font-medium text-[#d8b877]" title={`Strošek sredstva: ${wipLinks[r.id].assetName}`}>
+                                  <Layers className="h-3 w-3 shrink-0" /> {wipLinks[r.id].status === 'in_progress' ? 'V izdelavi' : 'Osnovno sredstvo'}: {wipLinks[r.id].assetName}
+                                </span>
+                              )}
                             </div>
                             <button
                               onClick={() => handleSendToAccounting(r)}
@@ -1264,13 +1275,42 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
                                   </button>
                                 </div>
                               </div>
+                            ) : wipLinks[r.id] ? (
+                              <p className="flex items-center gap-1.5 text-[13px] text-[#c59b5b]">
+                                <Check className="h-3.5 w-3.5" /> Strošek sredstva „{wipLinks[r.id].assetName}" — pogodba in stroški so v Osnovna sredstva.
+                              </p>
+                            ) : wipForId === r.id ? (
+                              <ReceiptToAssetPanel
+                                receipt={{
+                                  id: r.id,
+                                  date: r.date,
+                                  description: r.description || '',
+                                  amountAr: r.currency === 'Ar' ? r.amountOriginal : Math.round(Number(r.amountEur) * rate),
+                                }}
+                                onCancel={() => setWipForId(null)}
+                                onDone={(assetName) => {
+                                  setWipForId(null)
+                                  setWipLinks((prev) => ({ ...prev, [r.id]: { assetName, status: 'in_progress' } }))
+                                }}
+                              />
                             ) : (
-                              <button
-                                onClick={() => startAsset(r)}
-                                className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
-                              >
-                                <Layers className="h-4 w-4" /> Dodaj kot osnovno sredstvo
-                              </button>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => startAsset(r)}
+                                  className="flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-white/50 transition-all hover:bg-white/10 hover:text-white/80"
+                                >
+                                  <Layers className="h-4 w-4" /> Dodaj kot osnovno sredstvo
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setAssetForId(null)
+                                    setWipForId(r.id)
+                                  }}
+                                  className="flex items-center gap-2 rounded-lg border border-[#c59b5b]/30 bg-[#c59b5b]/[0.06] px-3 py-2 text-sm font-medium text-[#c59b5b] transition-all hover:bg-[#c59b5b]/15"
+                                >
+                                  <Layers className="h-4 w-4" /> Sredstvo v izdelavi (pogodba)
+                                </button>
+                              </div>
                             )}
                           </div>
 

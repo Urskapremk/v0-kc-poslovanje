@@ -203,7 +203,41 @@ function assetLifeMonths(annualRatePct: number): number {
   return Math.max(1, Math.round(1200 / annualRatePct))
 }
 
+// Sredstva v izdelavi (npr. lesena tla iz kupljenega lesa): pogodba z izvajalcem + zbiranje
+// stroškov (računi, razžaganje, izdelava, montaža). Dokler je status 'in_progress', se NE
+// amortizira; ob aktivaciji nabavna vrednost = vsota stroškov, amortizacija od datuma aktivacije.
+let assetSchemaReady: Promise<void> | null = null
+function ensureAssetSchema() {
+  if (!assetSchemaReady) {
+    assetSchemaReady = (async () => {
+      await db.execute(sql`ALTER TABLE fixed_assets
+        ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active',
+        ADD COLUMN IF NOT EXISTS "contractor" text,
+        ADD COLUMN IF NOT EXISTS "contractScope" text,
+        ADD COLUMN IF NOT EXISTS "contractPrice" numeric,
+        ADD COLUMN IF NOT EXISTS "contractDeadline" text,
+        ADD COLUMN IF NOT EXISTS "contractDate" text,
+        ADD COLUMN IF NOT EXISTS "activatedAt" text`)
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS fixed_asset_costs (
+        id text PRIMARY KEY,
+        "assetId" text NOT NULL,
+        date text NOT NULL,
+        description text NOT NULL,
+        "amountAr" numeric NOT NULL,
+        "receiptId" text,
+        "cashExpenseId" text,
+        "createdAt" timestamp NOT NULL DEFAULT now()
+      )`)
+    })().catch((e) => {
+      assetSchemaReady = null
+      throw e
+    })
+  }
+  return assetSchemaReady
+}
+
 export async function getFixedAssets() {
+  await ensureAssetSchema()
   const result = await db.execute(
     sql`SELECT * FROM fixed_assets ORDER BY "purchaseDate" DESC, "createdAt" DESC`
   )
@@ -214,6 +248,219 @@ export async function getFixedAssets() {
     amountAr: Number(r.amountAr) || 0,
     amountEur: Number(r.amountEur) || 0,
     annualRatePct: Number(r.annualRatePct) || 0,
+    status: ((r.status as string) || 'active') as 'active' | 'in_progress',
+    activatedAt: (r.activatedAt as string) || null,
+  }))
+}
+
+export type AssetCost = {
+  id: string
+  assetId: string
+  date: string
+  description: string
+  amountAr: number
+  receiptId: string | null
+  cashExpenseId: string | null
+}
+
+export type AssetInProgress = {
+  id: string
+  name: string
+  startDate: string
+  annualRatePct: number
+  contractor: string
+  contractScope: string
+  contractPrice: number
+  contractDeadline: string
+  contractDate: string
+  totalAr: number
+  costs: AssetCost[]
+}
+
+export async function getAssetsInProgress(): Promise<AssetInProgress[]> {
+  await ensureAssetSchema()
+  const assets = await db.execute(
+    sql`SELECT * FROM fixed_assets WHERE status = 'in_progress' ORDER BY "createdAt" DESC`
+  )
+  if (assets.rows.length === 0) return []
+  const costs = await db.execute(
+    sql`SELECT * FROM fixed_asset_costs ORDER BY date ASC, "createdAt" ASC`
+  )
+  const byAsset: Record<string, AssetCost[]> = {}
+  for (const c of costs.rows) {
+    const cost: AssetCost = {
+      id: c.id as string,
+      assetId: c.assetId as string,
+      date: String(c.date).slice(0, 10),
+      description: c.description as string,
+      amountAr: Number(c.amountAr) || 0,
+      receiptId: (c.receiptId as string) || null,
+      cashExpenseId: (c.cashExpenseId as string) || null,
+    }
+    ;(byAsset[cost.assetId] ||= []).push(cost)
+  }
+  return assets.rows.map((r) => {
+    const list = byAsset[r.id as string] || []
+    return {
+      id: r.id as string,
+      name: r.name as string,
+      startDate: String(r.purchaseDate).slice(0, 10),
+      annualRatePct: Number(r.annualRatePct) || 0,
+      contractor: (r.contractor as string) || '',
+      contractScope: (r.contractScope as string) || '',
+      contractPrice: Number(r.contractPrice) || 0,
+      contractDeadline: (r.contractDeadline as string) || '',
+      contractDate: (r.contractDate as string) || '',
+      totalAr: list.reduce((s, c) => s + c.amountAr, 0),
+      costs: list,
+    }
+  })
+}
+
+async function recomputeAssetValue(assetId: string) {
+  const sum = await db.execute(
+    sql`SELECT COALESCE(SUM("amountAr"), 0) AS total FROM fixed_asset_costs WHERE "assetId" = ${assetId}`
+  )
+  const totalAr = Math.round((Number(sum.rows[0]?.total) || 0) * 100) / 100
+  const rate = await getExchangeRate()
+  const totalEur = Math.round((totalAr / rate) * 100) / 100
+  await db.execute(
+    sql`UPDATE fixed_assets SET "amountAr" = ${String(totalAr)}, "amountEur" = ${String(totalEur)} WHERE id = ${assetId}`
+  )
+}
+
+type ContractFields = {
+  name: string
+  annualRatePct: number
+  contractor: string
+  contractScope: string
+  contractPrice: number
+  contractDeadline: string
+  contractDate: string
+}
+
+export async function createAssetInProgress(
+  params: ContractFields & {
+    startDate: string
+    firstCost?: { date: string; description: string; amountAr: number; receiptId?: string | null }
+  }
+) {
+  await ensureAssetSchema()
+  if (!params.name.trim()) throw new Error('Naziv sredstva je obvezen.')
+  const id = `fa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const rate = Number(params.annualRatePct) || 33.33
+  await db.execute(
+    sql`INSERT INTO fixed_assets (id, name, "purchaseDate", "amountAr", "amountEur", "annualRatePct", status,
+          "contractor", "contractScope", "contractPrice", "contractDeadline", "contractDate")
+        VALUES (${id}, ${params.name.trim()}, ${params.startDate}, '0', '0', ${String(rate)}, 'in_progress',
+          ${params.contractor.trim() || null}, ${params.contractScope.trim() || null},
+          ${params.contractPrice > 0 ? String(params.contractPrice) : null},
+          ${params.contractDeadline || null}, ${params.contractDate || null})`
+  )
+  if (params.firstCost && params.firstCost.amountAr > 0) {
+    await addAssetCost({ assetId: id, ...params.firstCost })
+  }
+  revalidatePath('/statistika')
+  return { id }
+}
+
+export async function updateAssetContract(id: string, params: ContractFields) {
+  await ensureAssetSchema()
+  if (!params.name.trim()) return
+  await db.execute(
+    sql`UPDATE fixed_assets SET name = ${params.name.trim()},
+          "annualRatePct" = ${String(Number(params.annualRatePct) || 33.33)},
+          "contractor" = ${params.contractor.trim() || null},
+          "contractScope" = ${params.contractScope.trim() || null},
+          "contractPrice" = ${params.contractPrice > 0 ? String(params.contractPrice) : null},
+          "contractDeadline" = ${params.contractDeadline || null},
+          "contractDate" = ${params.contractDate || null}
+        WHERE id = ${id}`
+  )
+  revalidatePath('/statistika')
+}
+
+export async function addAssetCost(params: {
+  assetId: string
+  date: string
+  description: string
+  amountAr: number
+  receiptId?: string | null
+  payFromCash?: boolean
+}) {
+  await ensureAssetSchema()
+  const amountAr = Math.round((params.amountAr || 0) * 100) / 100
+  if (!params.assetId || !params.date || !params.description.trim() || amountAr <= 0) {
+    throw new Error('Opis, datum in znesek stroška so obvezni.')
+  }
+  const receiptId = params.receiptId?.trim() || null
+  if (receiptId) {
+    const dup = await db.execute(
+      sql`SELECT id FROM fixed_asset_costs WHERE "receiptId" = ${receiptId} LIMIT 1`
+    )
+    if (dup.rows.length > 0) throw new Error('Ta račun je že dodan k sredstvu v izdelavi.')
+  }
+  const asset = await db.execute(sql`SELECT name FROM fixed_assets WHERE id = ${params.assetId}`)
+  const assetName = (asset.rows[0]?.name as string) || 'sredstvo v izdelavi'
+  let cashExpenseId: string | null = null
+  if (params.payFromCash && !receiptId) {
+    const { addCashExpense } = await import('./banka')
+    const res = await addCashExpense({
+      company: 'tourism',
+      date: params.date,
+      purpose: `${assetName}: ${params.description.trim()}`,
+      amount: amountAr,
+    })
+    cashExpenseId = (res as { id?: string } | undefined)?.id ?? null
+  }
+  const id = `fac-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await db.execute(
+    sql`INSERT INTO fixed_asset_costs (id, "assetId", date, description, "amountAr", "receiptId", "cashExpenseId")
+        VALUES (${id}, ${params.assetId}, ${params.date}, ${params.description.trim()}, ${String(amountAr)}, ${receiptId}, ${cashExpenseId})`
+  )
+  await recomputeAssetValue(params.assetId)
+  revalidatePath('/statistika')
+  return { id }
+}
+
+export async function deleteAssetCost(id: string) {
+  await ensureAssetSchema()
+  const row = await db.execute(sql`SELECT "assetId", "cashExpenseId" FROM fixed_asset_costs WHERE id = ${id}`)
+  const r = row.rows[0]
+  if (!r) return
+  if (r.cashExpenseId) {
+    const { deleteCashExpense } = await import('./banka')
+    await deleteCashExpense(r.cashExpenseId as string)
+  }
+  await db.execute(sql`DELETE FROM fixed_asset_costs WHERE id = ${id}`)
+  await recomputeAssetValue(r.assetId as string)
+  revalidatePath('/statistika')
+}
+
+export async function activateAsset(id: string, activationDate: string, annualRatePct: number) {
+  await ensureAssetSchema()
+  const rate = Number(annualRatePct) || 0
+  if (!activationDate || rate <= 0) throw new Error('Datum aktivacije in stopnja sta obvezna.')
+  await recomputeAssetValue(id)
+  await db.execute(
+    sql`UPDATE fixed_assets SET status = 'active', "purchaseDate" = ${activationDate},
+          "activatedAt" = ${activationDate}, "annualRatePct" = ${String(rate)}
+        WHERE id = ${id}`
+  )
+  revalidatePath('/statistika')
+}
+
+// Računi (stroski arhiv), dodani k sredstvom v izdelavi — za značko na računu.
+export async function getAssetCostReceiptLinks(): Promise<{ receiptId: string; assetName: string; status: string }[]> {
+  await ensureAssetSchema()
+  const result = await db.execute(
+    sql`SELECT c."receiptId", a.name, a.status FROM fixed_asset_costs c
+        JOIN fixed_assets a ON a.id = c."assetId" WHERE c."receiptId" IS NOT NULL`
+  )
+  return result.rows.map((r) => ({
+    receiptId: r.receiptId as string,
+    assetName: r.name as string,
+    status: (r.status as string) || 'active',
   }))
 }
 
@@ -268,13 +515,22 @@ export async function updateFixedAsset(
 }
 
 export async function deleteFixedAsset(id: string) {
+  await ensureAssetSchema()
+  const costs = await db.execute(
+    sql`SELECT "cashExpenseId" FROM fixed_asset_costs WHERE "assetId" = ${id} AND "cashExpenseId" IS NOT NULL`
+  )
+  if (costs.rows.length > 0) {
+    const { deleteCashExpense } = await import('./banka')
+    for (const c of costs.rows) await deleteCashExpense(c.cashExpenseId as string)
+  }
+  await db.execute(sql`DELETE FROM fixed_asset_costs WHERE "assetId" = ${id}`)
   await db.execute(sql`DELETE FROM fixed_assets WHERE id = ${id}`)
   revalidatePath('/statistika')
 }
 
 // Mesečna amortizacija za dani mesec (v EUR), z razčlembo po sredstvih.
 export async function getFixedAssetsDepreciation(year: number, month: number) {
-  const assets = await getFixedAssets()
+  const assets = (await getFixedAssets()).filter((a) => a.status !== 'in_progress')
   const monthIndex = year * 12 + (month - 1)
   const items = assets.map((a) => {
     const life = assetLifeMonths(a.annualRatePct)
@@ -307,6 +563,75 @@ export async function getFixedAssetsDepreciation(year: number, month: number) {
   })
   const total = Math.round(items.reduce((s, i) => s + i.monthlyEur, 0) * 100) / 100
   return { total, items }
+}
+
+export type FixedAssetRegisterRow = {
+  id: string
+  inventoryNo: string
+  name: string
+  status: 'active' | 'in_progress'
+  acquiredDate: string
+  activatedAt: string | null
+  contractor: string
+  amountAr: number
+  amountEur: number
+  annualRatePct: number
+  lifeMonths: number
+  monthsDepreciated: number
+  accumulatedEur: number
+  netBookEur: number
+  endDate: string | null
+  costCount: number
+  fullyDepreciated: boolean
+}
+
+// Register osnovnih sredstev: vsa sredstva (aktivna + v izdelavi) s stanjem na konec izbranega meseca.
+export async function getFixedAssetRegister(year: number, month: number): Promise<FixedAssetRegisterRow[]> {
+  await ensureAssetSchema()
+  const assets = await db.execute(sql`SELECT * FROM fixed_assets ORDER BY "createdAt" ASC, "purchaseDate" ASC`)
+  const costs = await db.execute(sql`SELECT "assetId", COUNT(*)::int AS n FROM fixed_asset_costs GROUP BY "assetId"`)
+  const costCount: Record<string, number> = {}
+  for (const c of costs.rows) costCount[c.assetId as string] = Number(c.n) || 0
+  const asOfIndex = year * 12 + (month - 1)
+
+  return assets.rows.map((r, idx) => {
+    const status = ((r.status as string) || 'active') as 'active' | 'in_progress'
+    const amountEur = Number(r.amountEur) || 0
+    const annualRatePct = Number(r.annualRatePct) || 0
+    const life = annualRatePct > 0 ? assetLifeMonths(annualRatePct) : 0
+    const purchaseDate = String(r.purchaseDate || '').slice(0, 10)
+    let monthsDepreciated = 0
+    let accumulatedEur = 0
+    let endDate: string | null = null
+    if (status === 'active' && life > 0 && purchaseDate) {
+      const d = new Date(purchaseDate)
+      const startIndex = d.getFullYear() * 12 + d.getMonth()
+      monthsDepreciated = Math.max(0, Math.min(life, asOfIndex - startIndex + 1))
+      const base = Math.round((amountEur / life) * 100) / 100
+      accumulatedEur = monthsDepreciated >= life ? amountEur : Math.round(base * monthsDepreciated * 100) / 100
+      const end = new Date(d.getFullYear(), d.getMonth() + life - 1, 1)
+      endDate = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}`
+    }
+    return {
+      id: r.id as string,
+      inventoryNo: `OS-${String(idx + 1).padStart(3, '0')}`,
+      name: r.name as string,
+      status,
+      acquiredDate: purchaseDate,
+      activatedAt: (r.activatedAt as string) || null,
+      contractor: (r.contractor as string) || '',
+      amountAr: Number(r.amountAr) || 0,
+      amountEur,
+      annualRatePct,
+      lifeMonths: life,
+      monthsDepreciated,
+      accumulatedEur,
+      netBookEur: Math.round((amountEur - accumulatedEur) * 100) / 100,
+      endDate,
+      costCount: costCount[r.id as string] || 0,
+      fullyDepreciated: status === 'active' && life > 0 && monthsDepreciated >= life,
+    }
+  })
 }
 
 // Add a marketing expense (date determines the booking month)
@@ -840,8 +1165,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   // Nabavni računi (stroški arhiv), razporejeni na posamezno kategorijo za ta mesec.
   // Zneski alokacij so že v EUR (glej CategoryAllocation.amountEur).
+  // Računi, dodani k sredstvu v izdelavi, niso tekoči strošek (gredo v nabavno vrednost sredstva).
+  await ensureAssetSchema()
   const monthReceipts = await db.execute(
-    sql`SELECT categories FROM stroski_receipts WHERE year = ${year} AND month = ${month}`
+    sql`SELECT categories FROM stroski_receipts WHERE year = ${year} AND month = ${month}
+        AND id NOT IN (SELECT "receiptId" FROM fixed_asset_costs WHERE "receiptId" IS NOT NULL)`
   )
   const receiptsByCategory: Record<string, number> = {}
   for (const r of monthReceipts.rows) {

@@ -11,6 +11,8 @@ import {
   deleteFixedAsset,
   getExchangeRateValue,
 } from '@/app/actions/statistics'
+import AssetsInProgress from '@/components/assets-in-progress'
+import FixedAssetRegister from '@/components/fixed-asset-register'
 
 const MONTH_NAMES = ['januar', 'februar', 'marec', 'april', 'maj', 'junij', 'julij', 'avgust', 'september', 'oktober', 'november', 'december']
 
@@ -45,7 +47,7 @@ export default function OsnovnaSredstvaTab({ year, month }: { year: number; mont
   const [editAr, setEditAr] = useState('')
   const [editRate, setEditRate] = useState('')
 
-  const all = assets || []
+  const all = (assets || []).filter((a) => a.status !== 'in_progress')
   const dep = depreciation
   const newArNum = Number(newAr.replace(/[^\d]/g, '')) || 0
   const newRateNum = Number(newRate.replace(',', '.')) || 0
@@ -55,6 +57,7 @@ export default function OsnovnaSredstvaTab({ year, month }: { year: number; mont
   const refresh = () => {
     mutate(assetsKey)
     mutate(depKey)
+    mutate(['fixed-asset-register', year, month])
   }
 
   async function handleAdd() {
@@ -124,6 +127,8 @@ export default function OsnovnaSredstvaTab({ year, month }: { year: number; mont
           <div className="mt-0.5 text-[11px] text-white/40">Nabavna vrednost skupaj {formatAr(all.reduce((s, a) => s + a.amountAr, 0))}</div>
         </div>
       </div>
+
+      <AssetsInProgress onActivated={refresh} />
 
       {/* Dodaj osnovno sredstvo */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5">
@@ -276,6 +281,8 @@ export default function OsnovnaSredstvaTab({ year, month }: { year: number; mont
           </table>
         </div>
       )}
+
+      <FixedAssetRegister year={year} month={month} />
     </div>
   )
 }
