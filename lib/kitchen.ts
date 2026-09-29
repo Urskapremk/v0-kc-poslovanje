@@ -305,7 +305,7 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
         // Vali morning / Noli afternoon, from day 15 the other way round.
         let workShift = STUDENT_WORK_SHIFT[s]
         if (octPlus && (s === 'Valencia Soaline' || s === 'Noeline Anjara')) {
-          const firstHalf = day <= 14
+          const firstHalf = day <= 14 || (year === 2026 && month === 10 && day >= 26)
           const valiMorning = firstHalf
           workShift = (s === 'Valencia Soaline') === valiMorning ? 'MORNING' : 'AFTERNOON'
         }
@@ -313,8 +313,8 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
       }
     }
 
-    // 1-4 and 6-11 October 2026: Anifa works afternoon, Nazirah morning (on the days they work).
-    if (year === 2026 && month === 10 && (day <= 4 || (day >= 6 && day <= 11))) {
+    // 1-4, 6-11 and 26-31 October 2026: Anifa works afternoon, Nazirah morning (on the days they work).
+    if (year === 2026 && month === 10 && (day <= 4 || (day >= 6 && day <= 11) || day >= 26)) {
       if (assignments['Anifa'] && assignments['Anifa'] !== 'OFF') assignments['Anifa'] = 'AFTERNOON'
       if (assignments['Nazirah'] && assignments['Nazirah'] !== 'OFF') assignments['Nazirah'] = 'MORNING'
     }
