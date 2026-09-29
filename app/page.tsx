@@ -9496,7 +9496,10 @@ function GuestCard() {
                   // Dilip = (kompletna cena čolna − vodič) × 0,90 + vodič — ČOLN je en sam za skupino
                   const boatNet = Math.max(0, boatCompletePrice - guidePrice);
                   // Top of Nosy Komba: čoln FIKSNO 80.000 Ar + vodič (guidePriceAr, npr. 50.000)
-                  const dilipPayment = isFixedDilipExcursion
+                  const dilipOverride = members.map(m => (m.excursion as { dilipOverrideAr?: number | null }).dilipOverrideAr).find(v => v != null);
+                  const dilipPayment = dilipOverride != null
+                    ? Number(dilipOverride)
+                    : isFixedDilipExcursion
                     ? 80000 + guidePrice
                     : isDirectBoatExcursion
                       ? boatCompletePrice + guidePrice

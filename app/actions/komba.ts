@@ -2459,7 +2459,10 @@ export async function getArchivedExcursions() {
     const isFixedDilip = nameLc.includes('top of') && nameLc.includes('nosy komba')
     const isDirectBoat = nameLc.includes('ampangorina') || nameLc.includes('maki')
     const boatNet = Math.max(0, boatCompletePrice - guidePrice)
-    const dilipPayment = isFixedDilip
+    const dilipOverride = members.find(m => m.dilipOverrideAr != null)?.dilipOverrideAr
+    const dilipPayment = dilipOverride != null
+      ? Number(dilipOverride)
+      : isFixedDilip
       ? 80000 + guidePrice
       : isDirectBoat
         ? boatCompletePrice + guidePrice

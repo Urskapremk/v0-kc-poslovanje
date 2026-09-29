@@ -453,6 +453,7 @@ export const excursionBookings = pgTable('excursion_bookings', {
   fanjaPaidCompany: text('fanjaPaidCompany'), // 'tourism' | 'sarl' | null (samo pri gotovini)
   fanjaLedgerId: text('fanjaLedgerId'),
   fanjaPaidAmountAr: integer('fanjaPaidAmountAr'),
+  dilipOverrideAr: integer('dilipOverrideAr'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   })
   
