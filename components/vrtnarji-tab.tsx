@@ -41,6 +41,7 @@ export default function VrtnarjiTab({
   readOnly?: boolean
 }) {
   const [selected, setSelected] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'staff' | 'shift'>('staff')
   // Editing tools collapsed by default — the phone view only needs the table.
   const [showTools, setShowTools] = useState(false)
   // Never open the tools block in view-only mode.
@@ -331,7 +332,100 @@ export default function VrtnarjiTab({
             Dopust
           </span>
         </div>
+        <div className="no-print mb-3 flex flex-wrap gap-2 text-xs">
+          {([
+            ['staff', 'Po osebah'],
+            ['shift', 'Po smenah (pari)'],
+          ] as const).map(([mode, label]) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              aria-pressed={viewMode === mode}
+              className={`rounded-lg border px-3 py-1.5 font-medium transition-colors ${
+                viewMode === mode
+                  ? 'border-[#8fae92]/40 bg-[#8fae92]/20 text-[#8fae92]'
+                  : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {viewMode === 'shift' && (
+          <table className="w-full min-w-[760px] border-collapse text-sm">
+            <thead>
+              <tr className={`text-xs uppercase tracking-wider ${t.head}`}>
+                <th className="text-left py-2 px-2 font-semibold">Dan</th>
+                <th className="text-left py-2 px-2 font-semibold">Datum</th>
+                <th className="text-left py-2 px-2 font-semibold">Plaža dopoldne</th>
+                <th className="text-left py-2 px-2 font-semibold">Plaža popoldne</th>
+                <th className="text-left py-2 px-2 font-semibold">Vrt dopoldne</th>
+                <th className="text-left py-2 px-2 font-semibold">Vrt popoldne</th>
+                <th className="text-left py-2 px-2 font-semibold">Rezerva</th>
+                <th className="text-left py-2 px-2 font-semibold">Prosto</th>
+              </tr>
+            </thead>
+            <tbody>
+              {schedule.map((day, i) => {
+                const dayNum = i + 1
+                const weekday = new Date(year, month - 1, dayNum).getDay()
+                const holiday = getHolidayName(year, month, dayNum)
+                const sunday = isSunday(year, month, dayNum)
+                const isToday = todayDay === dayNum
+                const groups: Record<GardenPost, string[]> = {
+                  BEACH_AM: [], BEACH_PM: [], GARDEN_AM: [], GARDEN_PM: [], RESERVE: [], OFF: [],
+                }
+                for (const g of GARDENERS) groups[(day.assignments[g] || 'OFF') as GardenPost].push(g)
+                const cell = (post: GardenPost) => {
+                  const names = groups[post]
+                  if (names.length === 0) return <span className={t.offText}>—</span>
+                  const cls =
+                    post === 'OFF' ? t.offText
+                    : post === 'RESERVE' ? pill.neutral
+                    : post === 'BEACH_AM' || post === 'BEACH_PM' ? pill.blue
+                    : pill.sage
+                  return (
+                    <div className="flex flex-wrap gap-1">
+                      {names.map((g) => {
+                        const leave = leaveByStaff[g]?.[dayNum]
+                        return (
+                          <span key={g} className={`inline-block rounded-md px-2 py-0.5 text-xs ${leave ? `border ${t.leaveBadge}` : cls}`}>
+                            {g}{leave ? ' (dopust)' : ''}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )
+                }
+                return (
+                  <tr
+                    key={day.date}
+                    ref={isToday ? todayRowRef : undefined}
+                    className={`border-t ${t.rowBorder} ${holiday ? t.holidayRow : sunday ? t.sundayRow : ''}`}
+                  >
+                    <td className={`py-1.5 px-2 ${isToday ? `border-l-[3px] ${t.todayBar}` : ''} ${sunday || holiday ? `${t.dayAccent} font-semibold` : t.dayMuted}`}>{DAY_NAMES[weekday]}</td>
+                    <td className={`py-1.5 px-2 tabular-nums ${t.dateText}`}>
+                      <div className="flex flex-col gap-0.5">
+                        <span>{dayNum}. {MONTHS[month - 1].slice(0, 3).toLowerCase()}</span>
+                        {holiday && <span className={`text-[10px] font-medium ${t.sundayLabel}`}>{holiday}</span>}
+                        {isToday && <span className={`text-[9px] font-semibold uppercase tracking-[0.18em] ${t.todayLabel}`}>Danes</span>}
+                      </div>
+                    </td>
+                    <td className="py-1.5 px-2">{cell('BEACH_AM')}</td>
+                    <td className="py-1.5 px-2">{cell('BEACH_PM')}</td>
+                    <td className="py-1.5 px-2">{cell('GARDEN_AM')}</td>
+                    <td className="py-1.5 px-2">{cell('GARDEN_PM')}</td>
+                    <td className="py-1.5 px-2">{cell('RESERVE')}</td>
+                    <td className="py-1.5 px-2">{cell('OFF')}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
         {/* Drop the width floor when one person is selected (see razpored-tab). */}
+        {viewMode === 'staff' && (
         <table className={`w-full border-collapse text-sm ${selected ? '' : 'min-w-[640px]'}`}>
           <thead>
             <tr className={`text-xs uppercase tracking-wider ${t.head}`}>
@@ -416,6 +510,7 @@ export default function VrtnarjiTab({
             })}
           </tbody>
         </table>
+        )}
       </div>
 
       {/* Hidden color print sheet — same layout as screen, white paper, colored posts */}
