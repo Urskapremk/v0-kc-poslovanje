@@ -243,11 +243,17 @@ const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff | (typeof BAR
   Walas: 'MORNING',
   'Maria Franclise Soanatera': 'MIDDAY',
   },
+  // 3. in 4. oktober 2026 (uporabnica): Frenki zjutraj poleg Flavi.
+  '2026-10-03': { 'Maria Franclise Soanatera': 'MORNING' },
+  '2026-10-04': { 'Maria Franclise Soanatera': 'MORNING' },
   // 8. oktober 2026 (uporabnica): Sandia zjutraj, Frenki opoldne.
   '2026-10-08': {
     Sandia: 'MORNING',
     'Maria Franclise Soanatera': 'MIDDAY',
   },
+  // 10. in 11. oktober 2026 (uporabnica): Frenki zjutraj z Brigido.
+  '2026-10-10': { 'Maria Franclise Soanatera': 'MORNING' },
+  '2026-10-11': { 'Maria Franclise Soanatera': 'MORNING' },
   // 15. oktober 2026 (uporabnica): opoldne Flavi, zjutraj Walas + Frenki.
   '2026-10-15': {
     Walas: 'MORNING',
