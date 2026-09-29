@@ -25,7 +25,7 @@ function todayIso() {
 }
 
 function emptyAlloc(): Record<StrosekCategory, string> {
-  return { bar: '', nocitve: '', kuhinja: '', wellness: '', reprezentanca: '', ostalo: '' }
+  return { bar: '', nocitve: '', kuhinja: '', wellness: '', reprezentanca: '', vzdrzevanje: '', ostalo: '' }
 }
 
 // Pomanjša sliko na največ maxDim px in vrne JPEG dataURL (manjši = manj pomnilnika, hitrejši prenos)

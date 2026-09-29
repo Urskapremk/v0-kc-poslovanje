@@ -863,6 +863,18 @@ function StatistikaContent() {
             </div>
           )}
 
+          {/* TEKOČE VZDRŽEVANJE NEPREMIČNIN */}
+          {((stats.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0) > 0 && (
+            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+              <h2 className="text-base sm:text-lg font-bold text-[#a3a36b] mb-4">TEKOČE VZDRŽEVANJE NEPREMIČNIN</h2>
+              <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni oddelkov, znižuje skupni poslovni rezultat.</p>
+              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
+                <span className="text-white/50">Računi vzdrževanje nepremičnin</span>
+                <span className="text-[#a3a36b] font-bold">{formatEur((stats.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0)}</span>
+              </div>
+            </div>
+          )}
+
           {/* NOSAČI IN TUC TUC — vsak svoj samostojen strošek */}
           {(((stats.costs as { porters?: number }).porters || 0) > 0 || ((stats.costs as { tuctuc?: number }).tuctuc || 0) > 0) && (
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">

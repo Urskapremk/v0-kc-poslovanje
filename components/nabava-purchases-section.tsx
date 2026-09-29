@@ -28,6 +28,7 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   kuhinja: "#4f7a54",
   wellness: "#a05a7a",
   reprezentanca: "#c8846b",
+  vzdrzevanje: "#7d7d3f",
   ostalo: "#6b6b6b",
 }
 const catColor = (c: NabavaCategory) => (c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : CAT_COLORS[c])

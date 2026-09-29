@@ -1,7 +1,7 @@
 // Kategorije za razbitje zneska računa (stroški arhiv).
 // Ločena datoteka (NE 'use server'), ker server akcije lahko izvažajo samo async funkcije.
 
-export const STROSEK_CATEGORIES = ['bar', 'nocitve', 'kuhinja', 'wellness', 'reprezentanca', 'ostalo'] as const
+export const STROSEK_CATEGORIES = ['bar', 'nocitve', 'kuhinja', 'wellness', 'reprezentanca', 'vzdrzevanje', 'ostalo'] as const
 export type StrosekCategory = (typeof STROSEK_CATEGORIES)[number]
 
 export const CATEGORY_LABELS: Record<StrosekCategory, string> = {
@@ -10,6 +10,7 @@ export const CATEGORY_LABELS: Record<StrosekCategory, string> = {
   kuhinja: 'Kuhinja',
   wellness: 'Wellness',
   reprezentanca: 'Reprezentanca',
+  vzdrzevanje: 'Vzdrževanje nepremičnin',
   ostalo: 'Ostalo',
 }
 

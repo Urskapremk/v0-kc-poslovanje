@@ -38,11 +38,12 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   kuhinja: '#8fae92',
   wellness: '#d9a68f',
   reprezentanca: '#c8846b',
+  vzdrzevanje: '#a3a36b',
   ostalo: '#b1c7cf',
 }
 
 function emptyAlloc(): Record<StrosekCategory, string> {
-  return { bar: '', nocitve: '', kuhinja: '', wellness: '', reprezentanca: '', ostalo: '' }
+  return { bar: '', nocitve: '', kuhinja: '', wellness: '', reprezentanca: '', vzdrzevanje: '', ostalo: '' }
 }
 
 const PAYMENT_OPTIONS: { method: PaymentMethod; label: string; icon: typeof CreditCard; color: string }[] = [
