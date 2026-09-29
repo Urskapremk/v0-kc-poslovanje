@@ -130,15 +130,26 @@ export function getKitchenCore(year: number, month: number): KitchenStaff[] {
   if (period === 'B') return ['Anifa', 'Selvera', 'Nazirah', 'Francia']
   // Period C: Selvera left; Verginie (chef, morning) + Justin (assist, afternoon)
   // joined; Angelina back (always afternoon, split shift).
+  // From October 2026 Francia and Justin are no longer in the kitchen.
+  if (year > 2026 || (year === 2026 && month >= 10)) {
+    return ['Anifa', 'Verginie', 'Angelina', 'Nazirah']
+  }
   return ['Anifa', 'Verginie', 'Angelina', 'Nazirah', 'Francia', 'Justin']
 }
 
 // Full active roster for display (columns, pills, hours): core + students
 // (students only from September 2026 / period C).
+export function getKitchenStudents(year: number, month: number): string[] {
+  if (getKitchenPeriod(year, month) !== 'C') return []
+  // From October 2026 Severin is no longer in the kitchen.
+  if (year > 2026 || (year === 2026 && month >= 10)) {
+    return KITCHEN_STUDENTS.filter((s) => s !== 'Severin Avilaza')
+  }
+  return [...KITCHEN_STUDENTS]
+}
+
 export function getActiveKitchenStaff(year: number, month: number): string[] {
-  const core = getKitchenCore(year, month)
-  const students = getKitchenPeriod(year, month) === 'C' ? [...KITCHEN_STUDENTS] : []
-  return [...core, ...students]
+  return [...getKitchenCore(year, month), ...getKitchenStudents(year, month)]
 }
 
 // Anchor for the continuous 6-work / 1-off rotation (schedule starts 29.06.2026).
@@ -283,8 +294,14 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
     // Students (September 2026 / period C): boy afternoon, girls morning, each
     // with an independent 6-work / 1-off rotation (own off-day per 7-day cycle).
     if (period === 'C') {
-      for (const s of KITCHEN_STUDENTS) {
-        assignments[s] = offset === STUDENT_OFF_OFFSET[s] ? 'OFF' : STUDENT_WORK_SHIFT[s]
+      for (const s of getKitchenStudents(year, month)) {
+        // From October 2026 (4 core cooks off on offsets 0-3), students take their
+        // day off on offsets when every cook works, so no shift is left with one person.
+        const octPlus = year > 2026 || (year === 2026 && month >= 10)
+        const offOffset = octPlus
+          ? ({ 'Noeline Anjara': 4, 'Valencia Soaline': 5 } as Record<string, number>)[s] ?? STUDENT_OFF_OFFSET[s]
+          : STUDENT_OFF_OFFSET[s]
+        assignments[s] = offset === offOffset ? 'OFF' : STUDENT_WORK_SHIFT[s]
       }
     }
 
