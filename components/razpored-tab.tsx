@@ -15,6 +15,7 @@ import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor } from '@/lib/schedule-theme'
+import { GuestArrivalsLinen } from '@/components/guest-arrivals-linen'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
@@ -413,6 +414,8 @@ export default function RazporedTab({
         </div>
         </>
       )}
+
+      <GuestArrivalsLinen year={year} month={month} />
 
       {/* Color print sheet — same layout as screen, white paper, colored shifts. */}
       <div className="schedule-color-print" aria-hidden="true">
