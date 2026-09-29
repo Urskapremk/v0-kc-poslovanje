@@ -313,8 +313,8 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
       }
     }
 
-    // 1-4 October 2026: Anifa works afternoon, Nazirah morning (on the days they work).
-    if (year === 2026 && month === 10 && day <= 4) {
+    // 1-4 and 6-11 October 2026: Anifa works afternoon, Nazirah morning (on the days they work).
+    if (year === 2026 && month === 10 && (day <= 4 || (day >= 6 && day <= 11))) {
       if (assignments['Anifa'] && assignments['Anifa'] !== 'OFF') assignments['Anifa'] = 'AFTERNOON'
       if (assignments['Nazirah'] && assignments['Nazirah'] !== 'OFF') assignments['Nazirah'] = 'MORNING'
     }
