@@ -59,16 +59,30 @@ async function ensureTable() {
   await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "reservationId" text`)
   await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "orderItemId" text`)
   await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "loanRate" numeric`)
+  // Strošek sredstva v izdelavi (pogodba): povezava na fixed_assets (status in_progress).
+  await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "assetId" text`)
 }
 
 const LOAN_CAT = "posojilo_gostu"
+const WIP_CAT = "sredstvo_v_izdelavi"
+type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi"
+
+async function syncWipCost(purchaseId: string, category: NabavaCat, assetId: string, date: string, name: string, amountAr: number) {
+  const { upsertNabavaAssetCost, removeNabavaAssetCost } = await import("./statistics")
+  if (category === WIP_CAT && assetId) {
+    await upsertNabavaAssetCost({ nabavaPurchaseId: purchaseId, assetId, date, description: name || "nabava", amountAr })
+  } else {
+    await removeNabavaAssetCost(purchaseId)
+  }
+}
 const LOAN_ORDER_CATEGORY = "Posojilo"
 const LOAN_ORDER_NAME = "Cash advance"
 
 // "osnovno_sredstvo" in "posojilo_gostu" nista navadni stroškovni kategoriji, zato ju ohranimo
 // ločeno; ostale normaliziramo na veljavno StrosekCategory.
-function normCategory(c: string): StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" {
+function normCategory(c: string): NabavaCat {
   if (c === "osnovno_sredstvo") return "osnovno_sredstvo"
+  if (c === WIP_CAT) return WIP_CAT
   if (c === LOAN_CAT) return LOAN_CAT
   return STROSEK_CATEGORIES.includes(c as StrosekCategory) ? (c as StrosekCategory) : "kuhinja"
 }
@@ -212,11 +226,13 @@ export async function deleteNabavaTrip(id: string) {
   }
   // Počisti tudi gotovinske nakupe (in njihove odlive iz blagajne).
   const purchases = await db.execute(
-    sql`SELECT "cashExpenseId", "orderItemId" FROM nabava_purchases WHERE "tripId" = ${id}`
+    sql`SELECT id, "cashExpenseId", "orderItemId" FROM nabava_purchases WHERE "tripId" = ${id}`
   )
+  const { removeNabavaAssetCost } = await import("./statistics")
   for (const row of purchases.rows as Record<string, unknown>[]) {
     if (row.cashExpenseId) await deleteCashExpense(String(row.cashExpenseId))
     if (row.orderItemId) await deleteLoanOrderItem(String(row.orderItemId))
+    await removeNabavaAssetCost(String(row.id))
   }
   await db.execute(sql`DELETE FROM nabava_purchases WHERE "tripId" = ${id}`)
   await db.execute(sql`DELETE FROM nabava_trips WHERE id = ${id}`)
@@ -229,7 +245,8 @@ export type NabavaPurchase = {
   id: string
   tripId: string
   name: string
-  category: StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu"
+  category: NabavaCat
+  assetId: string
   amountAr: number
   company: string
   date: string
@@ -250,6 +267,7 @@ function mapPurchase(r: Record<string, unknown>): NabavaPurchase {
     tripId: String(r.tripId),
     name: r.name ? String(r.name) : "",
     category: normCategory(String(r.category || "")),
+    assetId: r.assetId ? String(r.assetId) : "",
     amountAr: Number(r.amountAr || 0),
     company: r.company ? String(r.company) : "tourism",
     date: r.date ? String(r.date) : "",
@@ -295,10 +313,13 @@ export async function addNabavaPurchase(params: {
   annualRatePct?: number
   reservationId?: string
   loanRate?: number
+  assetId?: string
 }) {
   await ensureTable()
   const id = `nabp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const category = normCategory(params.category)
+  const assetId = category === WIP_CAT ? params.assetId || "" : ""
+  if (category === WIP_CAT && !assetId) throw new Error("Izberi pogodbo (sredstvo v izdelavi).")
   const company = params.company === "sarl" ? "sarl" : "tourism"
   const date = params.date || new Date().toISOString().slice(0, 10)
   const amountAr = Math.max(0, Math.round(params.amountAr || 0))
@@ -325,9 +346,10 @@ export async function addNabavaPurchase(params: {
     fixedAssetId = fa.id
   }
   await db.execute(
-    sql`INSERT INTO nabava_purchases (id, "tripId", name, category, "amountAr", company, date, "cashExpenseId", "annualRatePct", "fixedAssetId", "reservationId", "orderItemId", "loanRate")
-        VALUES (${id}, ${params.tripId}, ${params.name || ""}, ${category}, ${amountAr}, ${company}, ${date}, ${cashExpenseId}, ${annualRatePct}, ${fixedAssetId}, ${reservationId || null}, ${orderItemId}, ${loanRate || null})`
+    sql`INSERT INTO nabava_purchases (id, "tripId", name, category, "amountAr", company, date, "cashExpenseId", "annualRatePct", "fixedAssetId", "reservationId", "orderItemId", "loanRate", "assetId")
+        VALUES (${id}, ${params.tripId}, ${params.name || ""}, ${category}, ${amountAr}, ${company}, ${date}, ${cashExpenseId}, ${annualRatePct}, ${fixedAssetId}, ${reservationId || null}, ${orderItemId}, ${loanRate || null}, ${assetId || null})`
   )
+  if (category === WIP_CAT) await syncWipCost(id, category, assetId, date, params.name, amountAr)
   return { ok: true, id }
 }
 
@@ -341,9 +363,12 @@ export async function updateNabavaPurchase(params: {
   annualRatePct?: number
   reservationId?: string
   loanRate?: number
+  assetId?: string
 }) {
   await ensureTable()
   const category = normCategory(params.category)
+  const assetId = category === WIP_CAT ? params.assetId || "" : ""
+  if (category === WIP_CAT && !assetId) throw new Error("Izberi pogodbo (sredstvo v izdelavi).")
   const company = params.company === "sarl" ? "sarl" : "tourism"
   const date = params.date || new Date().toISOString().slice(0, 10)
   const amountAr = Math.max(0, Math.round(params.amountAr || 0))
@@ -401,9 +426,10 @@ export async function updateNabavaPurchase(params: {
   }
   await db.execute(
     sql`UPDATE nabava_purchases
-        SET name = ${params.name || ""}, category = ${category}, "amountAr" = ${amountAr}, company = ${company}, date = ${date}, "cashExpenseId" = ${cashExpenseId}, "annualRatePct" = ${annualRatePct}, "fixedAssetId" = ${fixedAssetId}, "reservationId" = ${reservationId || null}, "orderItemId" = ${orderItemId}, "loanRate" = ${loanRate || null}
+        SET name = ${params.name || ""}, category = ${category}, "amountAr" = ${amountAr}, company = ${company}, date = ${date}, "cashExpenseId" = ${cashExpenseId}, "annualRatePct" = ${annualRatePct}, "fixedAssetId" = ${fixedAssetId}, "reservationId" = ${reservationId || null}, "orderItemId" = ${orderItemId}, "loanRate" = ${loanRate || null}, "assetId" = ${assetId || null}
         WHERE id = ${params.id}`
   )
+  await syncWipCost(params.id, category, assetId, date, params.name, amountAr)
   return { ok: true }
 }
 
@@ -443,6 +469,8 @@ export async function deleteNabavaPurchase(id: string) {
     const { deleteFixedAsset } = await import("./statistics")
     await deleteFixedAsset(String(row.fixedAssetId))
   }
+  const { removeNabavaAssetCost } = await import("./statistics")
+  await removeNabavaAssetCost(id)
   await db.execute(sql`DELETE FROM nabava_purchases WHERE id = ${id}`)
   return { ok: true }
 }

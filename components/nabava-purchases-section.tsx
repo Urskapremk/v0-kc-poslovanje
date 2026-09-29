@@ -10,6 +10,7 @@ import {
   deleteNabavaPurchase,
   getNabavaLoanGuests,
 } from "@/app/actions/nabava"
+import { getAssetsInProgress, type AssetInProgress } from "@/app/actions/statistics"
 import { STROSEK_CATEGORIES, CATEGORY_LABELS, type StrosekCategory } from "@/lib/stroski-categories"
 
 const ACCENT = "#8f6d3a"
@@ -18,9 +19,11 @@ const ar = (v: number) => `${Math.round(v || 0).toLocaleString("de-DE")} Ar`
 // Osnovno sredstvo NI navadna stroškovna kategorija (amortizira se), zato ima svoj ključ/barvo/oznako.
 const ASSET_CAT = "osnovno_sredstvo"
 const LOAN_CAT = "posojilo_gostu"
-type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT
+const WIP_CAT = "sredstvo_v_izdelavi"
+type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT
 const ASSET_COLOR = "#c9a86a"
 const LOAN_COLOR = "#3f6b7d"
+const WIP_COLOR = "#a0662f"
 
 const CAT_COLORS: Record<StrosekCategory, string> = {
   bar: "#3f6b7d",
@@ -31,9 +34,47 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   vzdrzevanje: "#7d7d3f",
   ostalo: "#6b6b6b",
 }
-const catColor = (c: NabavaCategory) => (c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : CAT_COLORS[c])
+const catColor = (c: NabavaCategory) =>
+  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : CAT_COLORS[c]
 const catLabel = (c: NabavaCategory) =>
-  c === ASSET_CAT ? "Osnovno sredstvo" : c === LOAN_CAT ? "Posojilo gostu" : CATEGORY_LABELS[c]
+  c === ASSET_CAT ? "Osnovno sredstvo" : c === LOAN_CAT ? "Posojilo gostu" : c === WIP_CAT ? "Sredstvo v izdelavi" : CATEGORY_LABELS[c]
+
+function WipAssetPicker({
+  assets,
+  value,
+  onChange,
+}: {
+  assets: AssetInProgress[]
+  value: string
+  onChange: (id: string) => void
+}) {
+  return (
+    <div className="rounded-lg border p-2 space-y-1.5" style={{ borderColor: `${WIP_COLOR}55`, backgroundColor: `${WIP_COLOR}10` }}>
+      <label className="text-[10px] font-medium" style={{ color: WIP_COLOR }}>
+        Pogodba (sredstvo v izdelavi)
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-lg border border-[#0f2e3a]/15 bg-white px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none"
+      >
+        <option value="">— izberi pogodbo —</option>
+        {assets.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.name}
+            {a.contractor ? ` · ${a.contractor}` : ""}
+          </option>
+        ))}
+      </select>
+      {assets.length === 0 && (
+        <p className="text-[9px] text-[#2b2622]/55">Ni odprtih pogodb — odpri jo v Kalkulacije → Stroški → Osnovna sredstva.</p>
+      )}
+      <p className="text-[9px] text-[#2b2622]/45">
+        Gotovina gre iz blagajne, strošek pa se prišteje k vrednosti sredstva — ne bremeni oddelka.
+      </p>
+    </div>
+  )
+}
 
 type LoanGuest = { id: string; guestName: string; bungalow: string }
 
@@ -113,6 +154,10 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
   const [eGuestId, setEGuestId] = useState("")
   const [loanRate, setLoanRate] = useState("")
   const [eLoanRate, setELoanRate] = useState("")
+  const { data: wipAssetsData, mutate: mutateWip } = useSWR("assets-in-progress", getAssetsInProgress)
+  const wipAssets = wipAssetsData || []
+  const [assetId, setAssetId] = useState("")
+  const [eAssetId, setEAssetId] = useState("")
 
   const today = new Date().toISOString().slice(0, 10)
   const [adding, setAdding] = useState(false)
@@ -144,8 +189,10 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
     setRate("")
     setGuestId("")
     setLoanRate("")
+    setAssetId("")
     setAdding(false)
   }
+  const wipLabel = (id: string) => wipAssets.find((a) => a.id === id)?.name || "pogodbo"
 
   const loanGuestLabel = (id: string) => {
     const g = loanGuests.find((x) => x.id === id)
@@ -161,9 +208,12 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
     if (isLoan && !guestId) return
     const lr = parseRate(loanRate)
     if (isLoan && lr <= 0) return
+    if (category === WIP_CAT && !assetId) return
     const msg = isLoan
       ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} kot posojilo ${loanGuestLabel(guestId)} in dodam na njegov račun ${(amt / (lr || 1)).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € (tečaj ${lr})?`
-      : `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"}?`
+      : category === WIP_CAT
+        ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} in dodam strošek na pogodbo „${wipLabel(assetId)}“?`
+        : `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"}?`
     if (!confirm(msg)) return
     setSaving(true)
     try {
@@ -177,9 +227,10 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
         annualRatePct: rt,
         reservationId: isLoan ? guestId : undefined,
         loanRate: isLoan ? lr : undefined,
+        assetId: category === WIP_CAT ? assetId : undefined,
       })
       resetAdd()
-      await mutate()
+      await Promise.all([mutate(), mutateWip()])
     } finally {
       setSaving(false)
     }
@@ -195,6 +246,7 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
     setERate(p.annualRatePct ? String(p.annualRatePct) : "")
     setEGuestId(p.reservationId || "")
     setELoanRate(p.loanRate ? String(p.loanRate) : "")
+    setEAssetId(p.assetId || "")
   }
 
   const handleSaveEdit = async () => {
@@ -207,6 +259,7 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
     if (isLoan && !eGuestId) return
     const lr = parseRate(eLoanRate)
     if (isLoan && lr <= 0) return
+    if (eCategory === WIP_CAT && !eAssetId) return
     setSaving(true)
     try {
       await updateNabavaPurchase({
@@ -219,9 +272,10 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
         annualRatePct: rt,
         reservationId: isLoan ? eGuestId : undefined,
         loanRate: isLoan ? lr : undefined,
+        assetId: eCategory === WIP_CAT ? eAssetId : undefined,
       })
       setEditId(null)
-      await mutate()
+      await Promise.all([mutate(), mutateWip()])
     } finally {
       setSaving(false)
     }
@@ -230,7 +284,7 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
   const handleDelete = async (id: string) => {
     if (!confirm("Izbrišem nakup? Odliv iz blagajne se bo razveljavil.")) return
     await deleteNabavaPurchase(id)
-    await mutate()
+    await Promise.all([mutate(), mutateWip()])
   }
 
   const catBtnClass = (active: boolean) =>
@@ -280,7 +334,15 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
                   >
                     Posojilo gostu
                   </button>
+                  <button
+                    onClick={() => setECategory(WIP_CAT)}
+                    className={catBtnClass(eCategory === WIP_CAT)}
+                    style={eCategory === WIP_CAT ? { backgroundColor: `${WIP_COLOR}22`, borderColor: `${WIP_COLOR}66`, color: WIP_COLOR } : undefined}
+                  >
+                    Sredstvo v izdelavi (pogodba)
+                  </button>
                 </div>
+                {eCategory === WIP_CAT && <WipAssetPicker assets={wipAssets} value={eAssetId} onChange={setEAssetId} />}
                 {eCategory === LOAN_CAT && (
                   <LoanGuestPicker
                     guests={
@@ -379,6 +441,11 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
                         ` ${(p.amountAr / p.loanRate).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € (tečaj ${p.loanRate.toLocaleString("de-DE")})`}
                     </p>
                   )}
+                  {p.category === WIP_CAT && (
+                    <p className="text-[10px] font-medium" style={{ color: WIP_COLOR }}>
+                      Pogodba: {wipLabel(p.assetId)}
+                    </p>
+                  )}
                   <p className="text-[10px] text-[#2b2622]/55">
                     {ar(p.amountAr)} · Gotovina ({p.company === "sarl" ? "SARL" : "Tourism"})
                     {p.date ? ` · ${new Date(p.date + "T00:00:00").toLocaleDateString("sl-SI", { day: "numeric", month: "short" })}` : ""}
@@ -442,7 +509,15 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
             >
               Posojilo gostu
             </button>
+            <button
+              onClick={() => setCategory(WIP_CAT)}
+              className={catBtnClass(category === WIP_CAT)}
+              style={category === WIP_CAT ? { backgroundColor: `${WIP_COLOR}22`, borderColor: `${WIP_COLOR}66`, color: WIP_COLOR } : undefined}
+            >
+              Sredstvo v izdelavi (pogodba)
+            </button>
           </div>
+          {category === WIP_CAT && <WipAssetPicker assets={wipAssets} value={assetId} onChange={setAssetId} />}
           {category === LOAN_CAT && <LoanGuestPicker guests={loanGuests} value={guestId} onChange={setGuestId} />}
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-[#2b2622]/55">Znesek:</span>
@@ -504,7 +579,8 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
               disabled={
                 saving ||
                 parseAmt(amount) <= 0 ||
-                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : !name.trim())
+                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : !name.trim()) ||
+                (category === WIP_CAT && !assetId)
               }
               onClick={handleAdd}
               className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"

@@ -228,6 +228,7 @@ function ensureAssetSchema() {
         "cashExpenseId" text,
         "createdAt" timestamp NOT NULL DEFAULT now()
       )`)
+      await db.execute(sql`ALTER TABLE fixed_asset_costs ADD COLUMN IF NOT EXISTS "nabavaPurchaseId" text`)
     })().catch((e) => {
       assetSchemaReady = null
       throw e
@@ -423,11 +424,63 @@ export async function addAssetCost(params: {
   return { id }
 }
 
+// Strošek, vnesen prek Borutove nabave (gotovina): odliv blagajne je v lasti nakupa (nabava_purchases),
+// tukaj samo zabeležimo strošek na pogodbi sredstva v izdelavi.
+export async function upsertNabavaAssetCost(params: {
+  nabavaPurchaseId: string
+  assetId: string
+  date: string
+  description: string
+  amountAr: number
+}) {
+  await ensureAssetSchema()
+  const amountAr = Math.round((params.amountAr || 0) * 100) / 100
+  const existing = await db.execute(
+    sql`SELECT id, "assetId" FROM fixed_asset_costs WHERE "nabavaPurchaseId" = ${params.nabavaPurchaseId} LIMIT 1`
+  )
+  const prev = existing.rows[0]
+  let id: string
+  if (prev) {
+    id = prev.id as string
+    await db.execute(
+      sql`UPDATE fixed_asset_costs SET "assetId" = ${params.assetId}, date = ${params.date},
+            description = ${params.description.trim() || 'nabava'}, "amountAr" = ${String(amountAr)}
+          WHERE id = ${id}`
+    )
+    if ((prev.assetId as string) !== params.assetId) await recomputeAssetValue(prev.assetId as string)
+  } else {
+    id = `fac-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    await db.execute(
+      sql`INSERT INTO fixed_asset_costs (id, "assetId", date, description, "amountAr", "nabavaPurchaseId")
+          VALUES (${id}, ${params.assetId}, ${params.date}, ${params.description.trim() || 'nabava'}, ${String(amountAr)}, ${params.nabavaPurchaseId})`
+    )
+  }
+  await recomputeAssetValue(params.assetId)
+  revalidatePath('/statistika')
+  return { id }
+}
+
+export async function removeNabavaAssetCost(nabavaPurchaseId: string) {
+  await ensureAssetSchema()
+  const row = await db.execute(
+    sql`SELECT "assetId" FROM fixed_asset_costs WHERE "nabavaPurchaseId" = ${nabavaPurchaseId}`
+  )
+  await db.execute(sql`DELETE FROM fixed_asset_costs WHERE "nabavaPurchaseId" = ${nabavaPurchaseId}`)
+  for (const r of row.rows) await recomputeAssetValue(r.assetId as string)
+}
+
 export async function deleteAssetCost(id: string) {
   await ensureAssetSchema()
-  const row = await db.execute(sql`SELECT "assetId", "cashExpenseId" FROM fixed_asset_costs WHERE id = ${id}`)
+  const row = await db.execute(sql`SELECT "assetId", "cashExpenseId", "nabavaPurchaseId" FROM fixed_asset_costs WHERE id = ${id}`)
   const r = row.rows[0]
   if (!r) return
+  if (r.nabavaPurchaseId) {
+    // Izbris na pogodbi izbriše tudi nakup v nabavi (in njegov odliv iz blagajne).
+    const { deleteNabavaPurchase } = await import('./nabava')
+    await deleteNabavaPurchase(r.nabavaPurchaseId as string)
+    revalidatePath('/statistika')
+    return
+  }
   if (r.cashExpenseId) {
     const { deleteCashExpense } = await import('./banka')
     await deleteCashExpense(r.cashExpenseId as string)
@@ -1185,6 +1238,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   if (p.category === "osnovno_sredstvo") continue
   // Posojilo gostu ni strošek — gost ga vrne prek računa (postavka "Cash advance").
   if (p.category === "posojilo_gostu") continue
+  if (p.category === "sredstvo_v_izdelavi") continue
   receiptsByCategory[p.category] = (receiptsByCategory[p.category] || 0) + p.amountAr / rate
   }
   const receiptsKuhinjaCost = receiptsByCategory.kuhinja || 0
