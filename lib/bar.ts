@@ -254,6 +254,11 @@ const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff | (typeof BAR
     'Flavienne Winjisna': 'MIDDAY',
     'Maria Franclise Soanatera': 'MORNING',
   },
+  // 22. oktober 2026 (uporabnica): Sandia zjutraj, Brigida opoldne.
+  '2026-10-22': {
+    Sandia: 'MORNING',
+    'Brigida Aoulati': 'MIDDAY',
+  },
   }
 
 // Manual per-date overrides for the extra split-shift segments. Replaces the
