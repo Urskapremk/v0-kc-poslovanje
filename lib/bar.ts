@@ -135,7 +135,7 @@ function usesNamedHelperWindow(year: number, month: number, day: number): boolea
 // Manual per-date overrides: force a worker onto a specific MAIN shift even if the
 // rotation would give them the day off. (People who come in on their day off are
 // handled via BAR_MANUAL_EXTRA_OVERRIDES so the schedule still shows "Prosto".)
-const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff, BarShift>>> = {
+const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff | (typeof BAR_STUDENTS)[number], BarShift>>> = {
   // 1. avgust 2026: še ni gostov → brez večerne smene, nihče prost.
   // 2 zjutraj (Alex, Walas) + Jonny dopoldan = 3 v jutranji smeni;
   // 2 popoldan (Fransia, Sandia) = opoldanska smena.
@@ -238,7 +238,13 @@ const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff, BarShift>>> 
   // Uporabnica: Sandia naj bo takrat sredi dneva (opoldne) namesto Fransie.
   '2026-09-09': { Sandia: 'MIDDAY' },
   '2026-09-10': { Sandia: 'MIDDAY' },
-}
+  // 15. oktober 2026 (uporabnica): opoldne Flavi, zjutraj Walas + Frenki.
+  '2026-10-15': {
+    Walas: 'MORNING',
+    'Flavienne Winjisna': 'MIDDAY',
+    'Maria Franclise Soanatera': 'MORNING',
+  },
+  }
 
 // Manual per-date overrides for the extra split-shift segments. Replaces the
 // computed extras for the listed people (empty array = removes their extras).
@@ -618,9 +624,9 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
     // Manual overrides for specific dates (force a worker onto a shift even if off).
     const override = BAR_MANUAL_OVERRIDES[date]
     if (override) {
-      for (const p of BAR_STAFF) {
-        if (override[p]) assignments[p] = override[p]!
-      }
+  for (const [p, shift] of Object.entries(override)) {
+  if (shift && p in assignments) (assignments as Record<string, BarShift>)[p] = shift
+  }
     }
 
     // Ročno določeni dnevi (BAR_MANUAL_OVERRIDES) so v celoti ročni → samodejni
