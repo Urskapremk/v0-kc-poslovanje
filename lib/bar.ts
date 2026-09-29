@@ -238,6 +238,11 @@ const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff | (typeof BAR
   // Uporabnica: Sandia naj bo takrat sredi dneva (opoldne) namesto Fransie.
   '2026-09-09': { Sandia: 'MIDDAY' },
   '2026-09-10': { Sandia: 'MIDDAY' },
+  // 1. oktober 2026 (uporabnica): Walas zjutraj, Frenki opoldne.
+  '2026-10-01': {
+  Walas: 'MORNING',
+  'Maria Franclise Soanatera': 'MIDDAY',
+  },
   // 8. oktober 2026 (uporabnica): Sandia zjutraj, Frenki opoldne.
   '2026-10-08': {
     Sandia: 'MORNING',
