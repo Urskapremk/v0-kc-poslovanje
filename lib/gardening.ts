@@ -66,9 +66,34 @@ export function generateGardenerSchedule(year: number, month: number): DaySchedu
   const lastDay = new Date(year, month, 0).getDate()
   const result: DaySchedule[] = []
 
+  const usesFixedPattern = year > 2026 || (year === 2026 && month >= 10)
+
   for (let day = 1; day <= lastDay; day++) {
     const dayIndex = day - 1
     const weekIndex = Math.floor(dayIndex / 7)
+
+    // From October 2026: Hijaldo always garden PM, KD always garden AM,
+    // Francelj and Velo swap beach AM/PM weekly, Maxim covers whoever is off.
+    if (usesFixedPattern) {
+      const base: Record<string, GardenPost> = {
+        Hijaldo: 'GARDEN_PM',
+        KD: 'GARDEN_AM',
+        Francelj: weekIndex % 2 === 0 ? 'BEACH_AM' : 'BEACH_PM',
+        Velo: weekIndex % 2 === 0 ? 'BEACH_PM' : 'BEACH_AM',
+        Maxim: 'GARDEN_AM',
+      }
+      const offOrder: Gardener[] = ['Hijaldo', 'Francelj', 'KD', 'Velo', 'Maxim']
+      const offMod = dayIndex % 7
+      const offGardener = offMod < offOrder.length ? offOrder[offMod] : null
+      const assignments: Record<string, GardenPost> = { ...base }
+      if (offGardener) {
+        assignments[offGardener] = 'OFF'
+        if (offGardener !== 'Maxim') assignments.Maxim = base[offGardener]
+      }
+      const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      result.push({ date, assignments })
+      continue
+    }
     const offMod = dayIndex % 7 // 0..6 ; 0..4 => that gardener off, 5/6 => nobody off
 
     // The weekly reserve is ALWAYS KD. The other four gardeners rotate
