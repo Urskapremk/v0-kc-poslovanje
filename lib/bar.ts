@@ -254,6 +254,11 @@ const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff | (typeof BAR
   // 10. in 11. oktober 2026 (uporabnica): Frenki zjutraj z Brigido.
   '2026-10-10': { 'Maria Franclise Soanatera': 'MORNING' },
   '2026-10-11': { 'Maria Franclise Soanatera': 'MORNING' },
+  '2026-10-17': { 'Brigida Aoulati': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Maria Franclise Soanatera': 'EVENING' },
+  '2026-10-18': { 'Brigida Aoulati': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Maria Franclise Soanatera': 'EVENING' },
+  '2026-10-24': { 'Maria Franclise Soanatera': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Brigida Aoulati': 'EVENING' },
+  '2026-10-25': { 'Maria Franclise Soanatera': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Brigida Aoulati': 'EVENING' },
+  '2026-10-31': { 'Maria Franclise Soanatera': 'MORNING', 'Brigida Aoulati': 'MORNING', 'Flavienne Winjisna': 'EVENING' },
   // 15. oktober 2026 (uporabnica): opoldne Flavi, zjutraj Walas + Frenki.
   '2026-10-15': {
     Walas: 'MORNING',
