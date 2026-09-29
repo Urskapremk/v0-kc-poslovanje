@@ -301,7 +301,15 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
         const offOffset = octPlus
           ? ({ 'Noeline Anjara': 4, 'Valencia Soaline': 5 } as Record<string, number>)[s] ?? STUDENT_OFF_OFFSET[s]
           : STUDENT_OFF_OFFSET[s]
-        assignments[s] = offset === offOffset ? 'OFF' : STUDENT_WORK_SHIFT[s]
+        // From October 2026 Vali and Noli swap shifts every 14 days: days 1-14
+        // Vali morning / Noli afternoon, from day 15 the other way round.
+        let workShift = STUDENT_WORK_SHIFT[s]
+        if (octPlus && (s === 'Valencia Soaline' || s === 'Noeline Anjara')) {
+          const firstHalf = day <= 14
+          const valiMorning = firstHalf
+          workShift = (s === 'Valencia Soaline') === valiMorning ? 'MORNING' : 'AFTERNOON'
+        }
+        assignments[s] = offset === offOffset ? 'OFF' : workShift
       }
     }
 
