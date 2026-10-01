@@ -87,7 +87,7 @@ export default function StroskiReceiptCaptureModal({
   onSaved?: () => void
   requirePayment?: boolean
 }) {
-  const [payMethod, setPayMethod] = useState<'cash' | 'orange_money' | null>(null)
+  const [payMethod, setPayMethod] = useState<'cash' | 'orange_money' | 'card' | null>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -683,10 +683,11 @@ export default function StroskiReceiptCaptureModal({
             <label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-white/50">
               Plačano z{requirePayment ? ' *' : ''}
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               {([
                 { id: 'cash', label: 'Gotovina', hint: 'blagajna Tourism', color: '#c59b5b' },
                 { id: 'orange_money', label: 'Orange Money', hint: 'denarnica OM', color: '#e08a3c' },
+                { id: 'card', label: 'Plačilna kartica', hint: 'bančni račun', color: '#6aa9d6' },
               ] as const).map((m) => {
                 const active = payMethod === m.id
                 return (
@@ -709,7 +710,12 @@ export default function StroskiReceiptCaptureModal({
                 )
               })}
             </div>
-            {payMethod && totalAmount > 0 && (
+            {payMethod === 'card' && (
+              <p className="mt-2 text-xs text-[#6aa9d6]">
+                Odliv ni ustvarjen ročno — plačilo se poveže z bančnim izpiskom.
+              </p>
+            )}
+            {payMethod && payMethod !== 'card' && totalAmount > 0 && (
               <p className="mt-2 text-xs text-[#8fae92]">
                 Ob shranjevanju se odšteje{' '}
                 {(currency === 'Ar' ? Math.round(totalAmount) : Math.round(totalEur * rate)).toLocaleString('sl-SI')} Ar iz{' '}
