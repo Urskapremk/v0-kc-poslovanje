@@ -438,23 +438,55 @@ export async function updateNabavaPurchase(params: {
 // popravljanja (NabavaPurchasesSection).
 export async function getArchivedNabavaTrips(
   site: "hv" | "komba",
-): Promise<{ trips: { id: string; date: string; note: string; count: number }[]; today: string }> {
+  ): Promise<{
+  trips: {
+  id: string
+  date: string
+  note: string
+  count: number
+  payments: { refKey: string; supplier: string; amountAr: number; method: string; company: string; paidAt: string }[]
+  }[]
+  today: string
+  }> {
   await ensureTable()
   const siteVal = site === "komba" ? "komba" : "hv"
   const today = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().split("T")[0]
   const res = await db.execute(sql`
-    SELECT t.id, t.date, t.note, COUNT(p.id) AS cnt
-    FROM nabava_trips t
-    JOIN nabava_purchases p ON p."tripId" = t.id
-    WHERE t.site = ${siteVal} AND t.date < ${today}
-    GROUP BY t.id, t.date, t.note, t."createdAt"
-    ORDER BY t.date DESC, t."createdAt" DESC
+  SELECT t.id, t.date, t.note,
+  (SELECT COUNT(*) FROM nabava_purchases p WHERE p."tripId" = t.id) AS cnt
+  FROM nabava_trips t
+  WHERE t.site = ${siteVal} AND t.date < ${today}
+  AND (
+  EXISTS (SELECT 1 FROM nabava_purchases p WHERE p."tripId" = t.id)
+  OR EXISTS (SELECT 1 FROM supplier_payments sp WHERE sp."refKey" LIKE 'nabava:' || t.id || ':%')
+  )
+  ORDER BY t.date DESC, t."createdAt" DESC
   `)
+  const payRes = await db.execute(sql`
+  SELECT "refKey", supplier, "amountAr", method, company, "paidAt"
+  FROM supplier_payments WHERE "refKey" LIKE 'nabava:%'
+  `)
+  const paysByTrip = new Map<string, { refKey: string; supplier: string; amountAr: number; method: string; company: string; paidAt: string }[]>()
+  for (const p of payRes.rows as Record<string, unknown>[]) {
+  const refKey = String(p.refKey)
+  const tripId = refKey.split(":")[1]
+  const arr = paysByTrip.get(tripId) || []
+  arr.push({
+  refKey,
+  supplier: String(p.supplier || ""),
+  amountAr: Number(p.amountAr || 0),
+  method: String(p.method || ""),
+  company: String(p.company || ""),
+  paidAt: p.paidAt ? String(p.paidAt) : "",
+  })
+  paysByTrip.set(tripId, arr)
+  }
   const trips = (res.rows as Record<string, unknown>[]).map((r) => ({
-    id: String(r.id),
-    date: r.date ? String(r.date) : "",
-    note: r.note ? String(r.note) : "",
-    count: Number(r.cnt || 0),
+  id: String(r.id),
+  date: r.date ? String(r.date) : "",
+  note: r.note ? String(r.note) : "",
+  count: Number(r.cnt || 0),
+  payments: paysByTrip.get(String(r.id)) || [],
   }))
   return { trips, today }
 }

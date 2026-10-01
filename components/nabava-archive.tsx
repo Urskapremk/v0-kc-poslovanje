@@ -7,6 +7,13 @@ import { ArrowLeft, Search, ShoppingCart } from 'lucide-react'
 import { getArchivedNabavaTrips } from '@/app/actions/nabava'
 import { NabavaPurchasesSection } from '@/components/nabava-purchases-section'
 
+const PAY_LABELS: Record<string, string> = {
+  boat: 'Dilip (čoln)',
+  boatdriver: 'Voznik čolna',
+  porters: 'Nosači',
+  tuctuc: 'Tuc tuc',
+}
+
 export function NabavaArchive({ site, title }: { site: 'hv' | 'komba'; title: string }) {
   const [search, setSearch] = useState('')
   const { data, isLoading, error } = useSWR(['archived-nabava', site], () => getArchivedNabavaTrips(site), {
@@ -96,6 +103,20 @@ export function NabavaArchive({ site, title }: { site: 'hv' | 'komba'; title: st
                           {trip.note || 'Nabava'}
                         </p>
                       </div>
+                      {trip.payments.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[#8f6d3a]">Plačila (čoln, voznik, nosači)</p>
+                          {trip.payments.map((p) => (
+                            <div key={p.refKey} className="flex items-center justify-between gap-2 rounded-lg bg-[#4f7a54]/10 px-2.5 py-1.5 text-[11px] text-[#0f2e3a]">
+                              <span className="min-w-0 truncate">
+                                <span className="font-semibold">{PAY_LABELS[p.refKey.split(':')[2]] || p.supplier}</span>
+                                <span className="text-[#0f2e3a]/60"> · {p.method === 'cash' ? `Gotovina (${p.company === 'sarl' ? 'SARL' : 'Tourism'})` : 'Orange Money'}{p.paidAt ? ` · ${new Date(p.paidAt).toLocaleDateString('sl-SI')}` : ''}</span>
+                              </span>
+                              <span className="flex-shrink-0 font-semibold text-[#4f7a54]">{p.amountAr.toLocaleString('de-DE')} Ar</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} />
                     </div>
                   ))}
