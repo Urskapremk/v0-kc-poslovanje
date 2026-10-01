@@ -8255,8 +8255,13 @@ function GuestCard() {
   // Same UTC+3 "today" boundary the purchase archive uses, so the current day's
   // trips stay on the Nabava tiles and only move to the archive once the day ends.
   const nabavaToday = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && (!t.date || t.date >= nabavaToday));
-  const nabavaKombaList = nabavaList.filter((t) => t.site === "komba" && (!t.date || t.date >= nabavaToday));
+  // Back-dated trips entered today stay on the tile so purchases can still be added to them.
+  const nabavaCreatedDay = (createdAt: string) =>
+    createdAt ? new Date(new Date(createdAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10) : "";
+  const nabavaOnTile = (t: { date: string; createdAt: string }) =>
+    !t.date || t.date >= nabavaToday || nabavaCreatedDay(t.createdAt) === nabavaToday;
+  const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && nabavaOnTile(t));
+  const nabavaKombaList = nabavaList.filter((t) => t.site === "komba" && nabavaOnTile(t));
   const reminderDateLabel = (() => {
     const d = new Date(reminderDate + "T00:00:00");
     if (isNaN(d.getTime())) return reminderDate;
