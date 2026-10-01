@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Camera, Upload, Loader2, Receipt, Sparkles, SplitSquareHorizontal, Plus, ClipboardPaste } from 'lucide-react'
-import { addStroskiReceipt } from '@/app/actions/stroski-arhiv'
+import { addStroskiReceipt, setReceiptPaymentMethod } from '@/app/actions/stroski-arhiv'
 import { getExchangeRate } from '@/app/actions/komba'
 import {
   STROSEK_CATEGORIES,
@@ -80,11 +80,14 @@ export default function StroskiReceiptCaptureModal({
   isOpen,
   onClose,
   onSaved,
+  requirePayment = false,
 }: {
   isOpen: boolean
   onClose: () => void
   onSaved?: () => void
+  requirePayment?: boolean
 }) {
+  const [payMethod, setPayMethod] = useState<'cash' | 'orange_money' | null>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -164,6 +167,7 @@ export default function StroskiReceiptCaptureModal({
   const cur = currency === 'Ar' ? 'Ar' : '€'
 
   function reset() {
+    setPayMethod(null)
     setPages([])
     setDate(todayIso())
     setDescription('')
@@ -343,6 +347,14 @@ export default function StroskiReceiptCaptureModal({
       )
       return
     }
+    if (requirePayment && !payMethod) {
+      setError('Izberi, s čim je bilo plačano: gotovina ali Orange Money.')
+      return
+    }
+    if (payMethod && !(totalAmount > 0)) {
+      setError('Vpiši znesek računa, da se zabeleži odliv.')
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -364,7 +376,7 @@ export default function StroskiReceiptCaptureModal({
         .filter((c) => c.amountEur > 0)
 
       // 2) Shrani zapis v arhiv (prva stran je glavna sličica)
-      await addStroskiReceipt({
+      const { id: receiptId } = await addStroskiReceipt({
         date,
         description: description.trim(),
         amountEur: totalEur,
@@ -376,6 +388,11 @@ export default function StroskiReceiptCaptureModal({
         pages: uploaded,
       })
 
+      if (payMethod) {
+        await setReceiptPaymentMethod(receiptId, payMethod, { createOmOutflow: true })
+      }
+
+      setPayMethod(null)
       reset()
       onSaved?.()
       onClose()
@@ -658,6 +675,46 @@ export default function StroskiReceiptCaptureModal({
                   <span className="text-white/30">Neobvezno</span>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* Način plačila → odliv iz prave denarnice */}
+          <div>
+            <label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-white/50">
+              Plačano z{requirePayment ? ' *' : ''}
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { id: 'cash', label: 'Gotovina', hint: 'blagajna Tourism', color: '#c59b5b' },
+                { id: 'orange_money', label: 'Orange Money', hint: 'denarnica OM', color: '#e08a3c' },
+              ] as const).map((m) => {
+                const active = payMethod === m.id
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setPayMethod(active ? null : m.id)}
+                    className="rounded-xl border px-3 py-3 text-left transition-all"
+                    style={{
+                      borderColor: active ? m.color : 'rgba(255,255,255,0.1)',
+                      background: active ? `${m.color}26` : 'rgba(255,255,255,0.05)',
+                    }}
+                  >
+                    <span className="block text-sm font-semibold" style={{ color: active ? m.color : 'rgba(255,255,255,0.8)' }}>
+                      {m.label}
+                    </span>
+                    <span className="block text-[11px] text-white/40">{m.hint}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {payMethod && totalAmount > 0 && (
+              <p className="mt-2 text-xs text-[#8fae92]">
+                Ob shranjevanju se odšteje{' '}
+                {(currency === 'Ar' ? Math.round(totalAmount) : Math.round(totalEur * rate)).toLocaleString('sl-SI')} Ar iz{' '}
+                {payMethod === 'cash' ? 'gotovinske blagajne Tourism' : 'Orange Money'}.
+              </p>
             )}
           </div>
 

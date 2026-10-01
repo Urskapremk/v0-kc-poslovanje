@@ -8,7 +8,7 @@ import { parseCategories, type CategoryAllocation } from '@/lib/stroski-categori
 import { readReceiptFromImages } from '@/lib/receipt-ocr'
 import { getExchangeRate } from './komba'
 import { addCashExpense, deleteCashExpense, getBankTransactions } from './banka'
-import { getOmTransactions } from './orange-money'
+import { getOmTransactions, addOmTransaction, deleteOmTransaction } from './orange-money'
 import { getOmTransfers } from './om-transfers'
 
 export type ReceiptPage = {
@@ -425,6 +425,10 @@ function escapeHtml(s: string) {
 
 // Izbriše zapis računa (blob ostane v shrambi, a ni več prikazan).
 export async function deleteStroskiReceipt(id: string) {
+  const res = await db.execute(sql`SELECT "cashLedgerId", "omLedgerId" FROM stroski_receipts WHERE id = ${id} LIMIT 1`)
+  const row = (res.rows as Record<string, unknown>[])[0]
+  if (row?.cashLedgerId) await deleteCashExpense(row.cashLedgerId as string).catch(() => {})
+  if (row?.omLedgerId) await deleteOmTransaction(row.omLedgerId as string).catch(() => {})
   await db.execute(sql`DELETE FROM stroski_receipts WHERE id = ${id}`)
   revalidatePath('/statistika')
 }
@@ -527,13 +531,43 @@ function receiptAmountAr(row: Record<string, unknown>, rate: number): number {
 //  - 'orange_money' → samo označi (ujemanje z odlivi preveriš posebej).
 //  - 'cash'         → ustvari odhodek v blagajni Tourism (v Ar) in poveži prek cashLedgerId.
 // Ob preklopu stran od gotovine se prejšnji blagajniški odhodek izbriše.
-export async function setReceiptPaymentMethod(id: string, method: PaymentMethod | null) {
+export async function setReceiptPaymentMethod(
+  id: string,
+  method: PaymentMethod | null,
+  opts?: { createOmOutflow?: boolean },
+) {
   const res = await db.execute(sql`SELECT * FROM stroski_receipts WHERE id = ${id} LIMIT 1`)
   const row = (res.rows as Record<string, unknown>[])[0]
   if (!row) return { ok: false as const, error: 'Račun ni najden.' }
 
   const prevMethod = (row.paymentMethod as PaymentMethod | null) ?? null
   const prevCashId = (row.cashLedgerId as string | null) ?? null
+  const prevOmId = (row.omLedgerId as string | null) ?? null
+
+  if (prevOmId && method !== 'orange_money') {
+    try {
+      await deleteOmTransaction(prevOmId)
+    } catch {
+      // odliv morda že ne obstaja
+    }
+  }
+
+  let omLedgerId: string | null = method === 'orange_money' ? prevOmId : null
+  if (method === 'orange_money' && !prevOmId && opts?.createOmOutflow) {
+    const rate = await getExchangeRate()
+    const amountAr = receiptAmountAr(row, rate)
+    if (amountAr > 0) {
+      const desc = ((row.description as string | null) ?? '').trim() || 'Račun'
+      const { id: omId } = await addOmTransaction({
+        date: (row.date as string) || new Date().toISOString().slice(0, 10),
+        direction: 'out',
+        category: 'dobavitelj',
+        amount: amountAr,
+        description: `Strošek: ${desc}`,
+      })
+      omLedgerId = omId
+    }
+  }
 
   // Če je bil prej gotovina in zdaj ni več → razveljavi blagajniški odhodek.
   if (prevCashId && method !== 'cash') {
@@ -562,7 +596,7 @@ export async function setReceiptPaymentMethod(id: string, method: PaymentMethod 
   }
 
   await db.execute(
-    sql`UPDATE stroski_receipts SET "paymentMethod" = ${method}, "cashLedgerId" = ${cashLedgerId} WHERE id = ${id}`
+    sql`UPDATE stroski_receipts SET "paymentMethod" = ${method}, "cashLedgerId" = ${cashLedgerId}, "omLedgerId" = ${omLedgerId} WHERE id = ${id}`
   )
   revalidatePath('/statistika')
   return { ok: true as const, cashLedgerId, prevMethod }

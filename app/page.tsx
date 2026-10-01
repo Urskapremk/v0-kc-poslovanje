@@ -10616,7 +10616,7 @@ function GuestCard() {
       )}
 
       {/* Nov račun (strošek) ��� modal za fotografiranje/nalaganje računa */}
-      <StroskiReceiptCaptureModal isOpen={showReceiptCapture} onClose={() => setShowReceiptCapture(false)} />
+      <StroskiReceiptCaptureModal isOpen={showReceiptCapture} onClose={() => setShowReceiptCapture(false)} requirePayment />
 
       {/* Pricing Calculator Modal */}
       {showTaxes && typeof document !== "undefined" && createPortal(
