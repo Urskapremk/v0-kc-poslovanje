@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useRef } from 'react'
-import { ChevronDown, ChevronUp, Upload, FileText, Loader2, ExternalLink, IdCard, User } from 'lucide-react'
+import { ChevronDown, ChevronUp, Upload, FileText, Loader2, ExternalLink, IdCard, User, ClipboardPaste } from 'lucide-react'
 import { updateStaffPersonalInfo } from '@/app/actions/statistics'
 import { COMPANIES, type CompanyId } from '@/lib/payroll'
 import { DEFAULT_WAGE_CATEGORIES } from '@/lib/payroll-mg'
@@ -74,6 +74,75 @@ export default function StaffPersonalInfo({
   // Tekstovna polja: shrani na onBlur, BREZ refresh (po pravilu iz memorije)
   const saveField = async (field: string, value: string) => {
     await updateStaffPersonalInfo(staffId, { [field]: value })
+  }
+
+  const readClipboardImage = async (): Promise<File | null> => {
+    if (!navigator.clipboard?.read) {
+      alert('Brskalnik ne podpira branja odložišča. Uporabi Naloži sliko.')
+      return null
+    }
+    try {
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const type = item.types.find((t) => t.startsWith('image/'))
+        if (type) {
+          const blob = await item.getType(type)
+          return new File([blob], `posnetek-${Date.now()}.${type.split('/')[1] || 'png'}`, { type })
+        }
+      }
+      alert('V odložišču ni slike. Najprej naredi posnetek zaslona.')
+    } catch {
+      alert('Dostop do odložišča je zavrnjen.')
+    }
+    return null
+  }
+
+  const uploadDocumentFile = async (file: File) => {
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/upload-staff-document', { method: 'POST', body: formData })
+      if (!res.ok) throw new Error('Upload failed')
+      const { pathname } = await res.json()
+      await updateStaffPersonalInfo(staffId, { documentImagePath: pathname })
+      setImagePath(pathname)
+      onImageChange()
+    } catch (err) {
+      console.error('[v0] Document paste upload error:', err)
+      alert('Napaka pri nalaganju dokumenta.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const uploadPhotoFile = async (file: File) => {
+    setUploadingPhoto(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/upload-staff-document', { method: 'POST', body: formData })
+      if (!res.ok) throw new Error('Upload failed')
+      const { pathname } = await res.json()
+      await updateStaffPersonalInfo(staffId, { employeePhotoPath: pathname })
+      setPhotoPath(pathname)
+      onImageChange()
+    } catch (err) {
+      console.error('[v0] Photo paste upload error:', err)
+      alert('Napaka pri nalaganju fotografije.')
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }
+
+  const handlePasteDocument = async () => {
+    const file = await readClipboardImage()
+    if (file) await uploadDocumentFile(file)
+  }
+
+  const handlePastePhoto = async () => {
+    const file = await readClipboardImage()
+    if (file) await uploadPhotoFile(file)
   }
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -433,6 +502,14 @@ export default function StaffPersonalInfo({
                   </>
                 )}
               </button>
+              <button
+                onClick={handlePastePhoto}
+                disabled={uploadingPhoto}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-[#8fae92]/30 bg-[#8fae92]/10 px-3 py-2 text-xs font-medium text-[#8fae92] transition-colors hover:bg-[#8fae92]/20 disabled:opacity-50"
+              >
+                <ClipboardPaste className="h-4 w-4" />
+                Prilepi posnetek zaslona
+              </button>
             </div>
 
             {/* Slika osebnega dokumenta */}
@@ -482,6 +559,14 @@ export default function StaffPersonalInfo({
                   {imageSrc ? 'Zamenjaj sliko' : 'Naloži sliko'}
                 </>
               )}
+            </button>
+            <button
+              onClick={handlePasteDocument}
+              disabled={uploading}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-[#8fae92]/30 bg-[#8fae92]/10 px-3 py-2 text-xs font-medium text-[#8fae92] transition-colors hover:bg-[#8fae92]/20 disabled:opacity-50"
+            >
+              <ClipboardPaste className="h-4 w-4" />
+              Prilepi posnetek zaslona
             </button>
           </div>
           </div>
