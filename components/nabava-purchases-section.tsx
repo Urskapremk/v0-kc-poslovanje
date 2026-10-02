@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import useSWR from "swr"
-import { ShoppingBasket, Pencil, Trash2, Check, X, Plus, HandCoins } from "lucide-react"
+import { ShoppingBasket, Pencil, Trash2, Check, X, Plus, HandCoins, Home } from "lucide-react"
 import {
   getNabavaPurchases,
   addNabavaPurchase,
@@ -20,10 +20,13 @@ const ar = (v: number) => `${Math.round(v || 0).toLocaleString("de-DE")} Ar`
 const ASSET_CAT = "osnovno_sredstvo"
 const LOAN_CAT = "posojilo_gostu"
 const WIP_CAT = "sredstvo_v_izdelavi"
-type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT
+const RENT_CAT = "najemnina"
+const RENT_NAME = "Najemnina hiša"
+type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT
 const ASSET_COLOR = "#c9a86a"
 const LOAN_COLOR = "#3f6b7d"
 const WIP_COLOR = "#a0662f"
+const RENT_COLOR = "#8a4f72"
 
 const CAT_COLORS: Record<StrosekCategory, string> = {
   bar: "#3f6b7d",
@@ -35,9 +38,39 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   ostalo: "#6b6b6b",
 }
 const catColor = (c: NabavaCategory) =>
-  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : CAT_COLORS[c]
+  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : CAT_COLORS[c]
 const catLabel = (c: NabavaCategory) =>
-  c === ASSET_CAT ? "Osnovno sredstvo" : c === LOAN_CAT ? "Posojilo gostu" : c === WIP_CAT ? "Sredstvo v izdelavi" : CATEGORY_LABELS[c]
+  c === ASSET_CAT
+    ? "Osnovno sredstvo"
+    : c === LOAN_CAT
+      ? "Posojilo gostu"
+      : c === WIP_CAT
+        ? "Sredstvo v izdelavi"
+        : c === RENT_CAT
+          ? RENT_NAME
+          : CATEGORY_LABELS[c]
+
+function RentButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium border transition-colors ${
+        active ? "" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10"
+      }`}
+      style={active ? { backgroundColor: `${RENT_COLOR}22`, borderColor: `${RENT_COLOR}66`, color: RENT_COLOR } : undefined}
+    >
+      <Home className="h-3 w-3" /> Najemnina
+    </button>
+  )
+}
+
+function RentNote() {
+  return (
+    <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${RENT_COLOR}55`, backgroundColor: `${RENT_COLOR}10`, color: RENT_COLOR }}>
+      Knjiži se na strošek „{RENT_NAME}“ — ločeno od ostalih stroškov, ne bremeni oddelkov.
+    </p>
+  )
+}
 
 function WipAssetPicker({
   assets,
@@ -143,7 +176,15 @@ function LoanRateInput({ amountAr, value, onChange }: { amountAr: number; value:
 }
 const assetLifeMonths = (rate: number) => (!rate || rate <= 0 ? 0 : Math.max(1, Math.round(1200 / rate)))
 
-export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; tripNote?: string }) {
+export function NabavaPurchasesSection({
+  tripId,
+  tripNote,
+  showRent = false,
+}: {
+  tripId: string
+  tripNote?: string
+  showRent?: boolean
+}) {
   const { data, mutate } = useSWR(["nabava-purchases", tripId], () => getNabavaPurchases(tripId), {
     refreshInterval: 0,
   })
@@ -202,7 +243,8 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
   const handleAdd = async () => {
     const amt = parseAmt(amount)
     const isLoan = category === LOAN_CAT
-    if ((!isLoan && !name.trim()) || amt <= 0) return
+    const isRent = category === RENT_CAT
+    if ((!isLoan && !isRent && !name.trim()) || amt <= 0) return
     const rt = parseRate(rate)
     if (category === ASSET_CAT && rt <= 0) return
     if (isLoan && !guestId) return
@@ -213,13 +255,15 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
       ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} kot posojilo ${loanGuestLabel(guestId)} in dodam na njegov račun ${(amt / (lr || 1)).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € (tečaj ${lr})?`
       : category === WIP_CAT
         ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} in dodam strošek na pogodbo „${wipLabel(assetId)}“?`
-        : `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"}?`
+        : isRent
+          ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} in poknjižim na strošek „${RENT_NAME}“?`
+          : `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"}?`
     if (!confirm(msg)) return
     setSaving(true)
     try {
       await addNabavaPurchase({
         tripId,
-        name: name.trim() || (isLoan ? "Posojilo gotovine" : ""),
+        name: name.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : ""),
         category,
         amountAr: amt,
         company,
@@ -253,7 +297,8 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
     if (!editId) return
     const amt = parseAmt(eAmount)
     const isLoan = eCategory === LOAN_CAT
-    if ((!isLoan && !eName.trim()) || amt <= 0) return
+    const isRent = eCategory === RENT_CAT
+    if ((!isLoan && !isRent && !eName.trim()) || amt <= 0) return
     const rt = parseRate(eRate)
     if (eCategory === ASSET_CAT && rt <= 0) return
     if (isLoan && !eGuestId) return
@@ -264,7 +309,7 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
     try {
       await updateNabavaPurchase({
         id: editId,
-        name: eName.trim() || (isLoan ? "Posojilo gotovine" : ""),
+        name: eName.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : ""),
         category: eCategory,
         amountAr: amt,
         company: eCompany,
@@ -341,7 +386,11 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
                   >
                     Sredstvo v izdelavi (pogodba)
                   </button>
+                  {(showRent || eCategory === RENT_CAT) && (
+                    <RentButton active={eCategory === RENT_CAT} onClick={() => setECategory(RENT_CAT)} />
+                  )}
                 </div>
+                {eCategory === RENT_CAT && <RentNote />}
                 {eCategory === WIP_CAT && <WipAssetPicker assets={wipAssets} value={eAssetId} onChange={setEAssetId} />}
                 {eCategory === LOAN_CAT && (
                   <LoanGuestPicker
@@ -516,7 +565,17 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
             >
               Sredstvo v izdelavi (pogodba)
             </button>
+            {showRent && (
+              <RentButton
+                active={category === RENT_CAT}
+                onClick={() => {
+                  setCategory(RENT_CAT)
+                  if (!name.trim()) setName(RENT_NAME)
+                }}
+              />
+            )}
           </div>
+          {category === RENT_CAT && <RentNote />}
           {category === WIP_CAT && <WipAssetPicker assets={wipAssets} value={assetId} onChange={setAssetId} />}
           {category === LOAN_CAT && <LoanGuestPicker guests={loanGuests} value={guestId} onChange={setGuestId} />}
           <div className="flex items-center gap-2">
@@ -579,7 +638,7 @@ export function NabavaPurchasesSection({ tripId, tripNote }: { tripId: string; t
               disabled={
                 saving ||
                 parseAmt(amount) <= 0 ||
-                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : !name.trim()) ||
+                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : category === RENT_CAT ? false : !name.trim()) ||
                 (category === WIP_CAT && !assetId)
               }
               onClick={handleAdd}

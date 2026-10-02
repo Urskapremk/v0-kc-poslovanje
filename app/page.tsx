@@ -9466,7 +9466,7 @@ function GuestCard() {
                         </div>
                       )}
                       <div className="border-t border-dashed border-[#8fae92]/30 pt-2">
-                        <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} />
+                        <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} showRent />
                       </div>
                     </div>
                   ))}
