@@ -117,7 +117,7 @@ export function NabavaArchive({ site, title }: { site: 'hv' | 'komba'; title: st
                           ))}
                         </div>
                       )}
-                      <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} />
+                      <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} showRent={site === 'komba'} />
                     </div>
                   ))}
                 </div>

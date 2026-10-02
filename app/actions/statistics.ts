@@ -1233,7 +1233,13 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Gotovinski nakupi na Borutovih nabavnih poteh (kalamari, riba, pijača …): ista logika
   // razvrščanja kot arhiv računov — hrana bremeni kuhinjo, pijača bar itd. Zneski so v Ar → EUR.
   const nabavaPurchases = await getNabavaPurchasesForMonth(year, month)
+  // Najemnina hiše (Borut plača gotovino v Nabavi Komba) = samostojen strošek, ločen od ostalih kategorij.
+  let najemninaHisaAr = 0
   for (const p of nabavaPurchases) {
+  if (p.category === "najemnina") {
+    najemninaHisaAr += p.amountAr
+    continue
+  }
   // Osnovno sredstvo se NE knjiži kot takojšen strošek oddelka — amortizira se prek fixed_assets.
   if (p.category === "osnovno_sredstvo") continue
   // Posojilo gostu ni strošek — gost ga vrne prek računa (postavka "Cash advance").
@@ -1250,6 +1256,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const receiptsReprezentancaCost = receiptsByCategory.reprezentanca || 0
   // Tekoče vzdrževanje nepremičnin = samostojen strošek; NE bremeni oddelkov, znižuje skupni dobiček.
   const receiptsVzdrzevanjeCost = receiptsByCategory.vzdrzevanje || 0
+  const najemninaHisaCost = najemninaHisaAr / rate
 
   // Nosači in Tuc tuc = vsak SVOJ samostojen strošek (npr. Borutove nabave HV/Komba). Vir so gotovinski odlivi
   // (bank_cash_expenses) IN Orange Money odlivi, prepoznani po besedilu opisa. NE bremenita nobenega oddelka —
@@ -1282,7 +1289,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const depreciationCost = depreciation.total
 
   const totalSalaryCost = accommodationSalaryCost + barSalaryCost + kuhinjaSalaryCost + managementSalaryCost
-  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + portersCost + tuctucCost + depreciationCost
+  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + portersCost + tuctucCost + depreciationCost
 
   // ===== PER-GUEST BREAKDOWN (analytics) =====
   // Attribute revenue and costs to each reservation/guest. Salaries are allocated
@@ -1536,6 +1543,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
       receiptsOstalo: Math.round(receiptsOstaloCost * 100) / 100,
       receiptsReprezentanca: Math.round(receiptsReprezentancaCost * 100) / 100,
       receiptsVzdrzevanje: Math.round(receiptsVzdrzevanjeCost * 100) / 100,
+      najemninaHisa: Math.round(najemninaHisaCost * 100) / 100,
       porters: Math.round(portersCost * 100) / 100,
       tuctuc: Math.round(tuctucCost * 100) / 100,
       depreciation: Math.round(depreciationCost * 100) / 100,
@@ -1792,6 +1800,7 @@ export async function getYearlyStatistics(year: number) {
       receiptsOstalo: 0,
       receiptsReprezentanca: 0,
       receiptsVzdrzevanje: 0,
+      najemninaHisa: 0,
       porters: 0,
       tuctuc: 0,
       depreciation: 0,
@@ -1826,6 +1835,7 @@ export async function getYearlyStatistics(year: number) {
     yearly.costs.receiptsOstalo += (m.costs as { receiptsOstalo?: number }).receiptsOstalo || 0
     yearly.costs.receiptsReprezentanca += (m.costs as { receiptsReprezentanca?: number }).receiptsReprezentanca || 0
     yearly.costs.receiptsVzdrzevanje += (m.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0
+    yearly.costs.najemninaHisa += (m.costs as { najemninaHisa?: number }).najemninaHisa || 0
     yearly.costs.porters += (m.costs as { porters?: number }).porters || 0
     yearly.costs.tuctuc += (m.costs as { tuctuc?: number }).tuctuc || 0
     yearly.costs.depreciation += (m.costs as { depreciation?: number }).depreciation || 0
