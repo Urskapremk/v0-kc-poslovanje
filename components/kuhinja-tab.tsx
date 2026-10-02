@@ -40,6 +40,7 @@ const DAY_NAMES_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam']
 // view-only table and the navy editing table share one lookup.
 function shiftClasses(shift: KitchenShift, pill: SchedulePill, offText: string): string {
   switch (shift) {
+    case 'EARLY':
     case 'MORNING':
       return pill.gold
     case 'MIDDAY':
@@ -54,12 +55,14 @@ function shiftClasses(shift: KitchenShift, pill: SchedulePill, offText: string):
 
 type WorkShift = Exclude<KitchenShift, 'OFF'>
 const SHIFT_SWATCH_KEY: Record<WorkShift, 'gold' | 'sage' | 'blue'> = {
+  EARLY: 'gold',
   MORNING: 'gold',
   MIDDAY: 'sage',
   AFTERNOON: 'blue',
   EVENING: 'blue',
 }
 const PRINT_CLASS: Record<KitchenShift, string> = {
+  EARLY: 'kc-morning',
   MORNING: 'kc-morning',
   MIDDAY: 'kc-midday',
   AFTERNOON: 'kc-afternoon',
@@ -67,6 +70,7 @@ const PRINT_CLASS: Record<KitchenShift, string> = {
   OFF: 'kc-off',
 }
 const PRINT_SWATCH: Record<WorkShift, { background: string; border: string }> = {
+  EARLY: { background: '#f3e7d8', border: '1px solid #785224' },
   MORNING: { background: '#f3e7d8', border: '1px solid #785224' },
   MIDDAY: { background: '#e3efe4', border: '1px solid #4f7a54' },
   AFTERNOON: { background: '#e5f3f8', border: '1px solid #28708d' },
@@ -310,7 +314,7 @@ export default function KuhinjaTab({
       <div className="no-print flex items-start gap-2 rounded-xl border border-[#c59b5b]/30 bg-[#c59b5b]/10 px-3 py-2 text-xs text-[#c59b5b]">
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          Razpored se samodejno izračuna po pravilih: od 3. oktobra 2026 dopoldan 06-12 (Nazirah, Noli), opoldan 10-16 (Anifa), večer 16-22 (Angelina, Vali); ko je Anifa prosta, opoldan dela Vali. 6 dni delo / 1 prost.
+          Razpored se samodejno izračuna po pravilih: od 3. oktobra 2026 dopoldan 06-10 (Nazirah, Noli), opoldan 10-16 (Anifa), večer 16-22 (Angelina, Vali); ko je Anifa prosta, opoldan dela Vali. 6 dni delo / 1 prost.
           Nihče ne dela dopoldan in popoldan isti dan; ob prosti delavki se ostale prerazporedijo, da popoldan ostane vsaj ena kuharica.
           {period === 'B' && ' Od avgusta 2026 je Angelina na porodniškem dopustu in ni v razporedu.'}
         </span>
@@ -503,7 +507,7 @@ export default function KuhinjaTab({
               const sunday = isSunday(year, month, dayNum)
               const isToday = todayDay === dayNum
               // Razvrsti aktivno osebje po smenah tega dne.
-              const groups: Record<KitchenShift, string[]> = { MORNING: [], MIDDAY: [], AFTERNOON: [], EVENING: [], OFF: [] }
+              const groups: Record<KitchenShift, string[]> = { EARLY: [], MORNING: [], MIDDAY: [], AFTERNOON: [], EVENING: [], OFF: [] }
               for (const p of activeStaff) {
                 const shift = (day.assignments[p] || 'OFF') as KitchenShift
                 groups[shift].push(p)

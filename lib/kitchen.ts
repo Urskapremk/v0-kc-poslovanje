@@ -25,12 +25,14 @@ export type KitchenStaff = (typeof KITCHEN_STAFF)[number]
 // From 3 October 2026 the split afternoon is replaced by two shifts:
 //  MIDDAY  = 10:00–16:00 (6 h)
 //  EVENING = 16:00–22:00 (6 h)
-export type KitchenShift = 'MORNING' | 'MIDDAY' | 'AFTERNOON' | 'EVENING' | 'OFF'
+//  EARLY   = 06:00–10:00 (4 h) — morning shift of the 3-shift pattern
+export type KitchenShift = 'EARLY' | 'MORNING' | 'MIDDAY' | 'AFTERNOON' | 'EVENING' | 'OFF'
 
 /** Display order of working shifts (legend, by-shift view). */
-export const SHIFT_ORDER: Exclude<KitchenShift, 'OFF'>[] = ['MORNING', 'MIDDAY', 'AFTERNOON', 'EVENING']
+export const SHIFT_ORDER: Exclude<KitchenShift, 'OFF'>[] = ['EARLY', 'MORNING', 'MIDDAY', 'AFTERNOON', 'EVENING']
 
 export const SHIFT_HOURS: Record<KitchenShift, number> = {
+  EARLY: 4,
   MORNING: 6,
   MIDDAY: 6,
   AFTERNOON: 7,
@@ -40,6 +42,7 @@ export const SHIFT_HOURS: Record<KitchenShift, number> = {
 
 // Slovenian labels (on-screen, for the manager)
 export const SHIFT_LABELS: Record<KitchenShift, string> = {
+  EARLY: 'Dopoldan 06-10',
   MORNING: 'Dopoldan 06-12',
   MIDDAY: 'Opoldan 10-16',
   AFTERNOON: 'Popoldan 12-15 / 17-21',
@@ -49,6 +52,7 @@ export const SHIFT_LABELS: Record<KitchenShift, string> = {
 
 // French labels (printed sheets — kitchen staff read French)
 export const SHIFT_LABELS_FR: Record<KitchenShift, string> = {
+  EARLY: 'Matin 6h-10h',
   MORNING: 'Matin 6h-12h',
   MIDDAY: 'Midi 10h-16h',
   AFTERNOON: 'Après-midi 12h-15h / 17h-21h',
@@ -302,8 +306,8 @@ function applyThreeShiftPattern(a: Record<string, KitchenShift>, offset: number)
   const set = (p: string, s: KitchenShift) => {
     a[p] = isOff(p) ? 'OFF' : s
   }
-  set('Nazirah', 'MORNING')
-  set(NOLI, 'MORNING')
+  set('Nazirah', 'EARLY')
+  set(NOLI, 'EARLY')
   set('Anifa', 'MIDDAY')
   set('Angelina', 'EVENING')
   set(VALI, isOff('Anifa') ? 'MIDDAY' : 'EVENING')
