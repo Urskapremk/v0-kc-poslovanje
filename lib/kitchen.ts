@@ -22,25 +22,37 @@ export type KitchenStaff = (typeof KITCHEN_STAFF)[number]
 // Two daily shifts + OFF.
 //  MORNING   = 06:00–12:00 (6 h)
 //  AFTERNOON = split 12:00–15:00 + 17:00–21:00 (3 + 4 = 7 h)
-export type KitchenShift = 'MORNING' | 'AFTERNOON' | 'OFF'
+// From 3 October 2026 the split afternoon is replaced by two shifts:
+//  MIDDAY  = 10:00–16:00 (6 h)
+//  EVENING = 16:00–22:00 (6 h)
+export type KitchenShift = 'MORNING' | 'MIDDAY' | 'AFTERNOON' | 'EVENING' | 'OFF'
+
+/** Display order of working shifts (legend, by-shift view). */
+export const SHIFT_ORDER: Exclude<KitchenShift, 'OFF'>[] = ['MORNING', 'MIDDAY', 'AFTERNOON', 'EVENING']
 
 export const SHIFT_HOURS: Record<KitchenShift, number> = {
   MORNING: 6,
+  MIDDAY: 6,
   AFTERNOON: 7,
+  EVENING: 6,
   OFF: 0,
 }
 
 // Slovenian labels (on-screen, for the manager)
 export const SHIFT_LABELS: Record<KitchenShift, string> = {
   MORNING: 'Dopoldan 06-12',
+  MIDDAY: 'Opoldan 10-16',
   AFTERNOON: 'Popoldan 12-15 / 17-21',
+  EVENING: 'Večer 16-22',
   OFF: 'Prosto',
 }
 
 // French labels (printed sheets — kitchen staff read French)
 export const SHIFT_LABELS_FR: Record<KitchenShift, string> = {
   MORNING: 'Matin 6h-12h',
+  MIDDAY: 'Midi 10h-16h',
   AFTERNOON: 'Après-midi 12h-15h / 17h-21h',
+  EVENING: 'Soir 16h-22h',
   OFF: 'Repos',
 }
 
@@ -130,8 +142,12 @@ export function getKitchenCore(year: number, month: number): KitchenStaff[] {
   if (period === 'B') return ['Anifa', 'Selvera', 'Nazirah', 'Francia']
   // Period C: Selvera left; Verginie (chef, morning) + Justin (assist, afternoon)
   // joined; Angelina back (always afternoon, split shift).
+  // From November 2026 the three-shift pattern has no place for Verginie.
+  if (year > 2026 || (year === 2026 && month >= 11)) {
+    return ['Anifa', 'Angelina', 'Nazirah']
+  }
   // From October 2026 Francia and Justin are no longer in the kitchen.
-  if (year > 2026 || (year === 2026 && month >= 10)) {
+  if (year === 2026 && month === 10) {
     return ['Anifa', 'Verginie', 'Angelina', 'Nazirah']
   }
   return ['Anifa', 'Verginie', 'Angelina', 'Nazirah', 'Francia', 'Justin']
@@ -265,6 +281,34 @@ function buildDayAssignments(
   return a
 }
 
+// From 3 October 2026: morning Nazirah + Noli, midday Anifa, evening Angelina + Vali.
+// When Anifa is off, Vali covers midday and Angelina works the evening alone.
+// Each person keeps a 6-work / 1-off rotation (own offset in the 7-day cycle;
+// offsets 1 and 6 nobody is off).
+const NEW_PATTERN_START = '2026-10-03'
+const NOLI = 'Noeline Anjara'
+const VALI = 'Valencia Soaline'
+const THREE_SHIFT_OFF_OFFSET: Record<string, number> = {
+  Anifa: 0,
+  Angelina: 2,
+  Nazirah: 3,
+  [NOLI]: 4,
+  [VALI]: 5,
+}
+
+function applyThreeShiftPattern(a: Record<string, KitchenShift>, offset: number) {
+  for (const p of Object.keys(a)) a[p] = 'OFF'
+  const isOff = (p: string) => THREE_SHIFT_OFF_OFFSET[p] === offset
+  const set = (p: string, s: KitchenShift) => {
+    a[p] = isOff(p) ? 'OFF' : s
+  }
+  set('Nazirah', 'MORNING')
+  set(NOLI, 'MORNING')
+  set('Anifa', 'MIDDAY')
+  set('Angelina', 'EVENING')
+  set(VALI, isOff('Anifa') ? 'MIDDAY' : 'EVENING')
+}
+
 /**
  * Generates the kitchen schedule for a given month.
  *
@@ -320,6 +364,7 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
     }
 
     const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    if (date >= NEW_PATTERN_START) applyThreeShiftPattern(assignments, offset)
     result.push({ date, assignments })
   }
 
