@@ -287,6 +287,7 @@ function buildDayAssignments(
 
 // From 3 October 2026: morning Nazirah + Noli, midday Anifa, evening Angelina + Vali.
 // When Anifa is off, Vali covers midday and Angelina works the evening alone.
+// When Angelina is off, Anifa works the evening and Vali covers midday.
 // Each person keeps a 6-work / 1-off rotation (own offset in the 7-day cycle;
 // offsets 1 and 6 nobody is off).
 const NEW_PATTERN_START = '2026-10-03'
@@ -308,9 +309,9 @@ function applyThreeShiftPattern(a: Record<string, KitchenShift>, offset: number)
   }
   set('Nazirah', 'EARLY')
   set(NOLI, 'EARLY')
-  set('Anifa', 'MIDDAY')
+  set('Anifa', isOff('Angelina') ? 'EVENING' : 'MIDDAY')
   set('Angelina', 'EVENING')
-  set(VALI, isOff('Anifa') ? 'MIDDAY' : 'EVENING')
+  set(VALI, isOff('Anifa') || isOff('Angelina') ? 'MIDDAY' : 'EVENING')
 }
 
 /**
