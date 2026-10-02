@@ -1206,7 +1206,13 @@ function StatistikaContent() {
             </div>
           </details>
           <button
-            onClick={() => setKadriView('razpored')}
+            onClick={() => {
+              // Razpored vedno odpri na tekočem mesecu (plače ostanejo na prejšnjem).
+              const now = new Date()
+              setYear(now.getFullYear())
+              setMonth(now.getMonth() + 1)
+              setKadriView('razpored')
+            }}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
               kadriView === 'razpored'
                 ? 'bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30'
