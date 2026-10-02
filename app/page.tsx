@@ -2573,7 +2573,8 @@ async function handleCreateReservation() {
             const hasArrivalTransfer = src.transfers?.arrival?.route;
             const hasDepartureTransfer = src.transfers?.departure?.route;
             const noTransferNeeded = (src as { noTransferNeeded?: boolean }).noTransferNeeded;
-            const hasHerman = src.transfers?.arrival?.hermanRouteId || src.transfers?.departure?.hermanRouteId;
+            const arrivalHasCar = !!src.transfers?.arrival?.hermanRouteId;
+            const hasHerman = src.transfers?.departure?.hermanRouteId || (arrivalHasCar && !src.transfers?.arrival?.route);
             const hasExcursion = (src.excursions?.length || 0) > 0;
             // Same rule as the boat and the arrival hour: a booked excursion is quiet
             // reference, today's excursion is the job in front of reception. The column
@@ -2622,7 +2623,19 @@ async function handleCreateReservation() {
             const left =
               showArrival && hasArrivalTransfer ? (
                 <span className={`${legClass} text-[#4f7a54]`} title="Prevoz ob prihodu je urejen">
-                  <Ship className={`h-3.5 w-3.5${sail(arrivingToday)}`} />
+                  {arrivalHasCar && (
+                    <>
+                      <span className="flex items-center gap-1 rounded-full bg-[#2b2622]/[0.06] px-1.5 py-0.5 text-[#2b2622]/70" title="Avto (taksi) do porta">
+                        <Car className="h-4 w-4" />
+                        Avto
+                      </span>
+                      <span aria-hidden className="text-[#2b2622]/35">→</span>
+                    </>
+                  )}
+                  <span className="flex items-center gap-1 rounded-full bg-[#4f7a54]/10 px-1.5 py-0.5" title="Čoln">
+                    <Ship className={`h-4 w-4${sail(arrivingToday)}`} />
+                    Čoln
+                  </span>
                   Prihod
                 </span>
               ) : showArrival && ownArrival ? (
