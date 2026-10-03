@@ -298,6 +298,7 @@ export default function RacunPage() {
   //  - 'noStay'    → WITHOUT accommodation (only services / bar / extras)
   //  - 'stayMeals' → accommodation + food + transfers (no bar drinks, excursions, wellness…)
   const [printMode, setPrintMode] = useState<'full' | 'noStay' | 'stayMeals'>('full')
+  const [showPayments, setShowPayments] = useState(true)
   const excludeAccommodation = printMode === 'noStay'
   const onlyStayMeals = printMode === 'stayMeals'
   // Discount form state
@@ -1159,6 +1160,7 @@ export default function RacunPage() {
             </div>
 
             {/* Payments */}
+            {showPayments && (
             <div className="inv-pay-box mb-8 p-5 rounded-2xl border">
               <h3 className="inv-green font-semibold mb-3 text-sm uppercase tracking-wider">{t.payments}</h3>
               {/* Only the combined total paid is shown here (prepayment + separately-paid
@@ -1175,10 +1177,11 @@ export default function RacunPage() {
                 </div>
               )}
             </div>
+            )}
 
             {/* Payment specification: when & how each amount was paid.
                 Every row here is part of Total paid (prepayment + separately-paid services). */}
-            {paymentSpec.length > 0 && (
+            {showPayments && paymentSpec.length > 0 && (
               <div className="inv-pay-box mb-8 p-5 rounded-2xl border">
                 <h3 className="inv-green font-semibold mb-3 text-sm uppercase tracking-wider">{t.paymentSpec}</h3>
                 {paymentSpec.map((r, idx) => (
@@ -1237,6 +1240,14 @@ export default function RacunPage() {
                 Bivanje + prehrana + transport
               </button>
             </div>
+            <button
+              onClick={() => setShowPayments(v => !v)}
+              aria-pressed={showPayments}
+              className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${showPayments ? 'border-[#8fae92]/50 bg-[#8fae92]/15 text-[#8fae92]' : 'border-white/15 bg-white/5 text-white/50 hover:text-white'}`}
+              title="Prikaži ali skrij plačila in specifikacijo plačil na računu"
+            >
+              {showPayments ? 'Plačila: vklop' : 'Plačila: izklop'}
+            </button>
             <button
               onClick={handleDownloadPdf}
               disabled={generatingPdf}
