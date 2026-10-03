@@ -5,6 +5,7 @@ import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { get } from '@vercel/blob'
 import { parseCategories, type CategoryAllocation } from '@/lib/stroski-categories'
+import { splitReceiptTranslation, supplierFromTranslation } from '@/lib/receipt-split'
 import { readReceiptFromImages } from '@/lib/receipt-ocr'
 import { getExchangeRate } from './komba'
 import { addCashExpense, deleteCashExpense, getBankTransactions } from './banka'
@@ -138,9 +139,60 @@ export async function addStroskiReceiptPages(id: string, newPages: ReceiptPage[]
 }
 
 // Shrani prepis + prevod vsebine računa v slovenščino.
+// Če kategorije še niso vpisane, jih pravilo razporedi: hrana v kuhinjo,
+// pijača in papirnati serveti v bar, pripomočki za sobe v nočitve.
+// Ročno razporejenih računov ne prepiše.
 export async function saveStroskiTranslation(id: string, translation: string) {
   await db.execute(sql`UPDATE stroski_receipts SET translation = ${translation} WHERE id = ${id}`)
+  await fillReceiptSplitFromTranslation(id, translation)
   revalidatePath('/statistika')
+}
+
+async function fillReceiptSplitFromTranslation(id: string, translation: string) {
+  const text = translation.trim()
+  if (!text) return
+  const result = await db.execute(
+    sql`SELECT description, currency, "amountOriginal", "amountEur", categories FROM stroski_receipts WHERE id = ${id} LIMIT 1`
+  )
+  const row = result.rows[0]
+  if (!row) return
+  if (parseCategories(row.categories).length > 0) return
+
+  const rate = await getExchangeRate()
+  const safeRate = rate > 0 ? rate : 4800
+  const currency: Currency = row.currency === 'Ar' ? 'Ar' : 'EUR'
+  const amountOriginal = Number(row.amountOriginal ?? 0)
+  const amountEur = Number(row.amountEur ?? 0)
+  const bookedAr = currency === 'Ar' && amountOriginal > 0
+    ? Math.round(amountOriginal)
+    : currency === 'EUR' && amountEur > 0
+      ? Math.round(amountEur * safeRate)
+      : 0
+
+  const categories = splitReceiptTranslation(text, safeRate, bookedAr > 0 ? bookedAr : null, amountEur > 0 ? amountEur : null)
+  if (categories.length === 0) return
+
+  const currentDesc = ((row.description as string | null) ?? '').trim()
+  const description = currentDesc || supplierFromTranslation(text) || ''
+
+  if (bookedAr > 0) {
+    await db.execute(
+      sql`UPDATE stroski_receipts SET categories = ${JSON.stringify(categories)}::jsonb, description = ${description} WHERE id = ${id}`
+    )
+    return
+  }
+
+  const totalAr = categories.reduce((sum, item) => sum + (item.amountOriginal ?? 0), 0)
+  const totalEur = Math.round(categories.reduce((sum, item) => sum + item.amountEur, 0) * 100) / 100
+  await db.execute(
+    sql`UPDATE stroski_receipts
+        SET categories = ${JSON.stringify(categories)}::jsonb,
+            description = ${description},
+            currency = 'Ar',
+            "amountOriginal" = ${totalAr},
+            "amountEur" = ${totalEur}
+        WHERE id = ${id}`
+  )
 }
 
 // Posodobi podatke arhiviranega računa (datum, opis, znesek).
