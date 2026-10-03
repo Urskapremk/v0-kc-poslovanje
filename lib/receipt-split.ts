@@ -35,7 +35,7 @@ const KITCHEN_WORDS = [
   'mleko', 'krema', 'sladoled', 'moka', 'moulinet', 'meso', 'riba', 'kruh', 'riž', 'riz',
   'jajc', 'sladkor', 'sol', 'piščan', 'piscan', 'čips', 'cips', 'kakec', 'nabodal',
   'jastog', 'langoust', 'langust', 'homar', 'sigal', 'cigal', 'kozic', 'rakov',
-  'baget', 'štruc', 'struc', 'roglj', 'rozin', 'svinj', 'kotlet', 'socolait', 'pak choi',
+  'baget', 'štruc', 'struc', 'roglj', 'rozin', 'svinj', 'kotlet', 'ramstek', 'steak', 'socolait', 'pak choi',
   'karamel', 'toffee', 'sardin', 'zamrzoval', 'pripravek', 'kečap', 'kecap',
   'čokolad', 'cokolad', 'chocolat', 'zelenjav', 'sadje', 'začimb', 'zacimb',
   'paradižnik', 'paradiznik', 'čebul', 'cebul', 'krompir', 'solat', 'korenj',
@@ -121,6 +121,12 @@ function isTotalLine(line: string): boolean {
 
 function isCancelled(line: string): boolean {
   return /preklic|annul|cancelled|storno/i.test(fold(line))
+}
+
+// Na blagajni Shampion sta SODIFROM in SODIANO vmesna seštevka, ne izdelka.
+function isAccountLine(name: string): boolean {
+  const token = fold(name).replace(/[^a-z0-9]/g, '')
+  return token === 'sodifrom' || token === 'sodiano'
 }
 
 export function supplierFromTranslation(text: string): string | null {
@@ -315,7 +321,7 @@ function looseReceiptLines(text: string): { line: string; amount: number; catego
   for (const block of blocks) {
     const amount = amountFromBlock(block.lines)
     const name = productName(block.name)
-    if (!name || !amount || isCancelled(name)) continue
+    if (!name || !amount || isCancelled(name) || isAccountLine(name)) continue
     rows.push({ line: name, amount, category: classifyReceiptLine(name) })
   }
   return rows.length > 0 ? rows : null
