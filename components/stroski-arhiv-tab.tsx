@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import useSWR, { mutate } from 'swr'
-import { Receipt, Plus, Trash2, ExternalLink, ChevronDown, ChevronRight, ChevronLeft, FileText, Pencil, Check, X, Layers, Languages, Loader2, ImagePlus, ScanLine, Merge, Mail, Building2, Send, CreditCard, Smartphone, Banknote, Printer, Maximize2, Scissors } from 'lucide-react'
+import { Receipt, Plus, Trash2, ExternalLink, ChevronDown, ChevronRight, ChevronLeft, FileText, Pencil, Check, X, Layers, Languages, Loader2, ImagePlus, ScanLine, Merge, Mail, Building2, Send, CreditCard, Smartphone, Banknote, Printer, Maximize2, Scissors, Search } from 'lucide-react'
 import {
   getStroskiReceipts,
   deleteStroskiReceipt,
@@ -86,6 +86,62 @@ function formatDate(d: string | null) {
   return new Intl.DateTimeFormat('sl-SI', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(d))
 }
 
+function foldText(value: string): string {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+function queryAmount(raw: string): number | null {
+  const compact = raw.trim().replace(/\s/g, '')
+  if (!/^[\d.,]+$/.test(compact)) return null
+  let normalized = compact
+  if (compact.includes(',') && compact.includes('.')) {
+    normalized = compact.lastIndexOf(',') > compact.lastIndexOf('.')
+      ? compact.replace(/\./g, '').replace(',', '.')
+      : compact.replace(/,/g, '')
+  } else if (compact.includes(',')) {
+    normalized = compact.replace(',', '.')
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(compact)) {
+    normalized = compact.replace(/\./g, '')
+  }
+  const value = Number(normalized)
+  return Number.isFinite(value) ? value : null
+}
+
+function receiptMatchesQuery(r: StroskiReceipt, raw: string): boolean {
+  const query = raw.trim()
+  if (!query) return true
+  const folded = foldText(query)
+  if (foldText(r.description || '').includes(folded)) return true
+  if (foldText(r.translation || '').includes(folded)) return true
+
+  const date = (r.date || '').slice(0, 10)
+  const [year, month, day] = date.split('-')
+  if (year && month && day) {
+    const forms = [
+      date,
+      `${day}.${month}.${year}`,
+      `${Number(day)}.${Number(month)}.${year}`,
+      `${day}.${month}`,
+      `${Number(day)}.${Number(month)}`,
+      `${day}/${month}/${year}`,
+      `${day}/${month}`,
+    ]
+    const needle = query.replace(/\s/g, '')
+    if (forms.some((form) => form.includes(needle))) return true
+  }
+
+  const amount = queryAmount(query)
+  if (amount != null) {
+    const ariary = Math.round(Number(r.amountOriginal) || 0)
+    const euros = Number(r.amountEur) || 0
+    if (Math.abs(ariary - amount) < 1) return true
+    if (Math.abs(euros - amount) < 0.02) return true
+    const digits = query.replace(/\D/g, '')
+    if (digits.length >= 3 && String(ariary).includes(digits)) return true
+  }
+  return false
+}
+
 function isImage(pathname: string) {
   return /\.(jpe?g|png|gif|webp|heic|heif)$/i.test(pathname)
 }
@@ -157,6 +213,7 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
   const [merging, setMerging] = useState(false)
   const [splittingId, setSplittingId] = useState<string | null>(null)
   const [allocatingId, setAllocatingId] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
   const [openTranslations, setOpenTranslations] = useState<Set<string>>(new Set())
 
   // Pošiljanje v računovodstvo
@@ -593,8 +650,10 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
 
   const all = receipts || []
   const yearTotal = all.reduce((s, r) => s + Number(r.amountEur), 0)
+  const queryActive = query.trim().length > 0
+  const visible = queryActive ? all.filter((r) => receiptMatchesQuery(r, query)) : all
 
-  const byMonth = all.reduce<Record<number, StroskiReceipt[]>>((acc, r) => {
+  const byMonth = visible.reduce<Record<number, StroskiReceipt[]>>((acc, r) => {
     (acc[r.month] ||= []).push(r)
     return acc
   }, {})
@@ -766,6 +825,32 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
         </div>
       </div>
 
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Išči po imenu, znesku ali datumu"
+          className="w-full rounded-xl border border-white/10 bg-white/5 py-2.5 pl-10 pr-10 text-sm text-white placeholder:text-white/30 focus:border-[#c59b5b]/40 focus:outline-none"
+        />
+        {queryActive && (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-white/40 hover:bg-white/10 hover:text-white"
+            title="Počisti"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </div>
+      {queryActive && (
+        <p className="text-xs text-white/40">
+          {visible.length === 0 ? 'Nič ne najdem.' : `Najdeno: ${visible.length}`}
+        </p>
+      )}
+
       {/* Vrstica za združevanje (ko je aktiven izbor) */}
       {selectMode && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#7fa8b8]/30 bg-[#7fa8b8]/10 px-4 py-3">
@@ -824,7 +909,7 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
       {/* Seznam po mesecih */}
       {isLoading ? (
         <p className="text-sm text-white/40">Nalagam...</p>
-      ) : monthsWithData.length === 0 ? (
+      ) : all.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.02] px-6 py-12 text-center">
           <Receipt className="mx-auto h-8 w-8 text-white/20" />
           <p className="mt-3 text-sm text-white/50">Za leto {year} še ni arhiviranih računov.</p>
@@ -841,7 +926,7 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
           {monthsWithData.map((m) => {
             const items = byMonth[m]
             const monthTotal = items.reduce((s, r) => s + Number(r.amountEur), 0)
-            const open = openMonths[m]
+            const open = queryActive || openMonths[m]
             return (
               <div key={m} className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.02]">
                 <button
