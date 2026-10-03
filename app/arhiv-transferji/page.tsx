@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react'
 import useSWR from 'swr'
 import Link from 'next/link'
-import { ArrowLeft, Search, LogIn, LogOut, Ship, Car, Users, Pencil, ChevronDown, X, Plus } from 'lucide-react'
+import { ArrowLeft, Search, LogIn, LogOut, Ship, Car, Users, Pencil, ChevronDown } from 'lucide-react'
 import { getArchivedTransfers } from '@/app/actions/komba'
 import { paySupplier, unpaySupplier, type SupplierPayMethod, type SupplierPayCompany } from '@/app/actions/supplier-payment'
 import { bungalowDisplayName } from '@/lib/bungalow'
@@ -136,119 +136,6 @@ function SupplierPayPanel({
   )
 }
 
-// Ročno gotovinsko doplačilo (voznik čolna / nosači / tuc tuc). Znesek se VPIŠE (ni iz cenika,
-// ker je vsakič drugačen). Vedno gotovina iz blagajne Komba Cabana Tourism. Isti mehanizem
-// (paySupplier + supplier_payments) in refKey kot v pending kartici na domači strani.
-function ExtraCashPayPanel({
-  refKey, supplierKey, fieldLabel, descLabel, paid, onDone,
-}: {
-  refKey: string
-  supplierKey: string
-  fieldLabel: string
-  descLabel: string
-  paid: PaidInfo
-  onDone: () => void
-}) {
-  const accent = '#8f6d3a'
-  const [open, setOpen] = useState(false)
-  const [amount, setAmount] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
-  const [saving, setSaving] = useState(false)
-
-  const amt = parseInt((amount || '').replace(/[^\d]/g, ''), 10) || 0
-
-  const save = async () => {
-    setSaving(true)
-    await paySupplier({ refKey, supplier: supplierKey, method: 'cash', company: 'tourism', date, amountAr: amt, label: `${fieldLabel} — ${descLabel}`.slice(0, 200) })
-    setSaving(false)
-    setOpen(false)
-    onDone()
-  }
-  const cancel = async () => {
-    if (!confirm('Prekličem plačilo? Odliv iz blagajne Tourism se bo izbrisal.')) return
-    setSaving(true)
-    await unpaySupplier({ refKey })
-    setSaving(false)
-    onDone()
-  }
-  const startEdit = () => {
-    setAmount(String(paid?.amountAr || ''))
-    if (paid?.paidAt) setDate(paid.paidAt.slice(0, 10))
-    setOpen(true)
-  }
-
-  if (open) {
-    return (
-      <div className="mt-2 rounded-lg border bg-[#efe8da] p-2.5" style={{ borderColor: `${accent}55` }}>
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-[11px] font-semibold" style={{ color: accent }}>{paid ? 'Uredi plačilo' : 'Plačilo'} · {fieldLabel}</p>
-          <button onClick={() => setOpen(false)} aria-label="Zapri"
-            className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-[#0f2e3a]/10 hover:text-[#2b2622]">
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-[#2b2622]/55">Znesek:</span>
-          <input inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} placeholder="0"
-            className="flex-1 rounded-lg border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-2 py-1.5 text-[11px] text-[#0f2e3a] focus:outline-none" />
-          <span className="text-[10px] text-[#2b2622]/55">Ar</span>
-        </div>
-        <div className="mt-2 flex items-center gap-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: `${accent}12`, border: `1px solid ${accent}33` }}>
-          <span className="text-[10px] font-medium" style={{ color: accent }}>Gotovina · blagajna Komba Cabana Tourism</span>
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[10px] text-[#2b2622]/55">Datum plačila:</span>
-          <input type="date" value={date} onChange={e => setDate(e.target.value)}
-            className="flex-1 rounded-lg border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none" />
-        </div>
-        <div className="mt-2 flex gap-2">
-          <button onClick={() => setOpen(false)}
-            className="rounded-lg border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-2 text-[11px] font-medium text-[#2b2622]/70 transition-colors hover:bg-[#0f2e3a]/10">
-            Prekliči
-          </button>
-          <button onClick={save} disabled={saving || amt <= 0}
-            className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ backgroundColor: `${accent}22`, border: `1px solid ${accent}66`, color: accent }}>
-            {saving ? 'Beležim…' : 'Zabeleži plačilo'}
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  if (paid) {
-    return (
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#4f7a54]/30 bg-[#4f7a54]/[0.08] px-2.5 py-2">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold text-[#4f7a54]">{fieldLabel} plačan ✓ · Gotovina (Tourism)</p>
-          <p className="text-[10px] text-[#2b2622]/55">
-            {paid.paidAt ? new Date(paid.paidAt).toLocaleDateString('sl-SI', { day: 'numeric', month: 'short', year: 'numeric' }) : ''} · {ar(paid.amountAr || 0)}
-          </p>
-        </div>
-        <div className="flex flex-shrink-0 gap-1.5">
-          <button onClick={startEdit} aria-label="Uredi plačilo" title="Uredi plačilo"
-            className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 p-1.5 text-[#2b2622]/70 transition-colors hover:bg-[#0f2e3a]/10">
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
-          <button onClick={cancel} disabled={saving}
-            className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70 transition-colors hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-600">
-            Prekliči
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <button onClick={() => { setAmount(''); setDate(new Date().toISOString().slice(0, 10)); setOpen(true) }}
-      className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border bg-[#efe8da] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.15em] transition-opacity hover:opacity-90"
-      style={{ borderColor: `${accent}55`, color: accent }}>
-      <Plus className="h-4 w-4" />
-      {fieldLabel}
-    </button>
-  )
-}
-
 export default function ArhivTransferjiPage() {
   const [search, setSearch] = useState('')
   const { data, isLoading, error, mutate } = useSWR('archived-transfers', fetcher, { revalidateOnFocus: false })
@@ -295,7 +182,7 @@ export default function ArhivTransferjiPage() {
                 <ArrowLeft className="h-5 w-5" />
               </Link>
               <div>
-                <h1 className="text-xl font-bold text-[#c59b5b]">Arhiv transferjev</h1>
+                <h1 className="text-xl font-bold text-[#c59b5b]">Arhiv prihodov / odhodov</h1>
                 <p className="text-sm text-white/40">Vsa opozorila o transferjih do danes · klikni za plačilo</p>
               </div>
             </div>
@@ -344,13 +231,6 @@ export default function ArhivTransferjiPage() {
                     const taxiName = t.taxiName || 'Herman'
                     const hermanLabel = `Prevoz ${taxiName} (avto) — ${shortBungalow} / ${t.guestName}${t.routeName ? ` · ${t.routeName}` : ''}`.slice(0, 200)
                     const hasPay = t.dilipCostAr > 0 || t.hermanCostAr > 0
-                    const paidParts = [
-                      { amt: t.dilipCostAr, paid: !!t.dilipPaid },
-                      { amt: t.hermanCostAr, paid: !!t.hermanPaid },
-                    ].filter(p => p.amt > 0)
-                    const isPaid = t.guestPaid || (paidParts.length > 0 && paidParts.every(p => p.paid))
-                    const isPast = !!today && date < today
-                    const isOrdered = t.executed || isPaid || isPast
                     return (
                       <details key={t.id} className="group rounded-xl border border-white/10 bg-white/[0.03] transition-colors open:bg-white/[0.05] hover:bg-white/[0.05]">
                         <summary className="flex cursor-pointer list-none items-start gap-2.5 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
@@ -375,22 +255,11 @@ export default function ArhivTransferjiPage() {
                               {t.flightNumber ? <span>Let {t.flightNumber}</span> : null}
                             </div>
                           </div>
-                          <div className="flex flex-shrink-0 flex-col items-end gap-1">
-                            {isOrdered ? (
-                              <span className="rounded-full bg-[#4f7a54]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#8fae92]">
-                                Naročeno
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-[#b0761a]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#e0a561]">
-                                Za naročiti
-                              </span>
-                            )}
-                            {isPaid && (
-                              <span className="-rotate-12 rounded-md border-2 border-[#8fae92]/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[#8fae92]/80">
-                                Plačano
-                              </span>
-                            )}
-                          </div>
+                          {t.executed && (
+                            <span className="flex-shrink-0 rounded-full bg-[#8fae92]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#8fae92]">
+                              Izveden
+                            </span>
+                          )}
                           <ChevronDown className="mt-0.5 h-4 w-4 flex-shrink-0 text-white/30 transition-transform group-open:rotate-180" />
                         </summary>
                         <div className="border-t border-white/5 px-3 pb-3 pt-2">
@@ -414,26 +283,6 @@ export default function ArhivTransferjiPage() {
                           ) : (
                             <p className="py-1 text-[11px] text-white/40">Za ta transfer ni zabeleženega stroška prevoznika.</p>
                           )}
-
-                          {/* Ročna gotovinska doplačila — velja za vse transferje */}
-                          <div className="mt-3 rounded-lg border border-dashed border-white/10 p-2.5">
-                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.15em] text-white/40">Dodatna gotovinska plačila</p>
-                            <ExtraCashPayPanel
-                              refKey={t.boatdriverRefKey} supplierKey="boatdriver" fieldLabel="Voznik čolna"
-                              descLabel={`${shortBungalow} / ${t.guestName}${t.routeName ? ` · ${t.routeName}` : ''}`}
-                              paid={t.boatdriverPaid} onDone={() => mutate()}
-                            />
-                            <ExtraCashPayPanel
-                              refKey={t.portersRefKey} supplierKey="porters" fieldLabel="Nosači"
-                              descLabel={`${shortBungalow} / ${t.guestName}${t.routeName ? ` · ${t.routeName}` : ''}`}
-                              paid={t.portersPaid} onDone={() => mutate()}
-                            />
-                            <ExtraCashPayPanel
-                              refKey={t.tuctucRefKey} supplierKey="tuctuc" fieldLabel="Tuc tuc"
-                              descLabel={`${shortBungalow} / ${t.guestName}${t.routeName ? ` · ${t.routeName}` : ''}`}
-                              paid={t.tuctucPaid} onDone={() => mutate()}
-                            />
-                          </div>
                         </div>
                       </details>
                     )

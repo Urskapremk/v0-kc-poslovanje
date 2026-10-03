@@ -4,7 +4,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import useSWR, { mutate } from "swr";
-  import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart } from "lucide-react";
+  import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone } from "lucide-react";
   import { bungalowDisplayName } from "@/lib/bungalow";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
@@ -40,12 +40,10 @@ import {
   searchReservations,
   getReminderChecks,
 } from "./actions/komba";
-import { closeAllDeliveryNotesForReservation, removeItemFromDeliveryNote, toggleItemFree, toggleItemMealPlanCovered, updateDeliveryNoteItemQuantity } from "./actions/delivery";
+import { closeAllDeliveryNotesForReservation, removeItemFromDeliveryNote, toggleItemFree, toggleItemMealPlanCovered } from "./actions/delivery";
 import { addExcursion, deleteExcursion } from "./actions/pricing";
 import { payFanja, unpayFanja } from "./actions/fanja-payment";
 import { paySupplier, unpaySupplier } from "./actions/supplier-payment";
-import { getNabavaTrips, addNabavaTrip, updateNabavaTrip, deleteNabavaTrip, setNabavaBoat, setNabavaBoatOrdered, setNabavaNoBoat } from "./actions/nabava";
-import { NabavaPurchasesSection } from "@/components/nabava-purchases-section";
 import { TaxesPanel } from "@/components/taxes-panel";
 import { GuestReplyAssistant } from "@/components/guest-reply-assistant";
   import { SentEmailsBox } from "@/components/sent-emails-box";
@@ -1365,24 +1363,6 @@ const PAYMENT_METHODS = [
   }
   
   // Payment section with multiple payments tracking
-// A paid meal plan (B / HB / FB) covers its meals. Bar staff enter meals as ordinary
-// bar lines, so they are matched to the plan by name.
-function isPaidPlanMeal(
-  res: { mealPlan?: string | null; mealPlanPaymentStatus?: string | null } | null | undefined,
-  name: string | null | undefined,
-): boolean {
-  if (!res || String(res.mealPlanPaymentStatus || '').toUpperCase() !== 'PAID') return false;
-  const plan = String(res.mealPlan || '').toUpperCase();
-  const n = String(name || '').toLowerCase();
-  const breakfast = /breakfast|zajtrk|petit[- ]d[ée]jeuner/.test(n);
-  const lunch = /lunch|kosilo|d[ée]jeuner/.test(n) && !breakfast;
-  const dinner = /dinner|ve[cč]erj|d[iî]ner/.test(n);
-  if (plan === 'FB') return breakfast || lunch || dinner;
-  if (plan === 'HB') return breakfast || dinner;
-  if (plan === 'B' || plan === 'BB') return breakfast;
-  return false;
-}
-
 function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange, separatePaidItems = [], onRemainingChange }: { 
   reservationId: string; totalAmount: string; currency: string; onPaymentChange?: () => void;
   // Reports the real remaining (TOTAL − everything paid) back to the parent so the
@@ -1603,8 +1583,6 @@ export default function KombaCabanaApp() {
   const [supPayCompany, setSupPayCompany] = React.useState<'tourism' | 'sarl'>('tourism');
   const [supPayDate, setSupPayDate] = React.useState(() => new Date().toISOString().slice(0, 10));
   const [supPaySaving, setSupPaySaving] = React.useState(false);
-  // Ročni zneski za dodatna gotovinska doplačila (voznik čolna / nosači / tuc tuc), keyirano po refKey.
-  const [extraAmt, setExtraAmt] = React.useState<Record<string, string>>({});
   // Schedules are always shown for the current month (view-only, no month picker).
   const scheduleNow = new Date();
   const scheduleYear = scheduleNow.getFullYear();
@@ -1644,17 +1622,6 @@ export default function KombaCabanaApp() {
   const [showPricingModal, setShowPricingModal] = React.useState(false);
   const [showPendingTransfers, setShowPendingTransfers] = React.useState(false);
   const [showPendingExcursions, setShowPendingExcursions] = React.useState(false);
-  const [showNabava, setShowNabava] = React.useState(false);
-  const [showNabavaKomba, setShowNabavaKomba] = React.useState(false);
-  const [nabavaKombaDate, setNabavaKombaDate] = React.useState(() => new Date().toISOString().slice(0, 10));
-  const [nabavaKombaNote, setNabavaKombaNote] = React.useState("");
-  const [nabavaKombaSaving, setNabavaKombaSaving] = React.useState(false);
-  const [nabavaDate, setNabavaDate] = React.useState(() => new Date().toISOString().slice(0, 10));
-  const [nabavaNote, setNabavaNote] = React.useState("");
-  const [nabavaSaving, setNabavaSaving] = React.useState(false);
-  const [nabavaEditId, setNabavaEditId] = React.useState<string | null>(null);
-  const [nabavaEditDate, setNabavaEditDate] = React.useState("");
-  const [nabavaEditNote, setNabavaEditNote] = React.useState("");
   const [showTaxes, setShowTaxes] = React.useState(false);
   // Header shortcut to the ring-a-phone panel, which otherwise sits at the very
   // bottom of the entry page.
@@ -1730,7 +1697,7 @@ export default function KombaCabanaApp() {
   const [emailingGuest, setEmailingGuest] = React.useState(false);
   const [emailingInvoice, setEmailingInvoice] = React.useState(false);
   const [loadingInvoicePreview, setLoadingInvoicePreview] = React.useState(false);
-  const [invoicePreview, setInvoicePreview] = React.useState<{ html: string; to: string; excludeAccommodation: boolean; onlyStayMeals: boolean; hidePayments?: boolean } | null>(null);
+  const [invoicePreview, setInvoicePreview] = React.useState<{ html: string; to: string; excludeAccommodation: boolean; onlyStayMeals: boolean } | null>(null);
   const [loadingCheckinPreview, setLoadingCheckinPreview] = React.useState(false);
   const [checkinPreview, setCheckinPreview] = React.useState<{ html: string; to: string; guests: { slot: 'first' | 'second' | 'third' | 'fourth'; label: string; expanded: boolean; data: Record<CheckinGuestField, string> }[] } | null>(null);
   const [savingCheckinNames, setSavingCheckinNames] = React.useState(false);
@@ -1756,9 +1723,6 @@ export default function KombaCabanaApp() {
   // Which delivery-note item's service date is being corrected, and the picked value.
   const [dateEditItem, setDateEditItem] = React.useState<string | null>(null);
   const [dateEditVal, setDateEditVal] = React.useState("");
-  // Which bar (delivery-note) item's quantity is being corrected, and the typed value.
-  const [qtyEditItem, setQtyEditItem] = React.useState<string | null>(null);
-  const [qtyEditVal, setQtyEditVal] = React.useState("");
   
   // PIN Protection State
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
@@ -2108,17 +2072,14 @@ export default function KombaCabanaApp() {
     }
     return 0;
   };
-  // Taxi routes for a given driver = routes that have a supplier price for that taxi.
-  // The "Relacija avta (taksi)" dropdown must follow the SELECTED taxi, otherwise
-  // Amad-only routes (e.g. "Exora Beach to Big Port Nosy Be") never show up.
-  const taxiRoutesFor = (taxiId: string) => dbRoutes.filter((r: { id: string }) =>
-    dbSupplierPricing.some((sp: { boatId: string; routeId: string }) => sp.boatId === taxiId && sp.routeId === r.id)
+  // Herman routes = routes that have a supplier price for taxi-herman.
+  const hermanRoutes = dbRoutes.filter((r: { id: string }) =>
+    dbSupplierPricing.some((sp: { boatId: string; routeId: string }) => sp.boatId === HERMAN_BOAT_ID && sp.routeId === r.id)
   );
-  // Taxi SELLING price (for the guest) in EUR, from the selling price list, for the
-  // selected driver (defaults to Herman for legacy legs with no taxi set).
-  const getHermanGuestPrice = (hermanRouteId?: string, pax = 1, taxiId: string = HERMAN_BOAT_ID): number => {
+  // Herman SELLING price (for the guest) in EUR, from the selling price list.
+  const getHermanGuestPrice = (hermanRouteId?: string, pax = 1): number => {
     if (!hermanRouteId) return 0;
-    return getTransferGuestPrice(hermanRouteId, taxiId, pax);
+    return getTransferGuestPrice(hermanRouteId, HERMAN_BOAT_ID, pax);
   };
 
   // Helper to get TOTAL guest price for excursion (price per person * pax)
@@ -2281,26 +2242,6 @@ async function handleCreateReservation() {
       showMsg("Sprememba ni uspela. Poskusite znova.");
     }
     setSaving(false);
-  }
-
-  // Correct a wrong quantity entered by bar staff on a delivery-note item.
-  async function handleSaveItemQty(itemId: string) {
-  const qty = Math.floor(Number(qtyEditVal));
-  if (!Number.isFinite(qty) || qty < 1) {
-  showMsg("Vnesite kolicino 1 ali vec (za 0 uporabite Odstrani).");
-  return;
-  }
-  setSaving(true);
-  try {
-  await updateDeliveryNoteItemQuantity(itemId, qty);
-  setQtyEditItem(null);
-  setQtyEditVal("");
-  refresh();
-  showMsg("Kolicina popravljena.");
-  } catch {
-  showMsg("Popravek kolicine ni uspel. Poskusite znova.");
-  }
-  setSaving(false);
   }
 
   // Correct a mistyped service date on a delivery-note order item.
@@ -2573,8 +2514,7 @@ async function handleCreateReservation() {
             const hasArrivalTransfer = src.transfers?.arrival?.route;
             const hasDepartureTransfer = src.transfers?.departure?.route;
             const noTransferNeeded = (src as { noTransferNeeded?: boolean }).noTransferNeeded;
-            const arrivalHasCar = !!src.transfers?.arrival?.hermanRouteId;
-            const hasHerman = src.transfers?.departure?.hermanRouteId || (arrivalHasCar && !src.transfers?.arrival?.route);
+            const hasHerman = src.transfers?.arrival?.hermanRouteId || src.transfers?.departure?.hermanRouteId;
             const hasExcursion = (src.excursions?.length || 0) > 0;
             // Same rule as the boat and the arrival hour: a booked excursion is quiet
             // reference, today's excursion is the job in front of reception. The column
@@ -2623,19 +2563,7 @@ async function handleCreateReservation() {
             const left =
               showArrival && hasArrivalTransfer ? (
                 <span className={`${legClass} text-[#4f7a54]`} title="Prevoz ob prihodu je urejen">
-                  {arrivalHasCar && (
-                    <>
-                      <span className="flex items-center gap-1 rounded-full bg-[#2b2622]/[0.06] px-1.5 py-0.5 text-[#2b2622]/70" title="Avto (taksi) do porta">
-                        <Car className="h-4 w-4" />
-                        Avto
-                      </span>
-                      <span aria-hidden className="text-[#2b2622]/35">→</span>
-                    </>
-                  )}
-                  <span className="flex items-center gap-1 rounded-full bg-[#4f7a54]/10 px-1.5 py-0.5" title="Čoln">
-                    <Ship className={`h-4 w-4${sail(arrivingToday)}`} />
-                    Čoln
-                  </span>
+                  <Ship className={`h-3.5 w-3.5${sail(arrivingToday)}`} />
                   Prihod
                 </span>
               ) : showArrival && ownArrival ? (
@@ -2709,11 +2637,7 @@ async function handleCreateReservation() {
               showArrival && hasArrivalTransfer
                 ? (dbRoutes.find((r: { id: string; name: string }) => r.id === src.transfers?.arrival?.route)?.name || '')
                 : '';
-            // Prefer the explicit "Pick up point (na vaucerju)" field when the receptionist
-            // filled it in; otherwise fall back to the route-name origin (before " - ").
-            const pickupPointField =
-              showArrival && hasArrivalTransfer ? (src.transfers?.arrival?.pickupPoint || '').trim() : '';
-            const pickup = pickupPointField || arrivalRouteName.split(' - ')[0]?.trim() || '';
+            const pickup = arrivalRouteName.split(' - ')[0]?.trim() || '';
             // Arrival time ("Ura prihoda" = flightTime), shown next to the pickup place.
             const pickupTime = showArrival && hasArrivalTransfer ? (src.transfers?.arrival?.flightTime || '') : '';
 
@@ -3017,14 +2941,9 @@ async function handleCreateReservation() {
                     // Bivanje (accommodation) is settled via totalAmount/amountPaid, not via the order item's
                     // paymentStatus — otherwise a prepaid/agency guest (Garcia) would wrongly show as owing.
                     const unpaidServicesAr = (now.orderItems || [])
-  .filter((item: { paymentStatus: string; category?: string; name?: string; isFree?: boolean }) =>
-    item.paymentStatus === 'UNPAID' && item.category !== 'Bivanje' &&
-    !((item.category === 'Prehrana' || item.category === 'Food') && !item.isFree && isPaidPlanMeal(now, item.name)))
-  .reduce((sum: number, item: { priceAr: number }) => sum + Number(item.priceAr || 0), 0);
-  const nowBarItems = (now as { barItems?: { productName?: string; priceAr?: number; quantity?: number; coveredByMealPlan?: boolean; isFree?: boolean }[] }).barItems;
-  const barAr = Array.isArray(nowBarItems)
-    ? nowBarItems.reduce((s, it) => s + ((it.coveredByMealPlan || it.isFree || isPaidPlanMeal(now, it.productName)) ? 0 : Number(it.priceAr || 0) * Number(it.quantity || 1)), 0)
-    : (now.deliveryNotesTotal || 0);
+                      .filter((item: { paymentStatus: string; category?: string }) => item.paymentStatus === 'UNPAID' && item.category !== 'Bivanje')
+                      .reduce((sum: number, item: { priceAr: number }) => sum + Number(item.priceAr || 0), 0);
+                    const barAr = now.deliveryNotesTotal || 0;
                     const accommodationEur = Number(now.totalAmount || 0);
                     const amountPaidEur = Number(now.amountPaid || 0);
                     const extrasEur = (unpaidServicesAr + barAr) / exchangeRate;
@@ -4884,13 +4803,13 @@ function GuestCard() {
                               value={reservation.transfers?.arrival?.hermanRouteId || ''}
                               onChange={async e => {
                                 const hermanRouteId = e.target.value;
-                                const price = getTransferGuestPrice(reservation.transfers.arrival.route, reservation.transfers?.arrival?.boatId || '', reservation.pax) + getHermanGuestPrice(hermanRouteId, reservation.pax, taxiIdOf(reservation.transfers?.arrival));
+                                const price = getTransferGuestPrice(reservation.transfers.arrival.route, reservation.transfers?.arrival?.boatId || '', reservation.pax) + getHermanGuestPrice(hermanRouteId, reservation.pax);
                                 await updateTransfer(reservation.id, "arrival", { hermanRouteId, guestPrice: price });
                                 refresh();
                               }}
                             >
                               <option value="">-- Brez avta (taksi) --</option>
-                              {taxiRoutesFor(taxiIdOf(reservation.transfers?.arrival)).map((r: { id: string; name: string }) => (
+                              {hermanRoutes.map((r: { id: string; name: string }) => (
                                 <option key={r.id} value={r.id}>{r.name} ({ar(getSupplierCostAr(taxiIdOf(reservation.transfers?.arrival), r.id))})</option>
                               ))}
                             </select>
@@ -5319,13 +5238,13 @@ function GuestCard() {
                               value={reservation.transfers?.departure?.hermanRouteId || ''}
                               onChange={async e => {
                                 const hermanRouteId = e.target.value;
-                                const price = getTransferGuestPrice(reservation.transfers.departure.route, reservation.transfers?.departure?.boatId || '', reservation.pax) + getHermanGuestPrice(hermanRouteId, reservation.pax, taxiIdOf(reservation.transfers?.departure));
+                                const price = getTransferGuestPrice(reservation.transfers.departure.route, reservation.transfers?.departure?.boatId || '', reservation.pax) + getHermanGuestPrice(hermanRouteId, reservation.pax);
                                 await updateTransfer(reservation.id, "departure", { hermanRouteId, guestPrice: price });
                                 refresh();
                               }}
                             >
                               <option value="">-- Brez avta (taksi) --</option>
-                              {taxiRoutesFor(taxiIdOf(reservation.transfers?.departure)).map((r: { id: string; name: string }) => (
+                              {hermanRoutes.map((r: { id: string; name: string }) => (
                                 <option key={r.id} value={r.id}>{r.name} ({ar(getSupplierCostAr(taxiIdOf(reservation.transfers?.departure), r.id))})</option>
                               ))}
                             </select>
@@ -6972,16 +6891,8 @@ function GuestCard() {
 
     if (!reservation) return <GlassCard><p className="text-white/40">Ni izbranega gosta.</p></GlassCard>;
 
-    const orderItems = (reservation.orderItems || []).map((item: any) =>
-      (item.category === 'Prehrana' || item.category === 'Food') && item.paymentStatus === 'UNPAID' && !item.isFree && isPaidPlanMeal(reservation, item.name)
-        ? { ...item, paymentStatus: 'PAID' }
-        : item
-    );
-    const barItems = (reservation.barItems || []).map((item: any) =>
-      !item.coveredByMealPlan && !item.isFree && isPaidPlanMeal(reservation, item.productName)
-        ? { ...item, coveredByMealPlan: true }
-        : item
-    );
+    const orderItems = reservation.orderItems || [];
+    const barItems = reservation.barItems || [];
     
     // Create items with service dates and executed status
     interface OrderItemWithDate extends OrderItem {
@@ -7464,15 +7375,6 @@ function GuestCard() {
                           }}
                         ><Calendar className="h-2.5 w-2.5" />Popravi datum</button>
                       )}
-                      {item.isBarItem && (
-                        <button
-                          className="inline-flex min-w-[96px] cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full border border-[#3f6b7d]/30 bg-[#3f6b7d]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#3f6b7d] transition-colors hover:bg-[#3f6b7d]/20"
-                          onClick={() => {
-                            setQtyEditItem(item.id);
-                            setQtyEditVal(String(item.qty ?? 1));
-                          }}
-                        ><Pencil className="h-2.5 w-2.5" />Popravi kolicino</button>
-                      )}
                       {!item.isTransfer && (
                         <button className="inline-flex min-w-[96px] cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full border border-[#4f7a54]/30 bg-[#4f7a54]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#4f7a54] transition-colors hover:bg-[#4f7a54]/20" onClick={() => handleToggleFree(item, true)}><Home className="h-2.5 w-2.5" />On House</button>
                       )}
@@ -7495,36 +7397,6 @@ function GuestCard() {
                        >Shrani</button>
                        <button
                          onClick={() => { setDateEditItem(null); setDateEditVal(""); }}
-                         className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#0f2e3a]/20 px-3 py-1 text-[11px] font-medium text-[#2b2622]/70 transition-colors hover:bg-[#0f2e3a]/5"
-                       >Preklici</button>
-                     </div>
-                   )}
-                   {qtyEditItem === item.id && (
-                     <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#0f2e3a]/10 pt-3">
-                       <label htmlFor={`qty-edit-${item.id}`} className="text-[11px] font-medium uppercase tracking-[0.1em] text-[#2b2622]/55">Pravilna kolicina:</label>
-                       <input
-                         id={`qty-edit-${item.id}`}
-                         type="number"
-                         min={1}
-                         step={1}
-                         inputMode="numeric"
-                         value={qtyEditVal}
-                         onChange={(e) => setQtyEditVal(e.target.value)}
-                         onKeyDown={(e) => {
-                           if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) handleSaveItemQty(item.id);
-                         }}
-                         className="w-20 rounded-lg border border-[#0f2e3a]/20 bg-white/60 px-2.5 py-1 text-[13px] tabular-nums text-[#0f2e3a] [color-scheme:light]"
-                       />
-                       <span className="text-[11px] tabular-nums text-[#2b2622]/55">
-                         {'× '}{ar(item.priceAr)}{' = '}{ar((Number(qtyEditVal) > 0 ? Math.floor(Number(qtyEditVal)) : 0) * Number(item.priceAr || 0))}
-                       </span>
-                       <button
-                         disabled={saving}
-                         onClick={() => handleSaveItemQty(item.id)}
-                         className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#4f7a54]/40 bg-[#4f7a54]/15 px-3 py-1 text-[11px] font-semibold text-[#4f7a54] transition-colors hover:bg-[#4f7a54]/25 disabled:opacity-50"
-                       >Shrani</button>
-                       <button
-                         onClick={() => { setQtyEditItem(null); setQtyEditVal(""); }}
                          className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#0f2e3a]/20 px-3 py-1 text-[11px] font-medium text-[#2b2622]/70 transition-colors hover:bg-[#0f2e3a]/5"
                        >Preklici</button>
                      </div>
@@ -8183,10 +8055,8 @@ function GuestCard() {
           items: [
             { id: "bentral", label: "Bentral", icon: Database, href: "/bentral" },
             { id: "arhiv", label: "Arhiv", icon: Archive, href: "/arhiv" },
-            { id: "arhiv-transferji", label: "Arhiv transferjev", icon: Ship, href: "/arhiv-transferji" },
+            { id: "arhiv-transferji", label: "Arhiv prihodov/odhodov", icon: Ship, href: "/arhiv-transferji" },
             { id: "arhiv-izleti", label: "Arhiv izletov", icon: Palmtree, href: "/arhiv-izleti" },
-            { id: "arhiv-nakupi-hv", label: "Arhiv nakupov HV", icon: ShoppingCart, href: "/arhiv-nakupi-hv" },
-            { id: "arhiv-nakupi-komba", label: "Arhiv nakupov Komba", icon: ShoppingCart, href: "/arhiv-nakupi-komba" },
             { id: "pretekle-rezervacije", label: "Vnos pretekle rezervacije", icon: FileText, href: "/pretekle-rezervacije" },
             { id: "ceniki", label: "Ceniki", icon: Settings, href: "/admin" },
             { id: "takse", label: "Takse", icon: Landmark, action: () => setShowTaxes(true) },
@@ -8263,18 +8133,6 @@ function GuestCard() {
   // Same key the reminder itself uses, so the landing page counts only what is
   // still open — ticking an item off there updates this summary too.
   const { data: reminderChecks } = useSWR(["reminder-checks", reminderDate], () => getReminderChecks(reminderDate), { refreshInterval: 0 });
-  const { data: nabavaTrips, mutate: mutateNabava } = useSWR("nabava-trips", getNabavaTrips, { refreshInterval: 0 });
-  const nabavaList = nabavaTrips || [];
-  // Same UTC+3 "today" boundary the purchase archive uses, so the current day's
-  // trips stay on the Nabava tiles and only move to the archive once the day ends.
-  const nabavaToday = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  // Back-dated trips entered today stay on the tile so purchases can still be added to them.
-  const nabavaCreatedDay = (createdAt: string) =>
-    createdAt ? new Date(new Date(createdAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10) : "";
-  const nabavaOnTile = (t: { date: string; createdAt: string }) =>
-    !t.date || t.date >= nabavaToday || nabavaCreatedDay(t.createdAt) === nabavaToday;
-  const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && nabavaOnTile(t));
-  const nabavaKombaList = nabavaList.filter((t) => t.site === "komba" && nabavaOnTile(t));
   const reminderDateLabel = (() => {
     const d = new Date(reminderDate + "T00:00:00");
     if (isNaN(d.getTime())) return reminderDate;
@@ -8362,7 +8220,7 @@ function GuestCard() {
         }
         return false;
       })
-      .map((r) => ({ id: `policeEmail::${r.id}`, text: `${bungalowDisplayName(r.bungalow)} · ${r.guestName} · ${r.pax} os  ���  pošlji email za prijavo/policijo (manjkajo podatki)` }));
+      .map((r) => ({ id: `policeEmail::${r.id}`, text: `${bungalowDisplayName(r.bungalow)} · ${r.guestName} · ${r.pax} os  →  pošlji email za prijavo/policijo (manjkajo podatki)` }));
     // Scheduled excursions that day — ONLY show those a guest is actually booked on
     const excursions = dbScheduledExcursions
       .filter((s) => String(s.date).slice(0, 10) === reminderDate && (s.guests || []).length > 0)
@@ -8522,242 +8380,6 @@ function GuestCard() {
     );
   };
 
-  // Ročno gotovinsko doplačilo na transferju (voznik čolna / nosači / tuc tuc). Znesek se VPIŠE
-  // (ni iz cenika, ker je vsakič drugačen). Uporabi isti mehanizem kot renderSupplierPay
-  // (supplier_payments + paySupplier), gotovina → odliv iz blagajne izbranega podjetja.
-  const renderExtraCashPay = (refKey: string, supplierKey: string, fieldLabel: string, descLabel: string) => {
-    const paid = supplierPayByKey[refKey];
-    const accent = '#8f6d3a';
-    if (supPayOpen === refKey) {
-      const amt = parseInt((extraAmt[refKey] || '').replace(/[^\d]/g, ''), 10) || 0;
-      return (
-        <div className="mt-2 rounded-lg p-2.5 space-y-2.5" style={{ border: `1px solid ${accent}40`, backgroundColor: `${accent}0d` }}>
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold" style={{ color: accent }}>{paid ? 'Uredi plačilo' : 'Plačilo'} · {fieldLabel}</p>
-            <button onClick={() => setSupPayOpen(null)} aria-label="Zapri"
-              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-[#0f2e3a]/10 hover:text-[#2b2622]">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[#2b2622]/55">Znesek:</span>
-            <input inputMode="numeric" value={extraAmt[refKey] || ''} onChange={e => setExtraAmt(p => ({ ...p, [refKey]: e.target.value }))} placeholder="0"
-              className="flex-1 rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-2 py-1.5 text-[11px] text-[#0f2e3a] focus:outline-none" />
-            <span className="text-[10px] text-[#2b2622]/55">Ar</span>
-          </div>
-          <div className="flex items-center gap-2 rounded-lg px-2.5 py-2" style={{ backgroundColor: `${accent}12`, border: `1px solid ${accent}33` }}>
-            <span className="text-[10px] font-medium" style={{ color: accent }}>Gotovina · blagajna Komba Cabana Tourism</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[#2b2622]/55">Datum plačila:</span>
-            <input type="date" value={supPayDate} onChange={e => setSupPayDate(e.target.value)}
-              className="flex-1 rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none" />
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setSupPayOpen(null)}
-              className="rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-3 py-2 text-[11px] font-medium text-[#2b2622]/70 hover:bg-[#0f2e3a]/10 transition-colors">
-              Prekliči
-            </button>
-            <button disabled={supPaySaving || amt <= 0}
-              onClick={async () => {
-                setSupPaySaving(true);
-                try {
-                  await paySupplier({
-                    refKey, supplier: supplierKey,
-                    method: 'cash',
-                    company: 'tourism',
-                    date: supPayDate,
-                    amountAr: amt,
-                    label: `${fieldLabel} — ${descLabel}`.slice(0, 200),
-                  });
-                  setSupPayOpen(null);
-                  refresh();
-                } finally {
-                  setSupPaySaving(false);
-                }
-              }}
-              className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              style={{ backgroundColor: `${accent}22`, border: `1px solid ${accent}66`, color: accent }}>
-              {supPaySaving ? 'Beležim…' : 'Zabeleži plačilo'}
-            </button>
-          </div>
-        </div>
-      );
-    }
-    if (paid) {
-      return (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#4f7a54]/30 bg-[#4f7a54]/[0.08] px-2.5 py-2">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-[#4f7a54]">
-              {fieldLabel} plačan ✓ · Gotovina (Tourism)
-            </p>
-            <p className="text-[10px] text-[#2b2622]/55">
-              {paid.paidAt ? new Date(paid.paidAt).toLocaleDateString('sl-SI', { day: 'numeric', month: 'short', year: 'numeric' }) : ''} · {ar(paid.amountAr || 0)}
-            </p>
-          </div>
-          <div className="flex shrink-0 gap-1.5">
-            <button onClick={() => {
-              setSupPayMethod('cash');
-              setSupPayCompany('tourism');
-              setSupPayDate((paid.paidAt || new Date().toISOString()).slice(0, 10));
-              setExtraAmt(p => ({ ...p, [refKey]: String(paid.amountAr || '') }));
-              setSupPayOpen(refKey);
-            }}
-              className="rounded-full border px-3 py-1.5 text-[10px] font-medium transition-colors" style={{ borderColor: `${accent}40`, backgroundColor: `${accent}1a`, color: accent }}>
-              Uredi
-            </button>
-            <button onClick={async () => {
-              if (!confirm('Prekličem plačilo? Odliv iz blagajne Tourism se bo izbrisal.')) return;
-              await unpaySupplier({ refKey });
-              refresh();
-            }}
-              className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70 hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40 transition-colors">
-              Prekliči
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return (
-      <button onClick={() => {
-        setSupPayMethod('cash');
-        setSupPayCompany('tourism');
-        setSupPayDate(new Date().toISOString().slice(0, 10));
-        setSupPayOpen(refKey);
-      }}
-        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border border-dashed px-4 py-2 transition-colors"
-        style={{ borderColor: `${accent}55`, color: accent }}>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.15em]">+ {fieldLabel}</span>
-      </button>
-    );
-  };
-
-  // Ročno plačilo pri nabavi (voznik čolna / nosači / tuc tuc) — znesek se VPIŠE, na voljo sta
-  // gotovina (blagajna Tourism/SARL) IN Orange Money. Uporablja isti mehanizem supplier_payments.
-  const renderNabavaPay = (refKey: string, supplierKey: string, fieldLabel: string, descLabel: string) => {
-    const paid = supplierPayByKey[refKey];
-    const accent = '#8f6d3a';
-    if (supPayOpen === refKey) {
-      const amt = parseInt((extraAmt[refKey] || '').replace(/[^\d]/g, ''), 10) || 0;
-      return (
-        <div className="mt-2 rounded-lg p-2.5 space-y-2.5" style={{ border: `1px solid ${accent}40`, backgroundColor: `${accent}0d` }}>
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-[11px] font-semibold" style={{ color: accent }}>{paid ? 'Uredi plačilo' : 'Plačilo'} · {fieldLabel}</p>
-            <button onClick={() => setSupPayOpen(null)} aria-label="Zapri"
-              className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-[#0f2e3a]/10 hover:text-[#2b2622]">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[#2b2622]/55">Znesek:</span>
-            <input inputMode="numeric" value={extraAmt[refKey] || ''} onChange={e => setExtraAmt(p => ({ ...p, [refKey]: e.target.value }))} placeholder="0"
-              className="flex-1 rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-2 py-1.5 text-[11px] text-[#0f2e3a] focus:outline-none" />
-            <span className="text-[10px] text-[#2b2622]/55">Ar</span>
-          </div>
-          <div className="flex gap-2">
-            {(['cash', 'orange'] as const).map(m => (
-              <button key={m} onClick={() => setSupPayMethod(m)}
-                className={`flex-1 rounded-lg px-3 py-2 text-[11px] font-medium border transition-colors ${supPayMethod === m ? '' : 'bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10'}`}
-                style={supPayMethod === m ? { backgroundColor: `${accent}22`, borderColor: `${accent}66`, color: accent } : undefined}>
-                {m === 'cash' ? 'Gotovina' : 'Orange Money'}
-              </button>
-            ))}
-          </div>
-          {supPayMethod === 'cash' && (
-            <div className="flex gap-2">
-              {(['tourism', 'sarl'] as const).map(c => (
-                <button key={c} onClick={() => setSupPayCompany(c)}
-                  className={`flex-1 rounded-lg px-3 py-2 text-[10px] font-medium border transition-colors ${supPayCompany === c ? 'bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40' : 'bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10'}`}>
-                  {c === 'tourism' ? 'KOMBA CABANA TOURISM SARL' : 'KOMBA CABANA SARL'}
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[#2b2622]/55">Datum plačila:</span>
-            <input type="date" value={supPayDate} onChange={e => setSupPayDate(e.target.value)}
-              className="flex-1 rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none" />
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => setSupPayOpen(null)}
-              className="rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-3 py-2 text-[11px] font-medium text-[#2b2622]/70 hover:bg-[#0f2e3a]/10 transition-colors">
-              Prekliči
-            </button>
-            <button disabled={supPaySaving || amt <= 0}
-              onClick={async () => {
-                setSupPaySaving(true);
-                try {
-                  await paySupplier({
-                    refKey, supplier: supplierKey,
-                    method: supPayMethod,
-                    company: supPayMethod === 'cash' ? supPayCompany : undefined,
-                    date: supPayDate,
-                    amountAr: amt,
-                    label: `${fieldLabel} — ${descLabel}`.slice(0, 200),
-                  });
-                  setSupPayOpen(null);
-                  refresh();
-                } finally {
-                  setSupPaySaving(false);
-                }
-              }}
-              className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              style={{ backgroundColor: `${accent}22`, border: `1px solid ${accent}66`, color: accent }}>
-              {supPaySaving ? 'Beležim…' : 'Zabeleži plačilo'}
-            </button>
-          </div>
-        </div>
-      );
-    }
-    if (paid) {
-      return (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[#4f7a54]/30 bg-[#4f7a54]/[0.08] px-2.5 py-2">
-          <div className="min-w-0">
-            <p className="text-[11px] font-semibold text-[#4f7a54]">
-              {fieldLabel} plačan ✓ · {paid.method === 'orange' ? <span className="text-[#c4741f]">Orange Money</span> : 'Gotovina'}
-              {paid.method === 'cash' && paid.company ? ` (${paid.company === 'sarl' ? 'SARL' : 'Tourism'})` : ''}
-            </p>
-            <p className="text-[10px] text-[#2b2622]/55">
-              {paid.paidAt ? new Date(paid.paidAt).toLocaleDateString('sl-SI', { day: 'numeric', month: 'short', year: 'numeric' }) : ''} · {ar(paid.amountAr || 0)}
-            </p>
-          </div>
-          <div className="flex shrink-0 gap-1.5">
-            <button onClick={() => {
-              setSupPayMethod(paid.method === 'orange' ? 'orange' : 'cash');
-              setSupPayCompany(paid.company === 'sarl' ? 'sarl' : 'tourism');
-              setSupPayDate((paid.paidAt || new Date().toISOString()).slice(0, 10));
-              setExtraAmt(p => ({ ...p, [refKey]: String(paid.amountAr || '') }));
-              setSupPayOpen(refKey);
-            }}
-              className="rounded-full border px-3 py-1.5 text-[10px] font-medium transition-colors" style={{ borderColor: `${accent}40`, backgroundColor: `${accent}1a`, color: accent }}>
-              Uredi
-            </button>
-            <button onClick={async () => {
-              if (!confirm('Prekličem plačilo? Vknjižba v blagajni/Orange Money se bo izbrisala.')) return;
-              await unpaySupplier({ refKey });
-              refresh();
-            }}
-              className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70 hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40 transition-colors">
-              Prekliči
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return (
-      <button onClick={() => {
-        setSupPayMethod('cash');
-        setSupPayCompany('tourism');
-        setSupPayDate(new Date().toISOString().slice(0, 10));
-        setSupPayOpen(refKey);
-      }}
-        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border border-dashed px-4 py-2 transition-colors"
-        style={{ borderColor: `${accent}55`, color: accent }}>
-        <span className="text-[10px] font-semibold uppercase tracking-[0.15em]">+ {fieldLabel}</span>
-      </button>
-    );
-  };
-
   // Compact, expandable card for one transfer (tap the header to reveal pay box + call buttons)
   const renderTransferCard = (item: (typeof pendingTransfersForDisplay)[number], idx: number) => {
     const r = item.reservation;
@@ -8856,12 +8478,6 @@ function GuestCard() {
             </div>
             {dilipCostAr > 0 && renderSupplierPay(`reception:${o.id}:dilip`, 'dilip', dilipCostAr, 'Dilip (čoln)', `Prevoz Dilip (čoln) — ${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`.slice(0, 200))}
             {hermanCostAr > 0 && renderSupplierPay(`reception:${o.id}:herman`, 'herman', hermanCostAr, 'Herman (avto)', `Prevoz Herman (avto) — ${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`.slice(0, 200))}
-            <div className="mt-2 border-t border-dashed border-[#8f6d3a]/25 pt-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#8f6d3a]/70">Dodatna gotovinska plačila</p>
-              {renderExtraCashPay(`reception:${o.id}:boatdriver`, 'boatdriver', 'Voznik čolna', `${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`)}
-              {renderExtraCashPay(`reception:${o.id}:porters`, 'porters', 'Nosači', `${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`)}
-              {renderExtraCashPay(`reception:${o.id}:tuctuc`, 'tuctuc', 'Tuc tuc', `${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`)}
-            </div>
           </div>
         </details>
       );
@@ -8907,7 +8523,7 @@ function GuestCard() {
               if (isAirport) {
                 return (t.flightNumber || t.flightTime) ? (<p><span className="text-[#2b2622]/45">Let:</span> {t.flightNumber || '?'}{t.flightTime ? ` ob ${t.flightTime}` : ''}</p>) : null;
               }
-              const pickup = (t.pickupPoint || '').trim() || (routeName || '').split(' - ')[0]?.trim();
+              const pickup = (routeName || '').split(' - ')[0]?.trim();
               return (pickup || t.flightTime) ? (<p><span className="text-[#2b2622]/45">Prevzem:</span> {pickup || '?'}{t.flightTime ? ` ob ${t.flightTime}` : ''}</p>) : null;
             })()}
             {(boatName || t.boatPortTime) && (<p><span className="text-[#2b2622]/45">Čoln:</span> {boatName || '?'}{t.boatPortTime ? ` · port ${t.boatPortTime}` : ''}</p>)}
@@ -8946,12 +8562,6 @@ function GuestCard() {
           </div>
           {dilipCostAr > 0 && renderSupplierPay(`transfer:${r.id}:${item.type}:dilip`, 'dilip', dilipCostAr, 'Dilip (čoln)', `Prevoz Dilip (čoln) — ${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`.slice(0, 200))}
           {hermanCostAr > 0 && renderSupplierPay(`transfer:${r.id}:${item.type}:${taxiKey(taxiId)}`, taxiKey(taxiId), hermanCostAr, `${taxiName} (avto)`, `Prevoz ${taxiName} (avto) — ${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`.slice(0, 200))}
-          <div className="mt-2 border-t border-dashed border-[#8f6d3a]/25 pt-2">
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#8f6d3a]/70">Dodatna gotovinska plačila</p>
-            {renderExtraCashPay(`transfer:${r.id}:${item.type}:boatdriver`, 'boatdriver', 'Voznik čolna', `${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`)}
-            {renderExtraCashPay(`transfer:${r.id}:${item.type}:porters`, 'porters', 'Nosači', `${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`)}
-            {renderExtraCashPay(`transfer:${r.id}:${item.type}:tuctuc`, 'tuctuc', 'Tuc tuc', `${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`)}
-          </div>
         </div>
       </details>
     );
@@ -9225,28 +8835,6 @@ function GuestCard() {
               </button>
             )}
 
-            {/* Nabava Button - Borut gre po nakupih brez gostov */}
-            <button
-              onClick={() => { setShowNabava(!showNabava); setShowPendingTransfers(false); setShowPendingExcursions(false); }}
-              className="inline-flex w-full sm:w-auto sm:min-w-[220px] items-center justify-center gap-2 rounded-full bg-[#c9a86a]/10 border border-[#c9a86a]/25 px-5 py-2.5 text-[#c9a86a] hover:bg-[#c9a86a]/20 transition-colors"
-            >
-              <ShoppingCart className="h-4 w-4" />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Nabava HV</span>
-              {nabavaHvList.length > 0 && <span className="text-sm font-medium">· {nabavaHvList.length}</span>}
-              <ChevronDown className={`h-4 w-4 transition-transform ${showNabava ? 'rotate-180' : ''}`} />
-            </button>
-
-            {/* Nabava Komba Button - Borut kupuje samo robo (brez čolna, brez voznika) */}
-            <button
-              onClick={() => { setShowNabavaKomba(!showNabavaKomba); setShowNabava(false); setShowPendingTransfers(false); setShowPendingExcursions(false); }}
-              className="inline-flex w-full sm:w-auto sm:min-w-[220px] items-center justify-center gap-2 rounded-full bg-[#8fae92]/10 border border-[#8fae92]/25 px-5 py-2.5 text-[#8fae92] hover:bg-[#8fae92]/20 transition-colors"
-            >
-              <ShoppingCart className="h-4 w-4" />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Nabava Komba</span>
-              {nabavaKombaList.length > 0 && <span className="text-sm font-medium">· {nabavaKombaList.length}</span>}
-              <ChevronDown className={`h-4 w-4 transition-transform ${showNabavaKomba ? 'rotate-180' : ''}`} />
-            </button>
-
             {/* Ceniki Button (opens the pricing modal) - pushed to the right edge */}
             <button
               onClick={() => setShowPricingModal(true)}
@@ -9282,199 +8870,6 @@ function GuestCard() {
             </div>
           )}
           
-          {/* Expanded Nabava Panel - Borut gre po nakupih brez gostov */}
-          {showNabava && (
-            <div className="mt-4 rounded-2xl border border-[#c9a86a]/20 bg-[#0a2029]/90 backdrop-blur-xl p-3 sm:p-5">
-              {/* Add form */}
-              <div className="mb-4 rounded-xl border border-[#c9a86a]/20 bg-[#c9a86a]/[0.05] p-3">
-                <h4 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#c9a86a]">
-                  <ShoppingCart className="h-4 w-4" /> Nova nabava
-                </h4>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input type="date" value={nabavaDate} onChange={e => setNabavaDate(e.target.value)}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white [color-scheme:dark] focus:outline-none" />
-                  <input value={nabavaNote} onChange={e => setNabavaNote(e.target.value)} placeholder="Opis nabave (npr. trg. Hakim — hrana, material)"
-                    className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-white/30 focus:outline-none" />
-                  <button disabled={nabavaSaving}
-                    onClick={async () => {
-                      setNabavaSaving(true);
-                      try {
-                        await addNabavaTrip({ date: nabavaDate, note: nabavaNote });
-                        setNabavaNote("");
-                        await mutateNabava();
-                      } finally {
-                        setNabavaSaving(false);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#c9a86a]/40 bg-[#c9a86a]/15 px-4 py-2 text-xs font-semibold text-[#c9a86a] transition-colors hover:bg-[#c9a86a]/25 disabled:opacity-50">
-                    <Plus className="h-3.5 w-3.5" /> {nabavaSaving ? 'Dodajam…' : 'Dodaj'}
-                  </button>
-                </div>
-              </div>
-
-              {nabavaHvList.length === 0 ? (
-                <p className="text-white/30 text-xs">Ni vnosov nabave. Dodaj prvo nabavo zgoraj.</p>
-              ) : (
-                <div className="space-y-3">
-                  {nabavaHvList.map((trip) => (
-                    <div key={trip.id} className="rounded-xl border border-[#c9a86a]/15 bg-[#f7f2e7] p-3">
-                      {nabavaEditId === trip.id ? (
-                        <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                          <input type="date" value={nabavaEditDate} onChange={e => setNabavaEditDate(e.target.value)}
-                            className="rounded-lg border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none" />
-                          <input value={nabavaEditNote} onChange={e => setNabavaEditNote(e.target.value)}
-                            className="flex-1 rounded-lg border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-2 py-1.5 text-[11px] text-[#0f2e3a] focus:outline-none" />
-                          <div className="flex gap-1.5">
-                            <button onClick={async () => { await updateNabavaTrip({ id: trip.id, date: nabavaEditDate, note: nabavaEditNote }); setNabavaEditId(null); await mutateNabava(); }}
-                              className="rounded-full border border-[#4f7a54]/40 bg-[#4f7a54]/15 px-3 py-1.5 text-[10px] font-semibold text-[#4f7a54]">Shrani</button>
-                            <button onClick={() => setNabavaEditId(null)}
-                              className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70">Prekliči</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mb-2 flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-semibold text-[#8f6d3a]">
-                              {trip.date ? new Date(trip.date + 'T00:00:00').toLocaleDateString('sl-SI', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                            </p>
-                            {trip.note && <p className="text-[11px] text-[#2b2622]/70">{trip.note}</p>}
-                          </div>
-                          <div className="flex shrink-0 gap-1.5">
-                            <button onClick={() => { setNabavaEditId(trip.id); setNabavaEditDate(trip.date); setNabavaEditNote(trip.note); }}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-[#0f2e3a]/10">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button onClick={async () => { if (!confirm('Izbrišem nabavo? Povezana plačila se bodo razveljavila.')) return; await deleteNabavaTrip(trip.id); refresh(); await mutateNabava(); }}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="space-y-2 border-t border-dashed border-[#c9a86a]/30 pt-2">
-                        {(() => {
-                          // Preklop "brez čolna": če gre Borut po nakupih brez naročenega čolna
-                          // (npr. se pelje z gosti), skrijemo blok Čoln (Dilip) in beležimo le ostale stroške.
-                          return (
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[9px] font-semibold uppercase tracking-[0.15em] text-[#3f6b7d]/70">Čoln</span>
-                              <button type="button" onClick={async () => { await setNabavaNoBoat({ id: trip.id, noBoat: false }); await mutateNabava(); }}
-                                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition ${!trip.noBoat ? 'bg-[#3f6b7d] text-white' : 'bg-[#3f6b7d]/10 text-[#3f6b7d]'}`}>
-                                S čolnom (Dilip)
-                              </button>
-                              <button type="button" onClick={async () => { if (confirm('Brez čolna? Morebitno plačilo Dilipu za čoln se bo razveljavilo.')) { await setNabavaNoBoat({ id: trip.id, noBoat: true }); await mutateNabava(); } }}
-                                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition ${trip.noBoat ? 'bg-[#5b6470] text-white' : 'bg-[#5b6470]/10 text-[#5b6470]'}`}>
-                                Brez čolna
-                              </button>
-                            </div>
-                          );
-                        })()}
-                        {!trip.noBoat && (() => {
-                          // Nabava HV: čoln je VEDNO Nero, cena Dilipu je FIKSNA 120.000 Ar (brez izbire, brez odštevanja).
-                          const boatName = 'Nero';
-                          const boatCostAr = 120000;
-                          return (
-                            <div className="rounded-lg border border-[#3f6b7d]/20 bg-[#3f6b7d]/[0.05] p-2">
-                              <p className="mb-1.5 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#3f6b7d]"><Ship className="h-3.5 w-3.5" /> Čoln (Dilip)</p>
-                              <div className="rounded-lg border border-[#3f6b7d]/30 bg-[#3f6b7d]/10 px-2 py-1">
-                                <p className="text-[10px] font-semibold text-[#3f6b7d]">Za plačilo Dilipu (čoln {boatName}): {ar(boatCostAr)}</p>
-                              </div>
-                              {renderSupplierPay(`nabava:${trip.id}:boat`, 'dilip', boatCostAr, `Dilip (čoln ${boatName})`, trip.note || 'nabava', '#3f6b7d')}
-                            </div>
-                          );
-                        })()}
-                        <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#8f6d3a]/70">Gotovinska / Orange Money plačila</p>
-                        {renderNabavaPay(`nabava:${trip.id}:boatdriver`, 'boatdriver', 'Voznik čolna', trip.note || 'nabava')}
-                        {renderNabavaPay(`nabava:${trip.id}:porters`, 'porters', 'Nosači', trip.note || 'nabava')}
-                        {renderNabavaPay(`nabava:${trip.id}:tuctuc`, 'tuctuc', 'Tuc tuc', trip.note || 'nabava')}
-                        <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Expanded Nabava Komba Panel - Borut kupuje samo robo (brez čolna, brez voznika) */}
-          {showNabavaKomba && (
-            <div className="mt-4 rounded-2xl border border-[#8fae92]/20 bg-[#0a2029]/90 backdrop-blur-xl p-3 sm:p-5">
-              {/* Add form */}
-              <div className="mb-4 rounded-xl border border-[#8fae92]/20 bg-[#8fae92]/[0.05] p-3">
-                <h4 className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[#8fae92]">
-                  <ShoppingCart className="h-4 w-4" /> Nova nabava Komba
-                </h4>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input type="date" value={nabavaKombaDate} onChange={e => setNabavaKombaDate(e.target.value)}
-                    className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white [color-scheme:dark] focus:outline-none" />
-                  <input value={nabavaKombaNote} onChange={e => setNabavaKombaNote(e.target.value)} placeholder="Opis nabave (npr. trg. Hakim — roba)"
-                    className="flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white placeholder:text-white/30 focus:outline-none" />
-                  <button disabled={nabavaKombaSaving}
-                    onClick={async () => {
-                      setNabavaKombaSaving(true);
-                      try {
-                        await addNabavaTrip({ date: nabavaKombaDate, note: nabavaKombaNote, site: "komba" });
-                        setNabavaKombaNote("");
-                        await mutateNabava();
-                      } finally {
-                        setNabavaKombaSaving(false);
-                      }
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#8fae92]/40 bg-[#8fae92]/15 px-4 py-2 text-xs font-semibold text-[#8fae92] transition-colors hover:bg-[#8fae92]/25 disabled:opacity-50">
-                    <Plus className="h-3.5 w-3.5" /> {nabavaKombaSaving ? 'Dodajam…' : 'Dodaj'}
-                  </button>
-                </div>
-              </div>
-
-              {nabavaKombaList.length === 0 ? (
-                <p className="text-white/30 text-xs">Ni vnosov nabave. Dodaj prvo nabavo zgoraj.</p>
-              ) : (
-                <div className="space-y-3">
-                  {nabavaKombaList.map((trip) => (
-                    <div key={trip.id} className="rounded-xl border border-[#8fae92]/15 bg-[#f7f2e7] p-3">
-                      {nabavaEditId === trip.id ? (
-                        <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center">
-                          <input type="date" value={nabavaEditDate} onChange={e => setNabavaEditDate(e.target.value)}
-                            className="rounded-lg border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none" />
-                          <input value={nabavaEditNote} onChange={e => setNabavaEditNote(e.target.value)}
-                            className="flex-1 rounded-lg border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-2 py-1.5 text-[11px] text-[#0f2e3a] focus:outline-none" />
-                          <div className="flex gap-1.5">
-                            <button onClick={async () => { await updateNabavaTrip({ id: trip.id, date: nabavaEditDate, note: nabavaEditNote }); setNabavaEditId(null); await mutateNabava(); }}
-                              className="rounded-full border border-[#4f7a54]/40 bg-[#4f7a54]/15 px-3 py-1.5 text-[10px] font-semibold text-[#4f7a54]">Shrani</button>
-                            <button onClick={() => setNabavaEditId(null)}
-                              className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70">Prekliči</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mb-2 flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-semibold text-[#4f7a54]">
-                              {trip.date ? new Date(trip.date + 'T00:00:00').toLocaleDateString('sl-SI', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                            </p>
-                            {trip.note && <p className="text-[11px] text-[#2b2622]/70">{trip.note}</p>}
-                          </div>
-                          <div className="flex shrink-0 gap-1.5">
-                            <button onClick={() => { setNabavaEditId(trip.id); setNabavaEditDate(trip.date); setNabavaEditNote(trip.note); }}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-[#0f2e3a]/10">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button onClick={async () => { if (!confirm('Izbrišem nabavo? Povezana plačila se bodo razveljavila.')) return; await deleteNabavaTrip(trip.id); refresh(); await mutateNabava(); }}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      <div className="border-t border-dashed border-[#8fae92]/30 pt-2">
-                        <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} showRent />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Expanded Excursions Panel */}
           {showPendingExcursions && (
             <div className="mt-4 rounded-2xl border border-[#8fae92]/20 bg-[#0a2029]/90 backdrop-blur-xl p-5">
@@ -9514,10 +8909,7 @@ function GuestCard() {
                   // Dilip = (kompletna cena čolna − vodič) × 0,90 + vodič — ČOLN je en sam za skupino
                   const boatNet = Math.max(0, boatCompletePrice - guidePrice);
                   // Top of Nosy Komba: čoln FIKSNO 80.000 Ar + vodič (guidePriceAr, npr. 50.000)
-                  const dilipOverride = members.map(m => (m.excursion as { dilipOverrideAr?: number | null }).dilipOverrideAr).find(v => v != null);
-                  const dilipPayment = dilipOverride != null
-                    ? Number(dilipOverride)
-                    : isFixedDilipExcursion
+                  const dilipPayment = isFixedDilipExcursion
                     ? 80000 + guidePrice
                     : isDirectBoatExcursion
                       ? boatCompletePrice + guidePrice
@@ -10404,22 +9796,7 @@ function GuestCard() {
               />
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
-              <button
-                onClick={async () => {
-                  const rid = activeReservation()?.id;
-                  if (!rid || !invoicePreview) return;
-                  const next = !invoicePreview.hidePayments;
-                  const { getInvoiceEmailPreview } = await import("@/app/actions/invoice-email");
-                  const result = await getInvoiceEmailPreview(rid, "en", invoicePreview.excludeAccommodation, invoicePreview.onlyStayMeals, next);
-                  if (result.html) setInvoicePreview({ ...invoicePreview, html: result.html, hidePayments: next });
-                }}
-                disabled={emailingInvoice}
-                aria-pressed={!invoicePreview.hidePayments}
-                className={`mr-auto rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${invoicePreview.hidePayments ? "border-white/15 text-white/50 hover:bg-white/5" : "border-[#8fae92]/40 text-[#8fae92] hover:bg-[#8fae92]/10"}`}
-              >
-                {invoicePreview.hidePayments ? "Plačila: izklopljena" : "Plačila: vklopljena"}
-              </button>
+            <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
               <button
                 onClick={() => setInvoicePreview(null)}
                 disabled={emailingInvoice}
@@ -10448,7 +9825,7 @@ function GuestCard() {
                   setEmailingInvoice(true);
                   try {
                     const { sendInvoiceEmail } = await import("@/app/actions/invoice-email");
-                    const result = await sendInvoiceEmail(rid, invoicePreview.to, "en", invoicePreview.excludeAccommodation, invoicePreview.onlyStayMeals, !!invoicePreview.hidePayments);
+                    const result = await sendInvoiceEmail(rid, invoicePreview.to, "en", invoicePreview.excludeAccommodation, invoicePreview.onlyStayMeals);
                     if (result.success) {
                       showMsg(`Račun poslan gostu (${invoicePreview.to}).`);
                       setSentEmailsRefresh((n) => n + 1);
@@ -10644,7 +10021,7 @@ function GuestCard() {
       )}
 
       {/* Nov račun (strošek) ��� modal za fotografiranje/nalaganje računa */}
-      <StroskiReceiptCaptureModal isOpen={showReceiptCapture} onClose={() => setShowReceiptCapture(false)} requirePayment />
+      <StroskiReceiptCaptureModal isOpen={showReceiptCapture} onClose={() => setShowReceiptCapture(false)} />
 
       {/* Pricing Calculator Modal */}
       {showTaxes && typeof document !== "undefined" && createPortal(

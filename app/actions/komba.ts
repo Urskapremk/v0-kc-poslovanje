@@ -4,8 +4,6 @@ import { db } from '@/lib/db'
 import { reservations, transfers, orderItems, settings, boats, routes, supplements, routeSupplements, supplierPricing, sellingPricing, excursions, excursionPricing, excursionSellingPricing, excursionBookings, bentralReservations, guests, payments, agencies, products, lunchProviders, deliveryNotes, deliveryNoteItems, scheduledExcursions, staff, invoiceDiscounts, supplierPayments } from '@/lib/db/schema'
 import { eq, and, or, lte, gte, desc, isNull, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
-import { unpaySupplier } from './supplier-payment'
-import { unpayFanja } from './fanja-payment'
 
 // Generate unique ID
 function uid(prefix: string) {
@@ -676,45 +674,9 @@ export async function addOrderItem(reservationId: string, data: {
   revalidatePath('/')
 }
 
-// Reverse every recorded payment tied to an excursion booking (supplier: Dilip/lunch/
-// entrance, and Fanja) so the cash blagajna / Orange Money balances are corrected, then
-// delete the booking itself. Idempotent — unpaySupplier/unpayFanja no-op when nothing was paid.
-async function reverseAndDeleteExcursionBooking(booking: { id: string; groupId?: string | null }) {
-  const groupKey = booking.groupId ? `g:${booking.groupId}` : `s:${booking.id}`
-  await unpaySupplier({ refKey: `excursion:${groupKey}:dilip` })
-  await unpaySupplier({ refKey: `excursion:${groupKey}:lunch` })
-  await unpaySupplier({ refKey: `excursion:${groupKey}:entrance` })
-  await unpayFanja({ bookingIds: [booking.id] })
-  await db.delete(excursionBookings).where(eq(excursionBookings.id, booking.id))
-}
-
 export async function deleteOrderItem(id: string) {
-  const [item] = await db.select().from(orderItems).where(eq(orderItems.id, id)).limit(1)
-
-  // If the deleted line is an excursion, ALSO remove the linked booking from the archive
-  // and reverse any clicked supplier/Fanja payments (money returns to blagajna / Orange Money).
-  // There is no FK between order_items and excursion_bookings, so we match by reservation +
-  // the excursion name appearing in the order item name + (when set) the same service date.
-  const isExcursion = item && (item.category === 'Izlet' || /^(Izlet|Excursion):/i.test(item.name || ''))
-  if (isExcursion && item?.reservationId) {
-    const itemNameLc = (item.name || '').toLowerCase()
-    const itemDate = item.eventDate ? String(item.eventDate).slice(0, 10) : null
-    const bookings = await db.select().from(excursionBookings).where(eq(excursionBookings.reservationId, item.reservationId))
-    const excNames = await db.select({ id: excursions.id, name: excursions.name }).from(excursions)
-    const nameById = new Map(excNames.map((e) => [e.id, (e.name || '').trim()]))
-    for (const b of bookings) {
-      const excName = (nameById.get(b.excursionId) || '').toLowerCase().trim()
-      const nameMatch = excName ? itemNameLc.includes(excName) : false
-      const dateMatch = itemDate ? String(b.date).slice(0, 10) === itemDate : true
-      if (nameMatch && dateMatch) {
-        await reverseAndDeleteExcursionBooking(b)
-      }
-    }
-  }
-
   await db.delete(orderItems).where(eq(orderItems.id, id))
   revalidatePath('/')
-  revalidatePath('/statistika')
 }
 
 export async function getOrderItems(reservationId: string) {
@@ -2234,13 +2196,12 @@ export async function getArchivedReservations(page: number = 1, limit: number = 
 // exactly like the pending list. We keep everything with an effective date up to today
 // (lodge-local, UTC+3), newest first.
 export async function getArchivedTransfers() {
-  const [allTransfers, allRoutes, allBoats, allSupplierPricing, allSupplierPayments, allOrderTransfers] = await Promise.all([
+  const [allTransfers, allRoutes, allBoats, allSupplierPricing, allSupplierPayments] = await Promise.all([
     db.select().from(transfers).where(isNotNull(transfers.route)),
     db.select().from(routes),
     db.select().from(boats),
     db.select().from(supplierPricing).where(eq(supplierPricing.active, true)),
     db.select().from(supplierPayments),
-    db.select().from(orderItems).where(eq(orderItems.category, 'Transfer')),
   ])
 
   const HERMAN_BOAT_ID = 'taxi-herman'
@@ -2267,9 +2228,7 @@ export async function getArchivedTransfers() {
   }
 
   const withRoute = allTransfers.filter(t => (t.route || '').trim() !== '')
-  // Reception ad-hoc transfers: order_items named "Transfer: {route} - {N} pax | Coln: {boat}".
-  const recTransfers = allOrderTransfers.filter(o => /^transfer:\s/i.test(o.name || ''))
-  const resIds = Array.from(new Set([...withRoute.map(t => t.reservationId), ...recTransfers.map(o => o.reservationId)]))
+  const resIds = Array.from(new Set(withRoute.map(t => t.reservationId)))
   const resRows = resIds.length > 0
     ? await db.select().from(reservations).where(or(...resIds.map(id => eq(reservations.id, id))))
     : []
@@ -2312,7 +2271,6 @@ export async function getArchivedTransfers() {
       boatName: t.boatId ? (boatMap.get(t.boatId) || '') : '',
       flightNumber: t.flightNumber || '',
       executed: !!t.executed,
-      guestPaid: t.paymentStatus === 'PAID',
       dilipCostAr,
       hermanCostAr,
       taxiName,
@@ -2322,78 +2280,8 @@ export async function getArchivedTransfers() {
       hermanRefKey,
       dilipPaid: dilipCostAr > 0 ? paidFor(dilipRefKey) : null,
       hermanPaid: hermanCostAr > 0 ? paidFor(hermanRefKey) : null,
-      // Ročna gotovinska doplačila (voznik čolna / nosači / tuc tuc) — isti refKey kot v pending kartici (page.tsx)
-      boatdriverRefKey: `transfer:${t.reservationId}:${t.type}:boatdriver`,
-      portersRefKey: `transfer:${t.reservationId}:${t.type}:porters`,
-      tuctucRefKey: `transfer:${t.reservationId}:${t.type}:tuctuc`,
-      boatdriverPaid: paidFor(`transfer:${t.reservationId}:${t.type}:boatdriver`),
-      portersPaid: paidFor(`transfer:${t.reservationId}:${t.type}:porters`),
-      tuctucPaid: paidFor(`transfer:${t.reservationId}:${t.type}:tuctuc`),
     }]
   })
-
-  // Reception ad-hoc transfers (order_items) — mirror the dashboard reception card so Borut
-  // can mark cash payment from the archive too, even for back-dated entries. Route + boat are
-  // parsed back from the item name, and refKeys use the SAME `reception:<orderId>:*` scheme as
-  // the pending card, so payments made here and on the dashboard stay in sync.
-  const routeByName = new Map(allRoutes.map(r => [r.name.toLowerCase(), r]))
-  const boatByName = new Map(allBoats.map(b => [b.name.toLowerCase(), b]))
-  const recItems = recTransfers.flatMap(o => {
-    const res = resMap.get(o.reservationId)
-    if (!res) return []
-    const rawName = (o.name || '').replace(/^transfer:\s*/i, '')
-    const boatMatch = rawName.match(/\|\s*coln:\s*(.+)$/i)
-    const boatNameFromName = boatMatch ? boatMatch[1].trim() : ''
-    const routeName = rawName.replace(/\s*\|\s*coln:.*$/i, '').replace(/\s*-\s*\d+\s*pax.*$/i, '').trim()
-    const matchedBoat = boatByName.get(boatNameFromName.toLowerCase())
-    const matchedRoute = routeByName.get(routeName.toLowerCase())
-    const dilipCostAr = supplierCostAr(matchedBoat?.id, matchedRoute?.id)
-    const hermanCostAr = supplierCostAr(HERMAN_BOAT_ID, matchedRoute?.id)
-    const arrDate = toDateStr(res.arrival)
-    const depDate = toDateStr(res.departure)
-    const evDate = o.eventDate ? String(o.eventDate).slice(0, 10) : ''
-    const routeLc = routeName.toLowerCase()
-    let recDir: 'arrival' | 'departure' = 'arrival'
-    if (evDate && evDate === depDate) recDir = 'departure'
-    else if (evDate && evDate === arrDate) recDir = 'arrival'
-    else if (/^\s*komba cabana/.test(routeLc)) recDir = 'departure'
-    else if (/komba cabana\s*$/.test(routeLc)) recDir = 'arrival'
-    const date = evDate || (recDir === 'departure' ? depDate : arrDate)
-    if (!date || date > todayStr) return []
-    const dilipRefKey = `reception:${o.id}:dilip`
-    const hermanRefKey = `reception:${o.id}:herman`
-    return [{
-      id: `rec-${o.id}`,
-      reservationId: o.reservationId,
-      type: recDir as 'arrival' | 'departure',
-      date,
-      time: '',
-      guestName: res.guestName,
-      bungalow: res.bungalow,
-      pax: res.pax || o.qty || 1,
-      routeName,
-      boatName: boatNameFromName,
-      flightNumber: '',
-      executed: !!o.dilipOrderedAt,
-      guestPaid: o.paymentStatus === 'PAID',
-      dilipCostAr,
-      hermanCostAr,
-      taxiName: 'Herman',
-      taxiSupplier: 'herman',
-      hermanRouteName: hermanCostAr > 0 ? routeName : '',
-      dilipRefKey,
-      hermanRefKey,
-      dilipPaid: dilipCostAr > 0 ? paidFor(dilipRefKey) : null,
-      hermanPaid: hermanCostAr > 0 ? paidFor(hermanRefKey) : null,
-      boatdriverRefKey: `reception:${o.id}:boatdriver`,
-      portersRefKey: `reception:${o.id}:porters`,
-      tuctucRefKey: `reception:${o.id}:tuctuc`,
-      boatdriverPaid: paidFor(`reception:${o.id}:boatdriver`),
-      portersPaid: paidFor(`reception:${o.id}:porters`),
-      tuctucPaid: paidFor(`reception:${o.id}:tuctuc`),
-    }]
-  })
-  items.push(...recItems)
 
   items.sort((a, b) => b.date.localeCompare(a.date) || a.type.localeCompare(b.type))
   return { items, today: todayStr }
@@ -2459,10 +2347,7 @@ export async function getArchivedExcursions() {
     const isFixedDilip = nameLc.includes('top of') && nameLc.includes('nosy komba')
     const isDirectBoat = nameLc.includes('ampangorina') || nameLc.includes('maki')
     const boatNet = Math.max(0, boatCompletePrice - guidePrice)
-    const dilipOverride = members.find(m => m.dilipOverrideAr != null)?.dilipOverrideAr
-    const dilipPayment = dilipOverride != null
-      ? Number(dilipOverride)
-      : isFixedDilip
+    const dilipPayment = isFixedDilip
       ? 80000 + guidePrice
       : isDirectBoat
         ? boatCompletePrice + guidePrice

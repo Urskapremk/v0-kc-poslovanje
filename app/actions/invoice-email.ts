@@ -147,7 +147,6 @@ type InvoiceData = {
   accommodationPartiallyPaid: boolean
   accPaymentNote?: string
   paymentSpec?: { label: string; methodDate: string; eur: number; separate: boolean }[]
-  hidePayments?: boolean
   extensionNote?: string | null
   services: { name: string; eur: number; paid: boolean; free?: boolean; included?: boolean }[]
   servicesTotalEur: number
@@ -382,8 +381,8 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
             </tr>
           </table>
         </td></tr>
-${opts.hidePayments ? '' : paymentsSection}
-        ${opts.hidePayments ? '' : paymentSpecSection}
+          ${paymentsSection}
+          ${paymentSpecSection}
         <tr><td align="center" bgcolor="#0a2029" style="background-color:#0a2029;padding:24px 20px 8px 20px;border-top:1px solid #1f2f36;">
           <p style="margin:16px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#b9c6ca;">${t.thankYou}</p>
           <p style="margin:4px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#7e786d;">${t.tagline} &middot; Nosy Komba, Madagascar</p>
@@ -562,7 +561,6 @@ async function buildInvoicePdfBase64(d: InvoiceData): Promise<string | null> {
     doc.text(`${t.exchangeRate}: 1 EUR = ${formatAr(d.exchangeRate)} Ar`, pageW - marginX, y, { align: 'right' })
     y += 8
 
-    if (!d.hidePayments) {
     // Payments
     ensure(24)
     doc.setFillColor(240, 248, 245)
@@ -608,7 +606,6 @@ async function buildInvoicePdfBase64(d: InvoiceData): Promise<string | null> {
       }
       y += 5
     }
-    }
 
     // Footer
     doc.setFont('helvetica', 'normal')
@@ -633,8 +630,7 @@ async function buildInvoiceData(
   reservationId: string,
   lang: InvoiceLang,
   excludeAccommodation = false,
-  onlyStayMeals = false,
-  hidePayments = false
+  onlyStayMeals = false
 ): Promise<{ data: InvoiceData; reservation: AnyRec } | { error: string }> {
   const [reservation, orderItems0, notes0, discounts0] = await Promise.all([
     getReservationById(reservationId) as Promise<AnyRec | null>,
@@ -648,37 +644,8 @@ async function buildInvoiceData(
   const exchangeRate = Number(reservation.exchangeRate) || 4800
 
   // Combine group data when the reservation uses a shared invoice (mirror /racun).
-  // A paid meal plan (B / HB / FB) covers its meals, even when bar staff entered them as
-  // ordinary bar lines, so those are matched to the plan by name and not charged again.
-  const paidMealPlan = String(reservation.mealPlanPaymentStatus || '').toUpperCase() === 'PAID'
-    ? String(reservation.mealPlan || '').toUpperCase()
-    : ''
-  const isPaidPlanMeal = (name: unknown) => {
-    if (!paidMealPlan) return false
-    const n = String(name || '').toLowerCase()
-    const breakfast = /breakfast|zajtrk|petit[- ]d[ée]jeuner/.test(n)
-    const lunch = /lunch|kosilo|d[ée]jeuner/.test(n) && !breakfast
-    const dinner = /dinner|ve[cč]erj|d[iî]ner/.test(n)
-    if (paidMealPlan === 'FB') return breakfast || lunch || dinner
-    if (paidMealPlan === 'HB') return breakfast || dinner
-    if (paidMealPlan === 'B' || paidMealPlan === 'BB') return breakfast
-    return false
-  }
-  let orderItems = orderItems0.map((item) =>
-    (item.category === 'Prehrana' || item.category === 'Food') && item.paymentStatus === 'UNPAID' && !item.isFree && isPaidPlanMeal(item.name)
-      ? { ...item, paymentStatus: 'PAID' }
-      : item,
-  )
-  let notes: AnyRec[] = notes0.map((note): AnyRec => {
-    const items = ((note.items || []) as AnyRec[]).map((it) =>
-      !it.coveredByMealPlan && !it.isFree && isPaidPlanMeal(it.productName) ? { ...it, coveredByMealPlan: true } : it,
-    )
-    const totalAr = items.reduce(
-      (s, it) => s + ((it.coveredByMealPlan || it.isFree) ? 0 : Number(it.priceAr || 0) * Number(it.quantity || 0)),
-      0,
-    )
-    return { ...note, items, totalAr }
-  })
+  let orderItems = orderItems0
+  let notes = notes0
   if (reservation.groupId) {
     try {
       const dashboard = (await getDashboardData()) as AnyRec
@@ -732,8 +699,7 @@ async function buildInvoiceData(
     !i.isFree &&
     (i.category === 'Izlet' || i.category === 'Transfer') &&
     Number(i.refPriceAr || 0) > 0 &&
-    !isAgencyBookingE &&
-    !hidePayments
+    !isAgencyBookingE
   const separatePaidAr = (invoiceOrderItems as AnyRec[])
     .filter(isSeparatelyPaidService)
     .reduce((s, i) => s + Number(i.refPriceAr || 0), 0)
@@ -857,9 +823,7 @@ async function buildInvoiceData(
   const isTransferItem = (i: AnyRec) => i.category === 'Transfer'
   const isMealItem = (i: AnyRec) => i.category === 'Prehrana'
   const isExcursionItem = (i: AnyRec) => i.category === 'Izlet'
-  const isChargeableOrShown = (i: AnyRec) =>
-    i.paymentStatus !== 'PAID' || !!i.isFree || isMealItem(i) ||
-    (!hidePayments && (isTransferItem(i) || isExcursionItem(i)))
+  const isChargeableOrShown = (i: AnyRec) => i.paymentStatus !== 'PAID' || !!i.isFree || isTransferItem(i) || isMealItem(i) || isExcursionItem(i)
   const days = dayKeys
     .map((day) => {
       const note = noteByDateRaw.get(day)
@@ -1003,13 +967,12 @@ export async function getInvoiceEmailPreview(
   reservationId: string,
   lang: InvoiceLang = 'en',
   excludeAccommodation = false,
-  onlyStayMeals = false,
-  hidePayments = false
+  onlyStayMeals = false
 ): Promise<{ html?: string; to?: string; error?: string }> {
-  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals, hidePayments)
+  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals)
   if ('error' in built) return { error: built.error }
   return {
-    html: buildInvoiceEmailHtml({ ...built.data, hidePayments }),
+    html: buildInvoiceEmailHtml(built.data),
     to: (built.reservation.email || '').trim(),
   }
 }
@@ -1019,20 +982,19 @@ export async function sendInvoiceEmail(
   toEmail?: string,
   lang: InvoiceLang = 'en',
   excludeAccommodation = false,
-  onlyStayMeals = false,
-  hidePayments = false
+  onlyStayMeals = false
 ): Promise<{ success: boolean; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) return { success: false, error: 'E-pošta še ni nastavljena (manjka RESEND_API_KEY).' }
 
-  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals, hidePayments)
+  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals)
   if ('error' in built) return { success: false, error: built.error }
   const { data, reservation } = built
 
   const to = (toEmail || reservation.email || '').trim()
   if (!to) return { success: false, error: 'Gost nima vpisanega email naslova.' }
 
-  const html = buildInvoiceEmailHtml({ ...data, hidePayments })
+  const html = buildInvoiceEmailHtml(data)
 
   const from = process.env.EMAIL_FROM || 'Komba Cabana <info@kombacabana.app>'
   const subject = lang === 'fr' ? 'Votre facture — Komba Cabana' : 'Your invoice — Komba Cabana'

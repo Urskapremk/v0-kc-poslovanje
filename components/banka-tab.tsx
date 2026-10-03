@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 import useSWR from 'swr'
 import {
-  Landmark, ArrowDownLeft, ArrowUpRight, Banknote, Users, Plus, Trash2, Pencil, Check, X, Wallet, ChevronDown, ChevronRight, FileText, Upload, Loader2, ClipboardPaste,
+  Landmark, ArrowDownLeft, ArrowUpRight, Banknote, Users, Plus, Trash2, Pencil, Check, X, Wallet, ChevronDown, ChevronRight, FileText,
 } from 'lucide-react'
 import { BankaVlogaLetters } from './banka-vloga-letters'
 import {
@@ -13,7 +13,6 @@ import {
   addBankTransaction,
   updateBankTransaction,
   deleteBankTransaction,
-  importBankStatementTransactions,
   type BankCompany,
   type TxDirection,
   type TxCategory,
@@ -166,157 +165,6 @@ export default function BankaTab({ year }: { year: number }) {
     setEditAccount(false)
     mutateAccount()
     mutateTxs()
-  }
-
-  // --- Nalaganje slike izpiska (samodejno prebere končno stanje) ---
-  const statementInputRef = React.useRef<HTMLInputElement>(null)
-  const [readingStatement, setReadingStatement] = useState(false)
-  const [statementMsg, setStatementMsg] = useState<string | null>(null)
-  // Pregled prebranega izpiska pred uvozom (da nič ne manjka in se nič ne podvoji)
-  type PendingTx = { date: string; direction: TxDirection; amount: number; description: string; dup: boolean; include: boolean }
-  const [pending, setPending] = useState<{ balance: number | null; date: string | null; txs: PendingTx[] } | null>(null)
-  const [importing, setImporting] = useState(false)
-
-  async function handleStatementUpload(files: FileList | null) {
-    if (!files || files.length === 0) return
-    setReadingStatement(true)
-    setStatementMsg(null)
-    try {
-      const fd = new FormData()
-      Array.from(files).forEach((f) => fd.append('file', f))
-      const res = await fetch('/api/read-bank-statement', { method: 'POST', body: fd })
-      if (!res.ok) throw new Error('ocr')
-      const data = (await res.json()) as {
-        balance: number | null
-        currency: 'EUR' | 'Ar' | null
-        date: string | null
-        transactions?: { date: string | null; direction: 'in' | 'out'; amount: number; description: string | null }[]
-      }
-      const rows = (data.transactions ?? []).filter((t) => t.amount > 0)
-      if (rows.length === 0) {
-        setStatementMsg('Na sliki ni bilo mogoče prebrati transakcij — poskusi z jasnejšo sliko ali vpiši ročno.')
-        setReadingStatement(false)
-        return
-      }
-      // Označi, katere so že vnesene — da se ob ponovnem nalaganju ne podvojijo.
-      // Ujemanje = isti znesek + smer, datum pa v oknu ±14 dni (banka isto transakcijo pogosto
-      // zapiše z dnem operacije ali dnem valute, zato točen datum ni zanesljiv).
-      const dayMs = 86400000
-      // Ujemanje ENA-NA-ENA: vsaka obstoječa vrstica pokrije največ eno prebrano — trije enaki
-      // odlivi istega dne se NE zložijo v enega.
-      const existing = list.map((t) => ({
-        dir: t.direction as TxDirection,
-        amount: Math.round(Number(t.amount)),
-        time: Date.parse(`${t.date.slice(0, 10)}T00:00:00Z`),
-        consumed: false,
-      }))
-      const consumeDup = (dir: TxDirection, amount: number, date: string) => {
-        const amt = Math.round(amount)
-        const time = Date.parse(`${date}T00:00:00Z`)
-        const hit = existing.find(
-          (e) =>
-            !e.consumed &&
-            e.dir === dir &&
-            e.amount === amt &&
-            (isNaN(time) || isNaN(e.time) || Math.abs(e.time - time) <= 14 * dayMs)
-        )
-        if (hit) {
-          hit.consumed = true
-          return true
-        }
-        return false
-      }
-      const pendingTxs: PendingTx[] = rows.map((t) => {
-        const date = (t.date ?? '').slice(0, 10)
-        const dir: TxDirection = t.direction === 'out' ? 'out' : 'in'
-        const amount = Math.abs(Number(t.amount) || 0)
-        const dup = consumeDup(dir, amount, date)
-        return { date, direction: dir, amount, description: t.description ?? '', dup, include: !dup }
-      })
-      setPending({ balance: data.balance ?? null, date: data.date ?? null, txs: pendingTxs })
-    } catch {
-      setStatementMsg('Napaka pri branju slike — poskusi znova ali vpiši ročno.')
-    } finally {
-      setReadingStatement(false)
-      if (statementInputRef.current) statementInputRef.current.value = ''
-    }
-  }
-
-  function togglePending(idx: number) {
-    setPending((prev) =>
-      prev ? { ...prev, txs: prev.txs.map((t, i) => (i === idx ? { ...t, include: !t.include } : t)) } : prev
-    )
-  }
-
-  async function confirmImport() {
-    if (!pending) return
-    const chosen = pending.txs.filter((t) => t.include && t.date && t.amount > 0)
-    if (chosen.length === 0) {
-      setPending(null)
-      return
-    }
-    setImporting(true)
-    try {
-      const result = await importBankStatementTransactions({
-        company,
-        transactions: chosen.map((t) => ({ date: t.date, direction: t.direction, amount: t.amount, description: t.description })),
-      })
-      await mutateTxs()
-      setStatementMsg(
-        result.added === 0
-          ? `Vse izbrane transakcije so že vnesene (${result.skipped} podvojenih preskočenih) — nič dodanega.`
-          : `Dodanih ${result.added} ${result.added === 1 ? 'transakcija' : 'transakcij'}` +
-              (result.skipped > 0 ? `, ${result.skipped} podvojenih preskočenih.` : '.')
-      )
-      setPending(null)
-    } catch {
-      setStatementMsg('Napaka pri uvozu — poskusi znova.')
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  // Ctrl/Cmd+V neposredno prilepi sliko izpiska (le ko obrazec stanja ni odprt)
-  React.useEffect(() => {
-    function onPaste(e: ClipboardEvent) {
-      if (editAccount || readingStatement) return
-      const files = e.clipboardData?.files
-      if (!files || files.length === 0) return
-      const img = Array.from(files).find((f) => f.type.startsWith('image/'))
-      if (!img) return
-      e.preventDefault()
-      const dt = new DataTransfer()
-      dt.items.add(img)
-      void handleStatementUpload(dt.files)
-    }
-    document.addEventListener('paste', onPaste)
-    return () => document.removeEventListener('paste', onPaste)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editAccount, readingStatement])
-
-  // Prilepi posnetek zaslona iz odložišča (Ctrl/Cmd+V ali gumb)
-  async function handleStatementPaste() {
-    try {
-      if (!navigator.clipboard || !navigator.clipboard.read) {
-        setStatementMsg('Lepljenje ni na voljo v tem brskalniku — uporabi Naloži izpisek.')
-        return
-      }
-      const items = await navigator.clipboard.read()
-      for (const item of items) {
-        const type = item.types.find((t) => t.startsWith('image/'))
-        if (!type) continue
-        const blob = await item.getType(type)
-        const ext = type.split('/')[1] || 'png'
-        const file = new File([blob], `izpisek-${Date.now()}.${ext}`, { type })
-        const dt = new DataTransfer()
-        dt.items.add(file)
-        await handleStatementUpload(dt.files)
-        return
-      }
-      setStatementMsg('V odložišču ni slike — najprej naredi posnetek zaslona.')
-    } catch {
-      setStatementMsg('Ni mogoče prebrati odložišča — dovoli dostop ali uporabi Naloži izpisek.')
-    }
   }
 
   // --- Nova transakcija ---
@@ -509,129 +357,11 @@ export default function BankaTab({ year }: { year: number }) {
             <h2 className="text-lg font-bold text-white">{COMPANY_LABELS[company]}</h2>
           </div>
           {!editAccount && (
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                ref={statementInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => handleStatementUpload(e.target.files)}
-              />
-              <button
-                onClick={() => statementInputRef.current?.click()}
-                disabled={readingStatement}
-                className="flex items-center gap-1.5 rounded-lg bg-[#c59b5b]/15 px-3 py-1.5 text-xs font-medium text-[#c59b5b] hover:bg-[#c59b5b]/25 disabled:opacity-60"
-                title="Naloži sliko izpiska — aplikacija prebere končno stanje"
-              >
-                {readingStatement ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                {readingStatement ? 'Berem stanje…' : 'Naloži izpisek (slika)'}
-              </button>
-              <button
-                onClick={handleStatementPaste}
-                disabled={readingStatement}
-                className="flex items-center gap-1.5 rounded-lg bg-[#8fae92]/15 px-3 py-1.5 text-xs font-medium text-[#8fae92] hover:bg-[#8fae92]/25 disabled:opacity-60"
-                title="Prilepi posnetek zaslona izpiska iz odložišča (Ctrl+V)"
-              >
-                <ClipboardPaste className="h-3.5 w-3.5" /> Prilepi posnetek
-              </button>
-              <button onClick={startEditAccount} className="flex items-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs text-white/60 hover:bg-white/10 hover:text-white">
-                <Pencil className="h-3.5 w-3.5" /> Uredi začetno stanje
-              </button>
-            </div>
+            <button onClick={startEditAccount} className="flex items-center gap-1.5 rounded-lg bg-white/5 px-3 py-1.5 text-xs text-white/60 hover:bg-white/10 hover:text-white">
+              <Pencil className="h-3.5 w-3.5" /> Uredi začetno stanje
+            </button>
           )}
         </div>
-
-        {statementMsg && (
-          <div className="mb-4 rounded-lg border border-[#c59b5b]/20 bg-[#c59b5b]/[0.06] px-3 py-2 text-xs text-[#d8b877]">
-            {statementMsg}
-          </div>
-        )}
-
-        {pending && (() => {
-          const chosen = pending.txs.filter((t) => t.include)
-          const deltaIn = chosen.filter((t) => t.direction === 'in').reduce((s, t) => s + t.amount, 0)
-          const deltaOut = chosen.filter((t) => t.direction === 'out').reduce((s, t) => s + t.amount, 0)
-          const resulting = balance + deltaIn - deltaOut
-          const hasRead = pending.balance != null
-          const diff = hasRead ? resulting - (pending.balance as number) : 0
-          const reconciled = hasRead && Math.abs(diff) < 1
-          const newCount = pending.txs.filter((t) => !t.dup).length
-          const dupCount = pending.txs.length - newCount
-          return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !importing && setPending(null)}>
-              <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/10 bg-[#12212b] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <div className="mb-3 flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-bold text-white">Prebrane transakcije z izpiska</h3>
-                    <p className="mt-0.5 text-xs text-white/50">
-                      {COMPANY_LABELS[company]} · potrdi, kaj naj se doda. Že vnesene so odkljukane, da se ne podvojijo.
-                    </p>
-                  </div>
-                  <button onClick={() => setPending(null)} disabled={importing} className="rounded-lg p-1 text-white/50 hover:bg-white/10 hover:text-white">
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {hasRead && (
-                  <div className="mb-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-white/60">
-                    Končno stanje na izpisku{pending.date ? ` (${formatDate(pending.date)})` : ''}: <span className="font-semibold text-white">{fmt(pending.balance as number)}</span>
-                  </div>
-                )}
-
-                <div className="space-y-1.5">
-                  {pending.txs.map((t, i) => (
-                    <label
-                      key={i}
-                      className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 ${
-                        t.include ? 'border-[#c59b5b]/30 bg-[#c59b5b]/[0.06]' : 'border-white/8 bg-white/[0.02]'
-                      }`}
-                    >
-                      <input type="checkbox" checked={t.include} onChange={() => togglePending(i)} className="h-4 w-4 accent-[#c59b5b]" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-white/50">{t.date ? formatDate(t.date) : 'brez datuma'}</span>
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${t.direction === 'out' ? 'bg-[#d08770]/15 text-[#d9917b]' : 'bg-[#8fae92]/15 text-[#8fae92]'}`}>
-                            {t.direction === 'out' ? 'odliv' : 'priliv'}
-                          </span>
-                          {t.dup && <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-white/50">že vneseno</span>}
-                        </div>
-                        {t.description && <p className="truncate text-xs text-white/60">{t.description}</p>}
-                      </div>
-                      <span className={`whitespace-nowrap text-sm font-semibold ${t.direction === 'out' ? 'text-[#d9917b]' : 'text-[#8fae92]'}`}>
-                        {t.direction === 'out' ? '−' : '+'}{fmt(t.amount)}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-
-                <p className="mt-2 text-[11px] text-white/40">
-                  {newCount} {newCount === 1 ? 'nova' : 'novih'}{dupCount > 0 ? `, ${dupCount} že vnesenih` : ''}
-                </p>
-
-                {hasRead && (
-                  <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${reconciled ? 'border-[#8fae92]/30 bg-[#8fae92]/[0.08] text-[#8fae92]' : 'border-[#d08770]/30 bg-[#d08770]/[0.08] text-[#d9917b]'}`}>
-                    {reconciled ? (
-                      <>Stanje po uvozu ({fmt(resulting)}) se ujema s končnim stanjem na izpisku.</>
-                    ) : (
-                      <>Pozor: stanje po uvozu ({fmt(resulting)}) se NE ujema s stanjem na izpisku — razlika {fmt(Math.abs(diff))}. Morda kakšna vrstica ni bila prebrana ali je odkljukana.</>
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-4 flex justify-end gap-2">
-                  <button onClick={() => setPending(null)} disabled={importing} className="rounded-lg bg-white/5 px-4 py-2 text-xs text-white/60 hover:bg-white/10 hover:text-white disabled:opacity-60">
-                    Prekliči
-                  </button>
-                  <button onClick={confirmImport} disabled={importing || chosen.length === 0} className="flex items-center gap-1.5 rounded-lg bg-[#c59b5b] px-4 py-2 text-xs font-semibold text-[#12212b] hover:bg-[#d3ad6f] disabled:opacity-50">
-                    {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    Uvozi izbrane ({chosen.length})
-                  </button>
-                </div>
-              </div>
-            </div>
-          )
-        })()}
 
         {editAccount ? (
           <div className="space-y-3 rounded-xl border border-[#c59b5b]/20 bg-[#c59b5b]/[0.04] p-4">

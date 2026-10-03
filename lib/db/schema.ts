@@ -368,11 +368,10 @@ export const excursions = pgTable('excursions', {
   entranceFeeAr: integer('entranceFeeAr').notNull().default(0),
   lunchPriceAr: integer('lunchPriceAr').notNull().default(0),
   active: boolean('active').default(true),
-  duplicatedAt: timestamp('duplicatedAt'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
-  })
-  
-  export const excursionPricing = pgTable('excursion_pricing', {
+})
+
+export const excursionPricing = pgTable('excursion_pricing', {
   id: text('id').primaryKey(),
   excursionId: text('excursionId').notNull().references(() => excursions.id, { onDelete: 'cascade' }),
   boatId: text('boatId').notNull().references(() => boats.id, { onDelete: 'cascade' }),
@@ -453,7 +452,6 @@ export const excursionBookings = pgTable('excursion_bookings', {
   fanjaPaidCompany: text('fanjaPaidCompany'), // 'tourism' | 'sarl' | null (samo pri gotovini)
   fanjaLedgerId: text('fanjaLedgerId'),
   fanjaPaidAmountAr: integer('fanjaPaidAmountAr'),
-  dilipOverrideAr: integer('dilipOverrideAr'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   })
   
@@ -650,19 +648,6 @@ export const hnaturaRepayments = pgTable('hnatura_repayments', {
   cashCompany: text('cashCompany'), // podjetje blagajne (tourism|sarl)
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })
-
-// Osnovna sredstva (fixed assets) — knjižijo se posebej; mesečni strošek je amortizacija.
-// Amortizacijska stopnja (letni %) se določi za vsako sredstvo posebej.
-export const fixedAssets = pgTable('fixed_assets', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  purchaseDate: date('purchaseDate').notNull(), // datum nabave (določa začetek amortizacije)
-  amountAr: decimal('amountAr', { precision: 16, scale: 2 }).notNull(), // nabavna vrednost v Ar (osnova)
-  amountEur: decimal('amountEur', { precision: 12, scale: 2 }).notNull(), // preračun v EUR ob nabavi (za kalkulacije)
-  annualRatePct: decimal('annualRatePct', { precision: 6, scale: 2 }).notNull(), // letna amortizacijska stopnja v %
-  receiptId: text('receiptId'), // če je knjiženo iz računa (stroski arhiv) — za značko "osnovno sredstvo"
-  createdAt: timestamp('createdAt').notNull().defaultNow(),
-  })
 
 export const housekeepingSchedule = pgTable('housekeeping_schedule', {
   id: text('id').primaryKey(),

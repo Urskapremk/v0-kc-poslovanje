@@ -116,69 +116,6 @@ export async function addBankTransaction(params: {
   return { id }
 }
 
-// Uvozi transakcije iz slike izpiska; PRESKOČI podvojene (isti datum + znesek + smer).
-// Odlivi (AUTORISATION TPE = plačila s kartico) → kategorija 'dobavitelj'; prilivi → 'ostalo_in'.
-export async function importBankStatementTransactions(params: {
-  company: string
-  transactions: { date: string; direction: TxDirection; amount: number; description?: string }[]
-}): Promise<{ added: number; skipped: number }> {
-  const comp = normCompany(params.company)
-  const existing = await db.execute(
-  sql`SELECT date, direction, amount FROM bank_transactions WHERE company = ${comp}`
-  )
-  const dayMs = 86400000
-  // Že vnesene: znesek + smer, datum pa v oknu ±14 dni (banka isto transakcijo pogosto zapiše z
-  // dnem operacije ali dnem valute, zato točen datum ni zanesljiv za primerjavo).
-  // POMEMBNO: ujemanje je ENA-NA-ENA — vsaka obstoječa vrstica lahko "pokrije" največ eno uvoženo
-  // vrstico. Tako se trije enaki odlivi (npr. 3× 800.000 isti dan) ne zložijo v enega: če je v bazi
-  // le en tak znesek, se preskoči le eden, ostala dva se dodata.
-  const existingRows = (existing.rows as Record<string, unknown>[]).map((r) => ({
-  dir: String(r.direction) as TxDirection,
-  amount: Math.round(Number(r.amount ?? 0)),
-  time: Date.parse(`${String(r.date).slice(0, 10)}T00:00:00Z`),
-  consumed: false,
-  }))
-  const consumeMatch = (dir: TxDirection, amt: number, time: number) => {
-  const hit = existingRows.find(
-  (e) =>
-  !e.consumed &&
-  e.dir === dir &&
-  e.amount === amt &&
-  (isNaN(time) || isNaN(e.time) || Math.abs(e.time - time) <= 14 * dayMs)
-  )
-  if (hit) {
-  hit.consumed = true
-  return true
-  }
-  return false
-  }
-  let added = 0
-  let skipped = 0
-  for (const t of params.transactions) {
-  const dir: TxDirection = t.direction === 'out' ? 'out' : 'in'
-  const amt = Math.abs(Number(t.amount) || 0)
-  const date = (t.date || '').slice(0, 10)
-  if (!date || amt <= 0) {
-  skipped++
-  continue
-  }
-  const time = Date.parse(`${date}T00:00:00Z`)
-  if (consumeMatch(dir, Math.round(amt), time)) {
-  skipped++
-  continue
-  }
-    const cat: TxCategory = dir === 'out' ? 'dobavitelj' : 'ostalo_in'
-    const id = `tx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    await db.execute(
-      sql`INSERT INTO bank_transactions (id, company, date, direction, category, amount, description)
-      VALUES (${id}, ${comp}, ${date}, ${dir}, ${cat}, ${amt}, ${t.description ?? ''})`
-    )
-    added++
-  }
-  revalidatePath('/statistika')
-  return { added, skipped }
-}
-
 export async function updateBankTransaction(
   id: string,
   params: { date: string; direction: TxDirection; category: TxCategory; amount: number; description?: string }

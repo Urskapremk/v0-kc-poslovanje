@@ -297,43 +297,6 @@ export async function removeItemFromDeliveryNote(itemId: string, deliveryNoteId:
   return { success: true }
 }
 
-// Correct the quantity a bar worker entered by mistake. The line total follows the
-// new quantity (covered/free lines stay at 0) and the note total is adjusted by the diff.
-export async function updateDeliveryNoteItemQuantity(itemId: string, quantity: number) {
-  const qty = Math.floor(Number(quantity))
-  if (!Number.isFinite(qty) || qty < 1 || qty > 999) {
-    throw new Error('Invalid quantity')
-  }
-
-  const item = await db.query.deliveryNoteItems.findFirst({
-    where: eq(deliveryNoteItems.id, itemId)
-  })
-  if (!item) throw new Error('Item not found')
-
-  const oldTotalAr = item.totalAr || 0
-  const newTotalAr = item.coveredByMealPlan || item.isFree ? 0 : (item.priceAr || 0) * qty
-
-  await db.update(deliveryNoteItems)
-    .set({ quantity: qty, totalAr: newTotalAr })
-    .where(eq(deliveryNoteItems.id, itemId))
-
-  const note = await db.query.deliveryNotes.findFirst({
-    where: eq(deliveryNotes.id, item.deliveryNoteId)
-  })
-
-  if (note) {
-    await db.update(deliveryNotes)
-      .set({ totalAr: Math.max(0, (note.totalAr || 0) - oldTotalAr + newTotalAr) })
-      .where(eq(deliveryNotes.id, note.id))
-
-    revalidatePath('/staff')
-    revalidatePath('/')
-    revalidatePath(`/dobavnice/${note.reservationId}`)
-  }
-
-  return { success: true }
-}
-
 // Toggle "on the house" (free) flag on a delivery note item.
 // Free items keep their priceAr for reference but totalAr becomes 0 so they never reach the bill.
 export async function toggleItemFree(itemId: string, deliveryNoteId: string, free: boolean) {

@@ -9,7 +9,6 @@ import { getFeedbackEmailPreview, sendFeedbackEmail } from '@/app/actions/feedba
 import { PoliceFormModal, type PoliceFormReservation } from '@/components/police-form-modal'
 import ArchivePaymentEditor from '@/components/archive-payment-editor'
 import { bungalowDisplayName } from '@/lib/bungalow'
-import { countryFlag } from '@/lib/country-flag'
 
 const fetcher = async (page: number) => {
   return await getArchivedReservations(page, 20)
@@ -131,15 +130,7 @@ export default function ArhivPage() {
                       <Home className="h-4 w-4 text-[#c59b5b]" />
                       <span className="text-[#c59b5b] font-medium">{bungalowDisplayName(res.bungalow)}</span>
                     </div>
-                    <h3 className="text-white text-lg font-medium mt-1 flex items-center gap-2">
-                      {(() => {
-                        const cf = countryFlag((res as { nationality?: string | null }).nationality)
-                        return cf ? (
-                          <span title={cf.name} aria-label={cf.name} className="text-xl leading-none">{cf.flag}</span>
-                        ) : null
-                      })()}
-                      <span>{res.guestName}</span>
-                    </h3>
+                    <h3 className="text-white text-lg font-medium mt-1">{res.guestName}</h3>
                     <div className="flex items-center gap-4 mt-2 text-white/50 text-sm">
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3.5 w-3.5" />

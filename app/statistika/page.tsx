@@ -436,16 +436,12 @@ function StatistikaContent() {
                         <span className="text-white/50">Starlink</span>
                         <span className="text-white">{formatEur((stats.costs as { starlink?: number }).starlink || 0)}</span>
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Nočitve</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsNocitve?: number }).receiptsNocitve || 0)}</span>
-                      </div>
                     </div>
                   </div>
                 </div>
                 <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/70 font-medium">Dobiček nočitev</span>
-                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.accommodation - ((stats.salaryBreakdown as { accommodation?: number })?.accommodation || 0) - ((stats.costs as { platformCommission?: number }).platformCommission || 0) - ((stats.costs as { marketing?: number }).marketing || 0) - ((stats.costs as { starlink?: number }).starlink || 0) - ((stats.costs as { receiptsNocitve?: number }).receiptsNocitve || 0))}</span>
+                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.accommodation - ((stats.salaryBreakdown as { accommodation?: number })?.accommodation || 0) - ((stats.costs as { platformCommission?: number }).platformCommission || 0) - ((stats.costs as { marketing?: number }).marketing || 0) - ((stats.costs as { starlink?: number }).starlink || 0))}</span>
                 </div>
               </div>
 
@@ -468,16 +464,12 @@ function StatistikaContent() {
                         <span className="text-white/50">Plače (barman)</span>
                         <span className="text-white">{formatEur((stats.salaryBreakdown as { bar?: number })?.bar || 0)}</span>
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Bar</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsBar?: number }).receiptsBar || 0)}</span>
-                      </div>
                     </div>
                   </div>
                 </div>
                 <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/70 font-medium">Dobiček bar</span>
-                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.bar.pijaca - stats.costs.barPijaca - ((stats.salaryBreakdown as { bar?: number })?.bar || 0) - ((stats.costs as { receiptsBar?: number }).receiptsBar || 0))}</span>
+                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.bar.pijaca - stats.costs.barPijaca - ((stats.salaryBreakdown as { bar?: number })?.bar || 0))}</span>
                 </div>
               </div>
 
@@ -561,10 +553,6 @@ function StatistikaContent() {
                         <span className="text-white">{formatEur(stats.costs.barPrehrana + ((stats.costs as { mealPlan?: number }).mealPlan || 0))}</span>
                       </div>
                       <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Kuhinja</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsKuhinja?: number }).receiptsKuhinja || 0)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
                         <span className="text-white/50">Plače (kuhinja)</span>
                         <span className="text-white">{formatEur((stats.salaryBreakdown as { kuhinja?: number })?.kuhinja || 0)}</span>
                       </div>
@@ -573,7 +561,7 @@ function StatistikaContent() {
                 </div>
                 <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/70 font-medium">Dobiček kuhinja</span>
-                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.bar.prehrana + stats.revenue.mealPlan - stats.costs.barPrehrana - ((stats.costs as { mealPlan?: number }).mealPlan || 0) - ((stats.costs as { receiptsKuhinja?: number }).receiptsKuhinja || 0) - ((stats.salaryBreakdown as { kuhinja?: number })?.kuhinja || 0))}</span>
+                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.bar.prehrana + stats.revenue.mealPlan - stats.costs.barPrehrana - ((stats.costs as { mealPlan?: number }).mealPlan || 0) - ((stats.salaryBreakdown as { kuhinja?: number })?.kuhinja || 0))}</span>
                 </div>
               </div>
 
@@ -814,94 +802,17 @@ function StatistikaContent() {
                   </div>
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Nabavna cena + pranje ({stats.costSettings?.find(c => c.category === 'ostalo')?.value || 0}%)</span>
-                        <span className="text-white">{formatEur(stats.costs.ostalo)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi ostalo</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsOstalo?: number }).receiptsOstalo || 0)}</span>
-                      </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-white/50">Nabavna cena + pranje ({stats.costSettings?.find(c => c.category === 'ostalo')?.value || 0}%)</span>
+                      <span className="text-white">{formatEur(stats.costs.ostalo)}</span>
                     </div>
                   </div>
                 </div>
                 <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/70 font-medium">Dobiček ostalo</span>
-                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.ostalo - stats.costs.ostalo - ((stats.costs as { receiptsOstalo?: number }).receiptsOstalo || 0))}</span>
+                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.ostalo - stats.costs.ostalo)}</span>
                 </div>
               </div>
-
-              {/* OSNOVNA SREDSTVA (amortizacija) */}
-              {((stats.costs as { depreciation?: number }).depreciation || 0) > 0 && (
-                <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
-                  <h2 className="text-base sm:text-lg font-bold text-[#c59b5b] mb-4">OSNOVNA SREDSTVA (amortizacija)</h2>
-                  <div className="space-y-2">
-                    {((stats.costs as { depreciationItems?: { id: string; name: string; monthlyEur: number }[] }).depreciationItems || []).map((it) => (
-                      <div key={it.id} className="flex justify-between text-sm">
-                        <span className="text-white/50">{it.name}</span>
-                        <span className="text-white">{formatEur(it.monthlyEur)}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:justify-between gap-1">
-                    <span className="text-white/70 font-medium">Mesečna amortizacija skupaj</span>
-                    <span className="text-[#c8846b] font-bold">{formatEur((stats.costs as { depreciation?: number }).depreciation || 0)}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* REPREZENTANCA (kava, pijača v lokalu) */}
-              {((stats.costs as { receiptsReprezentanca?: number }).receiptsReprezentanca || 0) > 0 && (
-                <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
-                  <h2 className="text-base sm:text-lg font-bold text-[#c8846b] mb-4">REPREZENTANCA (kava, pijača v lokalu)</h2>
-                  <p className="text-white/40 text-xs mb-3">Samostojen strošek podjetja — ne bremeni oddelkov, znižuje skupni dobiček.</p>
-                  <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                    <span className="text-white/50">Računi reprezentanca</span>
-          <span className="text-[#c8846b] font-bold">{formatEur((stats.costs as { receiptsReprezentanca?: number }).receiptsReprezentanca || 0)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* TEKOČE VZDRŽEVANJE NEPREMIČNIN */}
-          {((stats.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0) > 0 && (
-            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
-              <h2 className="text-base sm:text-lg font-bold text-[#a3a36b] mb-4">TEKOČE VZDRŽEVANJE NEPREMIČNIN</h2>
-              <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni oddelkov, znižuje skupni poslovni rezultat.</p>
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Računi vzdrževanje nepremičnin</span>
-                <span className="text-[#a3a36b] font-bold">{formatEur((stats.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* NAJEMNINA HIŠA — samostojen strošek (Nabava Komba) */}
-          {((stats.costs as { najemninaHisa?: number }).najemninaHisa || 0) > 0 && (
-            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
-              <h2 className="text-base sm:text-lg font-bold text-[#b07a9a] mb-4">NAJEMNINA HIŠA</h2>
-              <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni oddelkov, znižuje skupni poslovni rezultat.</p>
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Najemnina hiša (gotovina, Nabava Komba)</span>
-                <span className="text-[#b07a9a] font-bold">{formatEur((stats.costs as { najemninaHisa?: number }).najemninaHisa || 0)}</span>
-              </div>
-            </div>
-          )}
-
-          {/* NOSAČI IN TUC TUC — vsak svoj samostojen strošek */}
-          {(((stats.costs as { porters?: number }).porters || 0) > 0 || ((stats.costs as { tuctuc?: number }).tuctuc || 0) > 0) && (
-            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
-              <h2 className="text-base sm:text-lg font-bold text-[#8fae92] mb-4">NOSAČI IN TUC TUC</h2>
-              <p className="text-white/40 text-xs mb-3">Vsak svoj strošek — zmanjšuje skupni dobiček, ne bremeni oddelkov.</p>
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Nosači</span>
-                <span className="text-[#8fae92] font-bold">{formatEur((stats.costs as { porters?: number }).porters || 0)}</span>
-              </div>
-              <div className="mt-1 flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Tuc tuc</span>
-                <span className="text-[#8fae92] font-bold">{formatEur((stats.costs as { tuctuc?: number }).tuctuc || 0)}</span>
-              </div>
-            </div>
-          )}
 
               {/* MANAGEMENT PLAČE */}
               {(stats.salaryBreakdown?.management || 0) > 0 && (
@@ -911,6 +822,24 @@ function StatistikaContent() {
                     <span className="text-white/50">Vodstvo (recepcija, vzdrževanje)</span>
                     <span className="text-white font-medium">{formatEur(stats.salaryBreakdown?.management || 0)}</span>
                   </div>
+                </div>
+              )}
+
+              {/* NOSAČI IN TUC TUC — vsak svoj samostojen strošek (ne bremeni oddelkov) */}
+              {(((stats.costs as { porters?: number }).porters || 0) > 0 || ((stats.costs as { tuctuc?: number }).tuctuc || 0) > 0) && (
+                <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+                  <h2 className="text-base sm:text-lg font-bold text-[#c8846b] mb-4">NOSAČI IN TUC TUC</h2>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-white/50">Nosači</span>
+                      <span className="text-white font-medium">{formatEur((stats.costs as { porters?: number }).porters || 0)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-white/50">Tuc tuc</span>
+                      <span className="text-white font-medium">{formatEur((stats.costs as { tuctuc?: number }).tuctuc || 0)}</span>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-white/40">Vsak svoj strošek — zmanjšuje skupni dobiček, ne bremeni oddelkov.</p>
                 </div>
               )}
 
@@ -1218,13 +1147,7 @@ function StatistikaContent() {
             </div>
           </details>
           <button
-            onClick={() => {
-              // Razpored vedno odpri na tekočem mesecu (plače ostanejo na prejšnjem).
-              const now = new Date()
-              setYear(now.getFullYear())
-              setMonth(now.getMonth() + 1)
-              setKadriView('razpored')
-            }}
+            onClick={() => setKadriView('razpored')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
               kadriView === 'razpored'
                 ? 'bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30'

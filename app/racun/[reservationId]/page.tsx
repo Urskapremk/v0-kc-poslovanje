@@ -298,7 +298,6 @@ export default function RacunPage() {
   //  - 'noStay'    → WITHOUT accommodation (only services / bar / extras)
   //  - 'stayMeals' → accommodation + food + transfers (no bar drinks, excursions, wellness…)
   const [printMode, setPrintMode] = useState<'full' | 'noStay' | 'stayMeals'>('full')
-  const [showPayments, setShowPayments] = useState(true)
   const excludeAccommodation = printMode === 'noStay'
   const onlyStayMeals = printMode === 'stayMeals'
   // Discount form state
@@ -323,36 +322,7 @@ export default function RacunPage() {
     )
   }
   
-  const { reservation, orderItems: loadedOrderItems, notes: loadedDeliveryNotes, exchangeRate, groupReservations, isSharedInvoice, discounts } = data
-
-  // When the meal plan (B / HB / FB) is already paid (e.g. through the agency), the meals
-  // it covers must not be charged again. Bar staff enter meals as ordinary bar lines, so
-  // they are matched to the plan by name.
-  const paidMealPlan = String((reservation as { mealPlanPaymentStatus?: string | null }).mealPlanPaymentStatus || '').toUpperCase() === 'PAID'
-    ? String(reservation.mealPlan || '').toUpperCase()
-    : ''
-  const isPaidPlanMeal = (name: string | null | undefined) => {
-    if (!paidMealPlan) return false
-    const n = String(name || '').toLowerCase()
-    const breakfast = /breakfast|zajtrk|petit[- ]d[ée]jeuner/.test(n)
-    const lunch = /lunch|kosilo|d[ée]jeuner/.test(n) && !breakfast
-    const dinner = /dinner|ve[cč]erj|d[iî]ner/.test(n)
-    if (paidMealPlan === 'FB') return breakfast || lunch || dinner
-    if (paidMealPlan === 'HB') return breakfast || dinner
-    if (paidMealPlan === 'B' || paidMealPlan === 'BB') return breakfast
-    return false
-  }
-  const orderItems = (loadedOrderItems as OrderItem[]).map((item) =>
-    (item.category === 'Prehrana' || item.category === 'Food') && item.paymentStatus === 'UNPAID' && !item.isFree && isPaidPlanMeal(item.name)
-      ? { ...item, paymentStatus: 'PAID' }
-      : item,
-  )
-  const rawDeliveryNotes = (loadedDeliveryNotes as DeliveryNote[]).map((note) => ({
-    ...note,
-    items: note.items.map((it) =>
-      !it.coveredByMealPlan && !it.isFree && isPaidPlanMeal(it.productName) ? { ...it, coveredByMealPlan: true } : it,
-    ),
-  }))
+  const { reservation, orderItems, notes: rawDeliveryNotes, exchangeRate, groupReservations, isSharedInvoice, discounts } = data
   const invoiceDiscounts = (discounts || []) as InvoiceDiscount[]
   
   // The invoice shows ALL services, including those scheduled for a future date
@@ -388,8 +358,7 @@ export default function RacunPage() {
     !item.isFree &&
     (item.category === 'Izlet' || item.category === 'Transfer') &&
     Number(item.refPriceAr || 0) > 0 &&
-    !isAgencyBooking &&
-    showPayments
+    !isAgencyBooking
   const separatePaidAr = invoiceOrderItems
     .filter(isSeparatelyPaidService)
     .reduce((sum, item) => sum + Number(item.refPriceAr || 0), 0)
@@ -404,12 +373,14 @@ export default function RacunPage() {
   
   // Bar/food total. In "only accommodation + food" mode the note.totalAr still reflects
   // the whole (unfiltered) note, so recompute from the kept food items instead.
-  const barTotal = (deliveryNotes as DeliveryNote[]).reduce(
-    (sum, note) =>
-      sum +
-      note.items.reduce((s, it) => s + ((it.coveredByMealPlan || it.isFree) ? 0 : it.priceAr * it.quantity), 0),
-    0,
-  )
+  const barTotal = onlyStayMeals
+    ? (deliveryNotes as DeliveryNote[]).reduce(
+        (sum, note) =>
+          sum +
+          note.items.reduce((s, it) => s + ((it.coveredByMealPlan || it.isFree) ? 0 : it.priceAr * it.quantity), 0),
+        0,
+      )
+    : (deliveryNotes as DeliveryNote[]).reduce((sum, note) => sum + (note.totalAr || 0), 0)
 
   // Total of complimentary "On House" items (not charged, shown for reference).
   // Order items: isFree line amount. Bar items: isFree and NOT meal-plan covered (priceAr × qty).
@@ -436,10 +407,8 @@ export default function RacunPage() {
   const isTransferItem = (i: OrderItem) => i.category === 'Transfer'
   const isMealItem = (i: OrderItem) => i.category === 'Prehrana'
   const isExcursionItem = (i: OrderItem) => i.category === 'Izlet'
-  // With payments switched off, already-paid transfers/excursions are dropped entirely.
   const shownOnInvoiceDay = (i: OrderItem) =>
-    i.paymentStatus !== 'PAID' || i.isFree || isMealItem(i) ||
-    (showPayments && (isTransferItem(i) || isExcursionItem(i)))
+    i.paymentStatus !== 'PAID' || i.isFree || isTransferItem(i) || isMealItem(i) || isExcursionItem(i)
   // A day can have MORE THAN ONE delivery note (e.g. an extra empty note). Merge all notes'
   // items per day so a later/empty note never clobbers a note that actually has items.
   const noteDay = (d: string) => (d && d.includes('T') ? d.split('T')[0] : d)
@@ -1163,7 +1132,6 @@ export default function RacunPage() {
             </div>
 
             {/* Payments */}
-            {showPayments && (
             <div className="inv-pay-box mb-8 p-5 rounded-2xl border">
               <h3 className="inv-green font-semibold mb-3 text-sm uppercase tracking-wider">{t.payments}</h3>
               {/* Only the combined total paid is shown here (prepayment + separately-paid
@@ -1180,11 +1148,10 @@ export default function RacunPage() {
                 </div>
               )}
             </div>
-            )}
 
             {/* Payment specification: when & how each amount was paid.
                 Every row here is part of Total paid (prepayment + separately-paid services). */}
-            {showPayments && paymentSpec.length > 0 && (
+            {paymentSpec.length > 0 && (
               <div className="inv-pay-box mb-8 p-5 rounded-2xl border">
                 <h3 className="inv-green font-semibold mb-3 text-sm uppercase tracking-wider">{t.paymentSpec}</h3>
                 {paymentSpec.map((r, idx) => (
@@ -1243,14 +1210,6 @@ export default function RacunPage() {
                 Bivanje + prehrana + transport
               </button>
             </div>
-            <button
-              onClick={() => setShowPayments(v => !v)}
-              aria-pressed={showPayments}
-              className={`px-3 py-2 text-sm font-medium rounded-lg border transition-colors ${showPayments ? 'border-[#8fae92]/50 bg-[#8fae92]/15 text-[#8fae92]' : 'border-white/15 bg-white/5 text-white/50 hover:text-white'}`}
-              title="Prikaži ali skrij plačila in specifikacijo plačil na računu"
-            >
-              {showPayments ? 'Plačila: vklop' : 'Plačila: izklop'}
-            </button>
             <button
               onClick={handleDownloadPdf}
               disabled={generatingPdf}

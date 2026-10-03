@@ -11,7 +11,6 @@ import {
 } from '@/app/actions/statistics'
 import StroskiArhivTab from './stroski-arhiv-tab'
 import VraciloHnaturaTab from './vracilo-hnatura-tab'
-import OsnovnaSredstvaTab from './osnovna-sredstva-tab'
 
 const MONTH_NAMES = ['januar', 'februar', 'marec', 'april', 'maj', 'junij', 'julij', 'avgust', 'september', 'oktober', 'november', 'december']
 
@@ -48,7 +47,7 @@ function defaultDate(year: number, month: number) {
 
 export default function MarketingTab({ year, month }: { year: number; month: number }) {
   const [category, setCategory] = useState<CategoryId>('marketing')
-  const [view, setView] = useState<'expenses' | 'archive' | 'hnatura' | 'osnovna'>('expenses')
+  const [view, setView] = useState<'expenses' | 'archive' | 'hnatura'>('expenses')
   const activeCat = CATEGORIES.find((c) => c.id === category)!
   const key = ['marketing-expenses-year', category, year]
   const { data: expenses, isLoading } = useSWR(key, () => getMarketingExpensesYear(year, category))
@@ -170,22 +169,12 @@ export default function MarketingTab({ year, month }: { year: number; month: num
         >
           Vračilo Hnatura d.o.o.
         </button>
-        <button
-          onClick={() => { setView('osnovna'); setEditId(null) }}
-          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-            view === 'osnovna' ? 'bg-[#c59b5b]/20 text-[#c59b5b]' : 'text-white/50 hover:text-white/80'
-          }`}
-        >
-          Osnovna sredstva
-        </button>
       </div>
 
       {view === 'archive' ? (
         <StroskiArhivTab year={year} month={month} />
       ) : view === 'hnatura' ? (
         <VraciloHnaturaTab year={year} month={month} />
-      ) : view === 'osnovna' ? (
-        <OsnovnaSredstvaTab year={year} month={month} />
       ) : (
       <>
       {/* Add new */}

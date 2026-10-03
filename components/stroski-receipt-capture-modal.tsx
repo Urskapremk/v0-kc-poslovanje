@@ -2,8 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Camera, Upload, Loader2, Receipt, Sparkles, SplitSquareHorizontal, Plus, ClipboardPaste } from 'lucide-react'
-import { addStroskiReceipt, setReceiptPaymentMethod } from '@/app/actions/stroski-arhiv'
+import { X, Camera, Upload, Loader2, Receipt, Sparkles, SplitSquareHorizontal } from 'lucide-react'
+import { addStroskiReceipt } from '@/app/actions/stroski-arhiv'
 import { getExchangeRate } from '@/app/actions/komba'
 import {
   STROSEK_CATEGORIES,
@@ -13,7 +13,6 @@ import {
 } from '@/lib/stroski-categories'
 
 type Currency = 'EUR' | 'Ar'
-type Page = { dataUrl: string; name: string }
 
 // Ključa za shranjevanje osnutka (da fotografiranje ne "vrže ven" uporabnice:
 // če mobilni brskalnik osveži stran ob vrnitvi iz kamere, obnovimo modal + podatke).
@@ -25,7 +24,7 @@ function todayIso() {
 }
 
 function emptyAlloc(): Record<StrosekCategory, string> {
-  return { bar: '', nocitve: '', kuhinja: '', wellness: '', reprezentanca: '', vzdrzevanje: '', ostalo: '' }
+  return { bar: '', nocitve: '', kuhinja: '', wellness: '', ostalo: '' }
 }
 
 // Pomanjša sliko na največ maxDim px in vrne JPEG dataURL (manjši = manj pomnilnika, hitrejši prenos)
@@ -72,27 +71,21 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([arr], { type: mime })
 }
 
-function isPdfDataUrl(dataUrl: string) {
-  return dataUrl.startsWith('data:application/pdf')
-}
-
 export default function StroskiReceiptCaptureModal({
   isOpen,
   onClose,
   onSaved,
-  requirePayment = false,
 }: {
   isOpen: boolean
   onClose: () => void
   onSaved?: () => void
-  requirePayment?: boolean
 }) {
-  const [payMethod, setPayMethod] = useState<'cash' | 'orange_money' | 'card' | null>(null)
   const cameraRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  // Strani računa (vsaka je pomanjšan dataURL); prva stran se uporabi za samodejno branje.
-  const [pages, setPages] = useState<Page[]>([])
+  // Slika je predstavljena kot pomanjšan dataURL (preživi osvežitev strani).
+  const [imageData, setImageData] = useState<string | null>(null)
+  const [imageName, setImageName] = useState('')
   const [date, setDate] = useState(todayIso())
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
@@ -116,7 +109,8 @@ export default function StroskiReceiptCaptureModal({
       const raw = sessionStorage.getItem(DRAFT_KEY)
       if (raw) {
         const d = JSON.parse(raw)
-        if (Array.isArray(d.pages)) setPages(d.pages.filter((p: Page) => p && typeof p.dataUrl === 'string'))
+        if (d.imageData) setImageData(d.imageData)
+        if (d.imageName) setImageName(d.imageName)
         if (d.date) setDate(d.date)
         if (typeof d.description === 'string') setDescription(d.description)
         if (typeof d.amount === 'string') setAmount(d.amount)
@@ -133,19 +127,19 @@ export default function StroskiReceiptCaptureModal({
   // Sproti shranjuj osnutek (samo ko je modal odprt in ima vsebino) -> preživi osvežitev
   useEffect(() => {
     if (!isOpen || !restoredRef.current) return
-    const hasContent = pages.length > 0 || !!amount || !!description.trim()
+    const hasContent = !!imageData || !!amount || !!description.trim()
     try {
       if (hasContent) {
         sessionStorage.setItem(
           DRAFT_KEY,
-          JSON.stringify({ pages, date, description, amount, currency, alloc }),
+          JSON.stringify({ imageData, imageName, date, description, amount, currency, alloc }),
         )
         sessionStorage.setItem(STROSKI_CAPTURE_OPEN_KEY, '1')
       }
     } catch {
-      // ignoriraj (npr. presežena kvota pri veliko straneh)
+      // ignoriraj
     }
-  }, [isOpen, pages, date, description, amount, currency, alloc])
+  }, [isOpen, imageData, imageName, date, description, amount, currency, alloc])
 
   function clearDraft() {
     try {
@@ -167,8 +161,8 @@ export default function StroskiReceiptCaptureModal({
   const cur = currency === 'Ar' ? 'Ar' : '€'
 
   function reset() {
-    setPayMethod(null)
-    setPages([])
+    setImageData(null)
+    setImageName('')
     setDate(todayIso())
     setDescription('')
     setAmount('')
@@ -199,7 +193,7 @@ export default function StroskiReceiptCaptureModal({
     setAlloc((prev) => ({ ...prev, [cat]: String(Math.round((current + add) * 100) / 100) }))
   }
 
-  // Samodejno prebere znesek/datum/opis iz prve slike računa (prek API poti)
+  // Samodejno prebere znesek/datum/opis iz slike računa (prek API poti)
   async function runOcr(dataUrl: string) {
     setReading(true)
     setAutoFilled(false)
@@ -208,12 +202,11 @@ export default function StroskiReceiptCaptureModal({
       fd.append('file', dataUrlToBlob(dataUrl), 'receipt.jpg')
       const res = await fetch('/api/read-receipt', { method: 'POST', body: fd })
       if (!res.ok) return
-      const result: { amount: number | null; currency: Currency | null; date: string | null; description: string | null } =
-        await res.json()
+      const result: { amountEur: number | null; date: string | null; description: string | null } = await res.json()
       let filled = false
-      if (typeof result.amount === 'number' && result.amount > 0) {
-        if (result.currency === 'Ar' || result.currency === 'EUR') setCurrency(result.currency)
-        setAmount(String(result.amount))
+      if (typeof result.amountEur === 'number' && result.amountEur > 0) {
+        setCurrency('EUR')
+        setAmount(String(result.amountEur))
         filled = true
       }
       if (result.date && /^\d{4}-\d{2}-\d{2}$/.test(result.date)) {
@@ -232,97 +225,34 @@ export default function StroskiReceiptCaptureModal({
     }
   }
 
-  // Doda eno ali več novih strani (fotografija ali datoteka)
-  async function addFiles(files: FileList | null) {
-    if (!files || files.length === 0) return
+  async function pickFile(f: File | null) {
+    if (!f) {
+      setImageData(null)
+      setImageName('')
+      setAutoFilled(false)
+      clearDraft()
+      return
+    }
     setError(null)
-    const wasEmpty = pages.length === 0
+    setImageName(f.name)
     try {
-      const newPages: Page[] = []
-      for (const f of Array.from(files)) {
-        const dataUrl = f.type.startsWith('image/')
-          ? await fileToDownscaledDataUrl(f)
-          : await new Promise<string>((resolve, reject) => {
-              const reader = new FileReader()
-              reader.onload = () => resolve(reader.result as string)
-              reader.onerror = reject
-              reader.readAsDataURL(f)
-            })
-        newPages.push({ dataUrl, name: f.name })
-      }
-      setPages((prev) => [...prev, ...newPages])
-      // Samodejno branje samo ob PRVI strani (znesek/datum/opis)
-      if (wasEmpty && newPages[0] && (newPages[0].name || '').length >= 0) {
-        const first = newPages[0]
-        if (!isPdfDataUrl(first.dataUrl) || first.dataUrl.startsWith('data:application/pdf')) {
-          void runOcr(first.dataUrl)
-        }
+      // Slike pomanjšamo (manj pomnilnika -> mobilni brskalnik ne osveži strani); PDF pretvorimo v dataURL.
+      const dataUrl = f.type.startsWith('image/')
+        ? await fileToDownscaledDataUrl(f)
+        : await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve(reader.result as string)
+            reader.onerror = reject
+            reader.readAsDataURL(f)
+          })
+      setImageData(dataUrl)
+      // Samodejno branje za slike (OCR); PDF preskočimo pri pomanjšanem prikazu, a ga vseeno beremo
+      if (f.type.startsWith('image/') || f.type === 'application/pdf') {
+        void runOcr(dataUrl)
       }
     } catch {
       setError('Slike ni bilo mogoče obdelati. Poskusi znova.')
     }
-  }
-
-  // Prilepi posnetek zaslona iz odložišča (gumb "Prilepi posnetek")
-  async function handlePasteFromClipboard() {
-    setError(null)
-    try {
-      if (!navigator.clipboard || !navigator.clipboard.read) {
-        setError('Lepljenje ni podprto v tem brskalniku — uporabi Naloži ali Fotografiraj.')
-        return
-      }
-      const items = await navigator.clipboard.read()
-      for (const item of items) {
-        const type = item.types.find((t) => t.startsWith('image/'))
-        if (type) {
-          const blob = await item.getType(type)
-          const ext = type.split('/')[1] || 'png'
-          const file = new File([blob], `posnetek-${Date.now()}.${ext}`, { type })
-          const dt = new DataTransfer()
-          dt.items.add(file)
-          await addFiles(dt.files)
-          return
-        }
-      }
-      setError('V odložišču ni slike. Najprej naredi posnetek zaslona (Print Screen).')
-    } catch {
-      setError('Slike iz odložišča ni bilo mogoče prebrati (dovoljenje zavrnjeno?).')
-    }
-  }
-
-  // Neposredno lepljenje s tipkovnico (Ctrl/Cmd+V) med odprtim modalom
-  useEffect(() => {
-    if (!isOpen) return
-    function onPaste(e: ClipboardEvent) {
-      const clipItems = e.clipboardData?.items
-      if (!clipItems) return
-      for (const it of Array.from(clipItems)) {
-        if (it.type.startsWith('image/')) {
-          const f = it.getAsFile()
-          if (f) {
-            e.preventDefault()
-            const dt = new DataTransfer()
-            dt.items.add(f)
-            void addFiles(dt.files)
-            return
-          }
-        }
-      }
-    }
-    document.addEventListener('paste', onPaste)
-    return () => document.removeEventListener('paste', onPaste)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, pages.length])
-
-  function removePage(idx: number) {
-    setPages((prev) => {
-      const next = prev.filter((_, i) => i !== idx)
-      if (next.length === 0) {
-        setAutoFilled(false)
-        clearDraft()
-      }
-      return next
-    })
   }
 
   function handleClose() {
@@ -331,7 +261,7 @@ export default function StroskiReceiptCaptureModal({
   }
 
   async function handleSave() {
-    if (pages.length === 0) {
+    if (!imageData) {
       setError('Najprej fotografiraj ali naloži račun.')
       return
     }
@@ -347,52 +277,32 @@ export default function StroskiReceiptCaptureModal({
       )
       return
     }
-    if (requirePayment && !payMethod) {
-      setError('Izberi, s čim je bilo plačano: gotovina ali Orange Money.')
-      return
-    }
-    if (payMethod && !(totalAmount > 0)) {
-      setError('Vpiši znesek računa, da se zabeleži odliv.')
-      return
-    }
     setSaving(true)
     setError(null)
     try {
-      // 1) Naloži vse strani v blob shrambo
-      const uploaded: { pathname: string; fileName: string | null }[] = []
-      for (const p of pages) {
-        const blob = dataUrlToBlob(p.dataUrl)
-        const fd = new FormData()
-        fd.append('file', blob, p.name || 'receipt.jpg')
-        const res = await fetch('/api/upload-stroski-document', { method: 'POST', body: fd })
-        if (!res.ok) throw new Error('upload')
-        const { pathname } = await res.json()
-        uploaded.push({ pathname, fileName: p.name || 'receipt.jpg' })
-      }
+      // 1) Naloži datoteko v blob shrambo
+      const blob = dataUrlToBlob(imageData)
+      const fd = new FormData()
+      fd.append('file', blob, imageName || 'receipt.jpg')
+      const res = await fetch('/api/upload-stroski-document', { method: 'POST', body: fd })
+      if (!res.ok) throw new Error('upload')
+      const { pathname } = await res.json()
 
       // Zneski se shranijo v EUR (Ar se preračuna prek tečaja)
       const categories: CategoryAllocation[] = STROSEK_CATEGORIES
         .map((c) => ({ category: c, amountEur: Math.round(toEur(parseFloat(alloc[c]) || 0) * 100) / 100 }))
         .filter((c) => c.amountEur > 0)
 
-      // 2) Shrani zapis v arhiv (prva stran je glavna sličica)
-      const { id: receiptId } = await addStroskiReceipt({
+      // 2) Shrani zapis v arhiv
+      await addStroskiReceipt({
         date,
         description: description.trim(),
         amountEur: totalEur,
-        currency,
-        amountOriginal: Math.round(totalAmount * 100) / 100,
         categories,
-        pathname: uploaded[0].pathname,
-        fileName: uploaded[0].fileName ?? undefined,
-        pages: uploaded,
+        pathname,
+        fileName: imageName || 'receipt.jpg',
       })
 
-      if (payMethod) {
-        await setReceiptPaymentMethod(receiptId, payMethod, { createOmOutflow: true })
-      }
-
-      setPayMethod(null)
       reset()
       onSaved?.()
       onClose()
@@ -404,6 +314,8 @@ export default function StroskiReceiptCaptureModal({
   }
 
   if (!isOpen || typeof document === 'undefined') return null
+
+  const isPdf = !!imageData && imageData.startsWith('data:application/pdf')
 
   return createPortal(
     <div
@@ -430,119 +342,58 @@ export default function StroskiReceiptCaptureModal({
 
         {/* Telo */}
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {/* Skriti vhodi za kamero in disk (dovolimo večkratno izbiro) */}
+          {/* Skriti vhodi za kamero in disk */}
           <input
             ref={cameraRef}
             type="file"
             accept="image/*"
             capture="environment"
             className="hidden"
-            onChange={(e) => {
-              addFiles(e.target.files)
-              e.target.value = ''
-            }}
+            onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
           />
           <input
             ref={fileRef}
             type="file"
             accept="image/*,application/pdf"
-            multiple
             className="hidden"
-            onChange={(e) => {
-              addFiles(e.target.files)
-              e.target.value = ''
-            }}
+            onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
           />
 
-          {/* Predogled strani + gumbi za zajem */}
-          {pages.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium uppercase tracking-wider text-white/40">
-                  Strani računa ({pages.length})
-                </span>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {pages.map((p, i) => {
-                  const pdf = isPdfDataUrl(p.dataUrl)
-                  return (
-                    <div key={i} className="relative aspect-[3/4] overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                      {pdf ? (
-                        <div className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-[10px] text-white/50">
-                          <Receipt className="h-5 w-5 text-white/40" />
-                          PDF
-                        </div>
-                      ) : (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.dataUrl || '/placeholder.svg'} alt={`Stran ${i + 1}`} className="h-full w-full object-cover" />
-                      )}
-                      <span className="absolute left-1 top-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                        {i + 1}
-                      </span>
-                      <button
-                        onClick={() => removePage(i)}
-                        className="absolute right-1 top-1 rounded-md bg-black/60 p-1 text-white/80 hover:bg-black/80"
-                        title="Odstrani stran"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  )
-                })}
-                {/* Gumb za dodajanje strani */}
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  className="flex aspect-[3/4] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-[#c59b5b]/40 bg-[#c59b5b]/5 text-[#c59b5b] transition-all hover:bg-[#c59b5b]/15"
-                  title="Dodaj stran"
-                >
-                  <Plus className="h-5 w-5" />
-                  <span className="text-[10px] font-medium">Dodaj stran</span>
-                </button>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => cameraRef.current?.click()}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 py-2 text-xs font-medium text-white/70 transition-all hover:bg-white/10 hover:text-white"
-                >
-                  <Camera className="h-4 w-4" />
-                  Fotografiraj naslednjo stran
-                </button>
-                <button
-                  onClick={handlePasteFromClipboard}
-                  className="flex items-center justify-center gap-2 rounded-lg border border-[#8fae92]/30 bg-[#8fae92]/10 px-3 py-2 text-xs font-medium text-[#8fae92] transition-all hover:bg-[#8fae92]/20"
-                  title="Prilepi posnetek iz odložišča (Ctrl+V)"
-                >
-                  <ClipboardPaste className="h-4 w-4" />
-                  Prilepi
-                </button>
-              </div>
-            </div>
-          )}
-
-          {pages.length === 0 && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => cameraRef.current?.click()}
-                  className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[#c59b5b]/30 bg-[#c59b5b]/10 py-6 text-[#c59b5b] transition-all hover:bg-[#c59b5b]/20"
-                >
-                  <Camera className="h-6 w-6" />
-                  <span className="text-xs font-medium">Fotografiraj</span>
-                </button>
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  className="flex flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 py-6 text-white/70 transition-all hover:bg-white/10 hover:text-white"
-                >
-                  <Upload className="h-6 w-6" />
-                  <span className="text-xs font-medium">Naloži iz računalnika</span>
-                </button>
-              </div>
+          {/* Predogled ali gumbi za zajem */}
+          {imageData && !isPdf ? (
+            <div className="relative overflow-hidden rounded-xl border border-white/10">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={imageData || "/placeholder.svg"} alt="Predogled računa" className="max-h-64 w-full object-contain bg-black/30" />
               <button
-                onClick={handlePasteFromClipboard}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border border-[#8fae92]/30 bg-[#8fae92]/10 py-3 text-sm font-medium text-[#8fae92] transition-all hover:bg-[#8fae92]/20"
+                onClick={() => pickFile(null)}
+                className="absolute right-2 top-2 rounded-lg bg-black/60 p-1.5 text-white/80 hover:bg-black/80"
+                title="Odstrani sliko"
               >
-                <ClipboardPaste className="h-4 w-4" />
-                Prilepi posnetek (Ctrl+V)
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : imageData && isPdf ? (
+            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/70">
+              <span className="truncate">{imageName || 'Dokument PDF'}</span>
+              <button onClick={() => pickFile(null)} className="text-white/40 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={() => cameraRef.current?.click()}
+                className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[#c59b5b]/30 bg-[#c59b5b]/10 py-6 text-[#c59b5b] transition-all hover:bg-[#c59b5b]/20"
+              >
+                <Camera className="h-6 w-6" />
+                <span className="text-xs font-medium">Fotografiraj</span>
+              </button>
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="flex flex-col items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 py-6 text-white/70 transition-all hover:bg-white/10 hover:text-white"
+              >
+                <Upload className="h-6 w-6" />
+                <span className="text-xs font-medium">Naloži iz računalnika</span>
               </button>
             </div>
           )}
@@ -678,52 +529,6 @@ export default function StroskiReceiptCaptureModal({
             )}
           </div>
 
-          {/* Način plačila → odliv iz prave denarnice */}
-          <div>
-            <label className="mb-2 block text-[11px] font-medium uppercase tracking-wider text-white/50">
-              Plačano z{requirePayment ? ' *' : ''}
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                { id: 'cash', label: 'Gotovina', hint: 'blagajna Tourism', color: '#c59b5b' },
-                { id: 'orange_money', label: 'Orange Money', hint: 'denarnica OM', color: '#e08a3c' },
-                { id: 'card', label: 'Plačilna kartica', hint: 'bančni račun', color: '#6aa9d6' },
-              ] as const).map((m) => {
-                const active = payMethod === m.id
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setPayMethod(active ? null : m.id)}
-                    className="rounded-xl border px-3 py-3 text-left transition-all"
-                    style={{
-                      borderColor: active ? m.color : 'rgba(255,255,255,0.1)',
-                      background: active ? `${m.color}26` : 'rgba(255,255,255,0.05)',
-                    }}
-                  >
-                    <span className="block text-sm font-semibold" style={{ color: active ? m.color : 'rgba(255,255,255,0.8)' }}>
-                      {m.label}
-                    </span>
-                    <span className="block text-[11px] text-white/40">{m.hint}</span>
-                  </button>
-                )
-              })}
-            </div>
-            {payMethod === 'card' && (
-              <p className="mt-2 text-xs text-[#6aa9d6]">
-                Odliv ni ustvarjen ročno — plačilo se poveže z bančnim izpiskom.
-              </p>
-            )}
-            {payMethod && payMethod !== 'card' && totalAmount > 0 && (
-              <p className="mt-2 text-xs text-[#8fae92]">
-                Ob shranjevanju se odšteje{' '}
-                {(currency === 'Ar' ? Math.round(totalAmount) : Math.round(totalEur * rate)).toLocaleString('sl-SI')} Ar iz{' '}
-                {payMethod === 'cash' ? 'gotovinske blagajne Tourism' : 'Orange Money'}.
-              </p>
-            )}
-          </div>
-
           {error && <p className="text-sm text-red-400">{error}</p>}
         </div>
 
@@ -737,7 +542,7 @@ export default function StroskiReceiptCaptureModal({
           </button>
           <button
             onClick={handleSave}
-            disabled={saving || pages.length === 0}
+            disabled={saving || !imageData}
             className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#c59b5b] py-3 text-sm font-semibold text-[#152329] transition-all hover:bg-[#c59b5b]/90 disabled:opacity-50"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Receipt className="h-4 w-4" />}

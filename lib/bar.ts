@@ -30,8 +30,7 @@ export const BAR_STUDENTS = ['Flavienne Winjisna', 'Brigida Aoulati', 'Maria Fra
 // nikoli (kuhinjski student, po pomoti dodan v bar). Barski študenti od
 // septembra 2026 naprej (glej usesSepPattern / BAR_STUDENTS).
 export function getActiveBarStaff(year: number, month: number): string[] {
-  const fransiaActive = year < 2026 || (year === 2026 && month <= 9)
-  const core: string[] = fransiaActive ? ['Alex', 'Fransia', 'Sandia', 'Walas'] : ['Alex', 'Sandia', 'Walas']
+  const core: string[] = ['Alex', 'Fransia', 'Sandia', 'Walas']
   const jonnyActive = year < 2026 || (year === 2026 && month <= 8)
   const withJonny = jonnyActive ? [...core, 'Jonny'] : core
   const students = year > 2026 || (year === 2026 && month >= 9) ? [...BAR_STUDENTS] : []
@@ -135,7 +134,7 @@ function usesNamedHelperWindow(year: number, month: number, day: number): boolea
 // Manual per-date overrides: force a worker onto a specific MAIN shift even if the
 // rotation would give them the day off. (People who come in on their day off are
 // handled via BAR_MANUAL_EXTRA_OVERRIDES so the schedule still shows "Prosto".)
-const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff | (typeof BAR_STUDENTS)[number], BarShift>>> = {
+const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff, BarShift>>> = {
   // 1. avgust 2026: še ni gostov → brez večerne smene, nihče prost.
   // 2 zjutraj (Alex, Walas) + Jonny dopoldan = 3 v jutranji smeni;
   // 2 popoldan (Fransia, Sandia) = opoldanska smena.
@@ -238,44 +237,7 @@ const BAR_MANUAL_OVERRIDES: Record<string, Partial<Record<BarStaff | (typeof BAR
   // Uporabnica: Sandia naj bo takrat sredi dneva (opoldne) namesto Fransie.
   '2026-09-09': { Sandia: 'MIDDAY' },
   '2026-09-10': { Sandia: 'MIDDAY' },
-  // 1. oktober 2026 (uporabnica): Walas zjutraj, Frenki opoldne.
-  '2026-10-01': {
-  Walas: 'MORNING',
-  'Maria Franclise Soanatera': 'MIDDAY',
-  },
-  // 3. in 4. oktober 2026 (uporabnica): Frenki zjutraj poleg Flavi.
-  '2026-10-03': { 'Maria Franclise Soanatera': 'MORNING' },
-  '2026-10-04': { 'Maria Franclise Soanatera': 'MORNING' },
-  // 8. oktober 2026 (uporabnica): Sandia zjutraj, Frenki opoldne.
-  '2026-10-08': {
-    Sandia: 'MORNING',
-    'Maria Franclise Soanatera': 'MIDDAY',
-  },
-  // 10. in 11. oktober 2026 (uporabnica): Frenki zjutraj z Brigido.
-  '2026-10-10': { 'Maria Franclise Soanatera': 'MORNING' },
-  '2026-10-11': { 'Maria Franclise Soanatera': 'MORNING' },
-  '2026-10-17': { 'Brigida Aoulati': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Maria Franclise Soanatera': 'EVENING' },
-  '2026-10-18': { 'Brigida Aoulati': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Maria Franclise Soanatera': 'EVENING' },
-  '2026-10-24': { 'Maria Franclise Soanatera': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Brigida Aoulati': 'EVENING' },
-  '2026-10-25': { 'Maria Franclise Soanatera': 'MORNING', 'Flavienne Winjisna': 'MORNING', 'Brigida Aoulati': 'EVENING' },
-  '2026-10-31': { 'Maria Franclise Soanatera': 'MORNING', 'Brigida Aoulati': 'MORNING', 'Flavienne Winjisna': 'EVENING' },
-  // 15. oktober 2026 (uporabnica): opoldne Flavi, zjutraj Walas + Frenki.
-  '2026-10-15': {
-    Walas: 'MORNING',
-    'Flavienne Winjisna': 'MIDDAY',
-    'Maria Franclise Soanatera': 'MORNING',
-  },
-  // 22. oktober 2026 (uporabnica): Sandia zjutraj, Brigida opoldne.
-  '2026-10-22': {
-    Sandia: 'MORNING',
-    'Brigida Aoulati': 'MIDDAY',
-  },
-  // 29. oktober 2026 (uporabnica): Walas zjutraj, Frenki opoldne.
-  '2026-10-29': {
-    Walas: 'MORNING',
-    'Maria Franclise Soanatera': 'MIDDAY',
-  },
-  }
+}
 
 // Manual per-date overrides for the extra split-shift segments. Replaces the
 // computed extras for the listed people (empty array = removes their extras).
@@ -365,11 +327,6 @@ const BAR_MANUAL_EXTRA_OVERRIDES: Record<string, Partial<Record<BarStaff, BarExt
   return year > 2026 || (year === 2026 && month >= 9)
   }
 
-  // Od oktobra 2026 Fransia ne dela več v baru.
-  function usesOctPattern(year: number, month: number): boolean {
-  return year > 2026 || (year === 2026 && month >= 10)
-  }
-
 /**
  * Generate the bar schedule for a whole month.
  *
@@ -407,58 +364,7 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
       const pos = ((globalDay % 7) + 7) % 7
       const evenWeek = Math.floor(globalDay / 7) % 2 === 0
 
-      if (usesOctPattern(year, month)) {
-        // --- Oktober 2026 naprej: Fransia NE dela več v baru ---
-        // Mentorji Alex/Sandia/Walas (6+1, prosti dnevi pos 0/2/3). Ko delajo vsi
-        // trije: en mentor na smeno — večer fant (tedensko menjava), drugi fant
-        // jutro, Sandia opoldne. Ko je en mentor prost: jutro + večer mentor,
-        // opoldne pokrije študentka (prekrivanje 11-12:30 in 15:30-17 z mentorjem).
-        // Alex = delavec, vedno OPOLDNE (edini na opoldanski smeni).
-        // Mentorja Walas/Sandia: jutro + večer (tedenska menjava).
-        // Ko je en mentor prost, drugi mentor dela večer, Alex pa jutro (opoldne prazno).
-        // Ko je Alex prost, opoldanske smene ni.
-        // Opoldne NIKOLI brez delavca: Alex vedno opoldne; ko je Alex prost,
-        // gre opoldne en mentor (tedenska menjava), drugi večer.
-        fransia = 'OFF'
-        if (pos === WEEKLY_OFF_SLOT.Walas) {
-          walas = 'OFF'
-          sandia = 'EVENING'
-          alex = 'MIDDAY'
-        } else if (pos === WEEKLY_OFF_SLOT.Sandia) {
-          sandia = 'OFF'
-          walas = 'EVENING'
-          alex = 'MIDDAY'
-        } else if (pos === WEEKLY_OFF_SLOT.Alex) {
-          alex = 'OFF'
-          if (evenWeek) {
-            sandia = 'MIDDAY'
-            walas = 'EVENING'
-          } else {
-            walas = 'MIDDAY'
-            sandia = 'EVENING'
-          }
-        } else {
-          alex = 'MIDDAY'
-          if (evenWeek) {
-            sandia = 'EVENING'
-            walas = 'MORNING'
-          } else {
-            sandia = 'MORNING'
-            walas = 'EVENING'
-          }
-        }
-
-        // Študentke: NIKOLI opoldne. Jutro največ 1 (z mentorjem), večer do 2
-        // (z mentorjem → skupaj 3). Tedensko rotira, katera je zjutraj; vsaka ima
-        // 1 prost dan na teden (pos 4/5/6).
-        const weekIndex = Math.floor(globalDay / 7)
-        const offIdx = pos >= 4 && pos <= 6 ? pos - 4 : -1
-        let morningIdx = ((weekIndex % 3) + 3) % 3
-        if (morningIdx === offIdx) morningIdx = (morningIdx + 1) % 3
-        BAR_STUDENTS.forEach((name, i) => {
-          studentShifts[name] = i === offIdx ? 'OFF' : i === morningIdx ? 'MORNING' : 'EVENING'
-        })
-      } else if (usesSepPattern(year, month)) {
+      if (usesSepPattern(year, month)) {
         // --- September 2026 onward ---
         // Fransia ONLY midday. Alex/Sandia/Walas across morning+evening.
         // Sandia works evening regularly (on no-off days), always with a boy
@@ -655,9 +561,9 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
     // Manual overrides for specific dates (force a worker onto a shift even if off).
     const override = BAR_MANUAL_OVERRIDES[date]
     if (override) {
-  for (const [p, shift] of Object.entries(override)) {
-  if (shift && p in assignments) (assignments as Record<string, BarShift>)[p] = shift
-  }
+      for (const p of BAR_STAFF) {
+        if (override[p]) assignments[p] = override[p]!
+      }
     }
 
     // Ročno določeni dnevi (BAR_MANUAL_OVERRIDES) so v celoti ročni → samodejni

@@ -135,7 +135,6 @@ export default function BlagajniskiDnevnik({ year }: { year: number }) {
           <div className="space-y-3">
             {journalMonths.map(([ym, entries]) => {
               const endBal = entries[entries.length - 1]?.balance ?? 0
-              const displayEntries = [...entries].reverse()
               return (
                 <div key={ym} className="overflow-hidden rounded-xl border border-white/10 bg-white/[0.02]">
                   <div className="flex items-center gap-3 border-b border-white/[0.06] px-4 py-3">
@@ -154,7 +153,7 @@ export default function BlagajniskiDnevnik({ year }: { year: number }) {
                     <span className="w-28 shrink-0 text-right text-[#c59b5b]">Saldo</span>
                   </div>
                   <div className="divide-y divide-white/[0.04] px-4 pb-2">
-                    {displayEntries.map((j, i) => (
+                    {entries.map((j, i) => (
                       <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-2">
                         <span className="w-20 shrink-0 text-xs text-white/50">{formatDate(j.date)}</span>
                         <span className="flex min-w-0 flex-[1_1_100%] items-center gap-1.5 sm:flex-1">

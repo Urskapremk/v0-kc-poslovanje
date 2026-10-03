@@ -3,12 +3,12 @@
 import React, { useState } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Plus, Pencil, Trash2, Check, X, Ship, MapPin, Compass, Users, Printer, Copy, Sparkles } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Check, X, Ship, MapPin, Compass, Users, Printer } from "lucide-react";
 import { getProducts, addProduct, updateProduct, deleteProduct, getStaff, addStaff, updateStaff, deleteStaff, addRoute } from "../actions/admin";
 import { getDashboardData } from "../actions/komba";
 import { 
   getBoats, getRoutes, getBaseRoutes, getSupplierPricing, updateSupplierPricing,
-  getExcursions, getExcursionPricing, updateExcursionPricing, updateExcursion, addExcursion, deleteExcursion, duplicateExcursion, clearExcursionDuplicateFlag,
+  getExcursions, getExcursionPricing, updateExcursionPricing, updateExcursion, addExcursion, deleteExcursion,
   getSellingPricing, updateSellingPricing, getGuestRoutes,
   getExcursionSellingPricing, updateExcursionSellingPricing,
   getLunchProviders, addLunchProvider, updateLunchProvider, deleteLunchProvider
@@ -28,7 +28,7 @@ type Boat = { id: string; name: string; engine: string; maxPax: number };
 type Route = { id: string; name: string; type: string; priceEur: string; baseRouteId?: string | null };
 type SupplierPrice = { id: string; boatId: string; routeId: string; priceAr: number };
 type SellingPrice = { id: string; boatId: string; routeId: string; pricePax1: number; pricePax2: number; pricePax3: number; pricePax4: number; pricePax5: number; pricePax6: number };
-type Excursion = { id: string; name: string; description?: string | null; imageUrl?: string | null; guidePriceAr: number; entranceFeeAr: number; lunchPriceAr: number; duplicatedAt?: string | null };
+type Excursion = { id: string; name: string; description?: string | null; imageUrl?: string | null; guidePriceAr: number; entranceFeeAr: number; lunchPriceAr: number };
 type ExcursionPrice = { id: string; excursionId: string; boatId: string; priceAr: number; supplierPriceAr: number };
 type ExcursionSellingPrice = { id: string; excursionId: string; boatId: string; pricePax1: number; pricePax2: number; pricePax3: number; pricePax4: number; pricePax5: number; pricePax6: number };
 
@@ -1051,30 +1051,7 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
       </div>
       {/* Name and description */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          {isEditing ? (
-            <input
-              type="text"
-              value={excursionForm.name ?? exc.name}
-              onChange={e => setExcursionForm({ ...excursionForm, name: e.target.value })}
-              className="w-full px-3 py-1.5 rounded-lg bg-white/[0.05] border border-[#7fa8b8]/30 text-white text-sm font-medium focus:outline-none"
-              placeholder="Ime izleta..."
-            />
-          ) : (
-            <span className="font-medium">{exc.name}</span>
-          )}
-          {exc.duplicatedAt && (
-            <button
-              type="button"
-              onClick={async () => { await clearExcursionDuplicateFlag(exc.id); refresh(); }}
-              title="Podvojen izlet - klikni da odstranis oznako NOVO"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#c59b5b]/20 border border-[#c59b5b]/40 text-[#e0c68a] text-[9px] font-semibold uppercase tracking-wider hover:bg-[#c59b5b]/30 transition-colors"
-            >
-              <Sparkles className="h-3 w-3" />
-              Novo
-            </button>
-          )}
-        </div>
+        <div className="font-medium">{exc.name}</div>
         {isEditing ? (
           <textarea
             value={excursionForm.description ?? exc.description ?? ""}
@@ -1149,20 +1126,8 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
                               </div>
 ) : (
 <div className="flex items-center gap-1">
-<button onClick={() => { setEditingExcursion(exc.id); setExcursionForm({}); }} className="p-2 rounded-lg hover:bg-white/[0.06] text-white/40 hover:text-white transition-colors" title="Uredi">
+<button onClick={() => { setEditingExcursion(exc.id); setExcursionForm({}); }} className="p-2 rounded-lg hover:bg-white/[0.06] text-white/40 hover:text-white transition-colors">
   <Pencil className="h-4 w-4" />
-</button>
-<button
-  onClick={async () => {
-    if (confirm(`Podvoji izlet "${exc.name}"? Kopirajo se tudi nabavne cene in cene za goste.`)) {
-      await duplicateExcursion(exc.id);
-      refresh();
-    }
-  }}
-  className="p-2 rounded-lg hover:bg-[#c59b5b]/15 text-white/40 hover:text-[#e0c68a] transition-colors"
-  title="Podvoji izlet (skupaj s ceniki)"
->
-  <Copy className="h-4 w-4" />
 </button>
 <button 
   onClick={async () => { 
@@ -1172,7 +1137,6 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
     } 
   }} 
   className="p-2 rounded-lg hover:bg-red-500/10 text-white/40 hover:text-red-400 transition-colors"
-  title="Izbrisi"
 >
   <Trash2 className="h-4 w-4" />
 </button>

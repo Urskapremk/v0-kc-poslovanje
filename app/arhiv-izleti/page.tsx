@@ -351,15 +351,6 @@ export default function ArhivIzletiPage() {
                     const firstBungalow = bungalowDisplayName(e.members[0]?.bungalow || '')
                     const firstGuest = e.members[0]?.guestName || ''
                     const fanjaLabel = `Izlet ${e.excursionName} — ${e.members.map(m => `${bungalowDisplayName(m.bungalow)} / ${m.guestName}`).join(', ')}`.slice(0, 200)
-                    const paidParts = e.isFanja
-                      ? [{ amt: e.fanjaPayment, paid: !!e.fanjaPaidAt }]
-                      : [
-                          { amt: e.dilipPayment, paid: e.dilipPaid },
-                          { amt: e.lunchTotal, paid: e.lunchPaid },
-                          { amt: e.entranceTotalAr, paid: e.entrancePaid },
-                        ]
-                    const relevantPaidParts = paidParts.filter(p => p.amt > 0)
-                    const isPaid = relevantPaidParts.length > 0 && relevantPaidParts.every(p => p.paid)
                     return (
                       <details key={e.key} className="group rounded-xl border border-white/10 bg-white/[0.03] transition-colors open:bg-white/[0.05] hover:bg-white/[0.05]">
                         <summary className="flex cursor-pointer list-none items-start gap-2.5 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
@@ -382,22 +373,15 @@ export default function ArhivIzletiPage() {
                               {e.boatName ? <span>{e.boatName}</span> : null}
                             </div>
                           </div>
-                          <div className="flex flex-shrink-0 flex-col items-end gap-1">
-                            {e.isOrdered ? (
-                              <span className="rounded-full bg-[#4f7a54]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#8fae92]">
-                                Naročeno
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-[#b0761a]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#e0a561]">
-                                Za naročiti
-                              </span>
-                            )}
-          {isPaid && (
-            <span className="-rotate-12 rounded-md border-2 border-[#8fae92]/70 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[#8fae92]/80">
-              Plačano
-            </span>
-          )}
-                          </div>
+                          {e.isOrdered ? (
+                            <span className="flex-shrink-0 rounded-full bg-[#4f7a54]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#8fae92]">
+                              Naročeno
+                            </span>
+                          ) : (
+                            <span className="flex-shrink-0 rounded-full bg-[#b0761a]/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[#e0a561]">
+                              Za naročiti
+                            </span>
+                          )}
                           <ChevronDown className="mt-0.5 h-4 w-4 flex-shrink-0 text-white/30 transition-transform group-open:rotate-180" />
                         </summary>
                         <div className="border-t border-white/5 px-3 pb-3 pt-2">

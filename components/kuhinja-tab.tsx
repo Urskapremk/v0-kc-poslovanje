@@ -12,7 +12,6 @@ import {
   ROLE_LABELS,
   ROLE_LABELS_FR,
   SHIFT_HOURS,
-  SHIFT_ORDER,
   generateKitchenSchedule,
   computeKitchenStats,
   type KitchenShift,
@@ -40,41 +39,13 @@ const DAY_NAMES_FR = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam']
 // view-only table and the navy editing table share one lookup.
 function shiftClasses(shift: KitchenShift, pill: SchedulePill, offText: string): string {
   switch (shift) {
-    case 'EARLY':
     case 'MORNING':
       return pill.gold
-    case 'MIDDAY':
-      return pill.green
     case 'AFTERNOON':
-    case 'EVENING':
       return pill.blue
     default:
       return offText
   }
-}
-
-type WorkShift = Exclude<KitchenShift, 'OFF'>
-const SHIFT_SWATCH_KEY: Record<WorkShift, 'gold' | 'sage' | 'blue'> = {
-  EARLY: 'gold',
-  MORNING: 'gold',
-  MIDDAY: 'sage',
-  AFTERNOON: 'blue',
-  EVENING: 'blue',
-}
-const PRINT_CLASS: Record<KitchenShift, string> = {
-  EARLY: 'kc-morning',
-  MORNING: 'kc-morning',
-  MIDDAY: 'kc-midday',
-  AFTERNOON: 'kc-afternoon',
-  EVENING: 'kc-afternoon',
-  OFF: 'kc-off',
-}
-const PRINT_SWATCH: Record<WorkShift, { background: string; border: string }> = {
-  EARLY: { background: '#f3e7d8', border: '1px solid #785224' },
-  MORNING: { background: '#f3e7d8', border: '1px solid #785224' },
-  MIDDAY: { background: '#e3efe4', border: '1px solid #4f7a54' },
-  AFTERNOON: { background: '#e5f3f8', border: '1px solid #28708d' },
-  EVENING: { background: '#e5f3f8', border: '1px solid #28708d' },
 }
 
 export default function KuhinjaTab({
@@ -114,10 +85,6 @@ export default function KuhinjaTab({
   }, [staffMembers])
   const displayName = (p: string) => nickByName[p] || p
   const schedule = useMemo(() => generateKitchenSchedule(year, month), [year, month])
-  const usedShifts = useMemo(
-    () => SHIFT_ORDER.filter((s) => schedule.some((d) => Object.values(d.assignments).includes(s))),
-    [schedule],
-  )
   const stats = useMemo(() => computeKitchenStats(schedule), [schedule])
   const lastDay = schedule.length
 
@@ -200,7 +167,6 @@ export default function KuhinjaTab({
           .kitchen-color-print .kc-cell { font-weight: 600; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .kitchen-color-print .kc-morning { background: #f3e7d8 !important; color: #785224 !important; }
           .kitchen-color-print .kc-afternoon { background: #e5f3f8 !important; color: #28708d !important; }
-        .kitchen-color-print .kc-midday { background: #e3efe4 !important; color: #4f7a54 !important; }
           .kitchen-color-print .kc-off { color: #aaa !important; }
           .kitchen-color-print .kc-leave { background: #f0e0da !important; color: #975b45 !important; }
           .kitchen-color-print .kc-leave small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
@@ -314,7 +280,7 @@ export default function KuhinjaTab({
       <div className="no-print flex items-start gap-2 rounded-xl border border-[#c59b5b]/30 bg-[#c59b5b]/10 px-3 py-2 text-xs text-[#c59b5b]">
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          Razpored se samodejno izračuna po pravilih: od 3. oktobra 2026 dopoldan 06-10 (Nazirah, Noli), opoldan 10-16 (Anifa), večer 16-22 (Angelina, Vali); ko je Anifa prosta, opoldan dela Vali. 6 dni delo / 1 prost.
+          Razpored se samodejno izračuna po pravilih: dopoldan 06-12, popoldan 12-15 / 17-21, 6 dni delo / 1 prost.
           Nihče ne dela dopoldan in popoldan isti dan; ob prosti delavki se ostale prerazporedijo, da popoldan ostane vsaj ena kuharica.
           {period === 'B' && ' Od avgusta 2026 je Angelina na porodniškem dopustu in ni v razporedu.'}
         </span>
@@ -401,12 +367,14 @@ export default function KuhinjaTab({
       {/* On-screen schedule table */}
       <div className={`no-print rounded-2xl border p-3 sm:p-4 overflow-x-auto ${t.card}`}>
         <div className={`no-print flex flex-wrap items-center gap-4 mb-3 text-xs ${t.legend}`}>
-          {usedShifts.map((s) => (
-            <span key={s} className="flex items-center gap-1.5">
-              <span className={`inline-block h-3 w-3 rounded-sm border ${swatch[SHIFT_SWATCH_KEY[s]]}`} />
-              {SHIFT_LABELS[s]}
-            </span>
-          ))}
+          <span className="flex items-center gap-1.5">
+            <span className={`inline-block h-3 w-3 rounded-sm border ${swatch.gold}`} />
+            Dopoldan 06-12
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className={`inline-block h-3 w-3 rounded-sm border ${swatch.blue}`} />
+            Popoldan 12-15 / 17-21
+          </span>
           <span className="flex items-center gap-1.5">
             <span className={`inline-block h-3 w-3 rounded-sm border ${swatch.terracotta}`} />
             Dopust
@@ -493,9 +461,8 @@ export default function KuhinjaTab({
             <tr className={`text-xs uppercase tracking-wider ${t.head}`}>
               <th className="text-left py-2 px-2 font-semibold">Dan</th>
               <th className="text-left py-2 px-2 font-semibold">Datum</th>
-              {usedShifts.map((s) => (
-                <th key={s} className="text-left py-2 px-2 font-semibold"><span className="inline-flex items-center gap-1.5"><span className={`inline-block h-3 w-3 rounded-sm border ${swatch[SHIFT_SWATCH_KEY[s]]}`} /> {SHIFT_LABELS[s]}</span></th>
-              ))}
+              <th className="text-left py-2 px-2 font-semibold"><span className="inline-flex items-center gap-1.5"><span className={`inline-block h-3 w-3 rounded-sm border ${swatch.gold}`} /> Dopoldan 06-12</span></th>
+              <th className="text-left py-2 px-2 font-semibold"><span className="inline-flex items-center gap-1.5"><span className={`inline-block h-3 w-3 rounded-sm border ${swatch.blue}`} /> Popoldan 12-15 / 17-21</span></th>
               <th className="text-left py-2 px-2 font-semibold"><span className={`inline-flex items-center gap-1.5 ${readOnly ? 'text-[#2b2622]/45' : 'text-white/40'}`}>Prosto / dopust</span></th>
             </tr>
           </thead>
@@ -507,7 +474,7 @@ export default function KuhinjaTab({
               const sunday = isSunday(year, month, dayNum)
               const isToday = todayDay === dayNum
               // Razvrsti aktivno osebje po smenah tega dne.
-              const groups: Record<KitchenShift, string[]> = { EARLY: [], MORNING: [], MIDDAY: [], AFTERNOON: [], EVENING: [], OFF: [] }
+              const groups: Record<KitchenShift, string[]> = { MORNING: [], AFTERNOON: [], OFF: [] }
               for (const p of activeStaff) {
                 const shift = (day.assignments[p] || 'OFF') as KitchenShift
                 groups[shift].push(p)
@@ -557,9 +524,8 @@ export default function KuhinjaTab({
                       )}
                     </div>
                   </td>
-                  {usedShifts.map((s) => (
-                    <td key={s} className="py-1.5 px-2 align-top">{renderCell(s)}</td>
-                  ))}
+                  <td className="py-1.5 px-2 align-top">{renderCell('MORNING')}</td>
+                  <td className="py-1.5 px-2 align-top">{renderCell('AFTERNOON')}</td>
                   <td className="py-1.5 px-2 align-top">{renderCell('OFF')}</td>
                 </tr>
               )
@@ -614,7 +580,8 @@ export default function KuhinjaTab({
                         </td>
                       )
                     }
-                    return <td key={p} className={`kc-cell ${PRINT_CLASS[shift]}`}>{SHIFT_LABELS[shift]}</td>
+                    const cls = shift === 'MORNING' ? 'kc-morning' : shift === 'AFTERNOON' ? 'kc-afternoon' : 'kc-off'
+                    return <td key={p} className={`kc-cell ${cls}`}>{SHIFT_LABELS[shift]}</td>
                   })}
                 </tr>
               )
@@ -628,9 +595,8 @@ export default function KuhinjaTab({
           </tbody>
         </table>
         <div className="doc-legend">
-          {usedShifts.map((s) => (
-            <span key={s} className="lg"><span className="sw" style={PRINT_SWATCH[s]} /> {SHIFT_LABELS[s]}</span>
-          ))}
+          <span className="lg"><span className="sw" style={{ background: '#f3e7d8', border: '1px solid #785224' }} /> Dopoldan 06-12</span>
+          <span className="lg"><span className="sw" style={{ background: '#e5f3f8', border: '1px solid #28708d' }} /> Popoldan 12-15 / 17-21</span>
           <span className="lg"><span className="sw" style={{ background: '#f0e0da', border: '1px solid #975b45' }} /> Dopust</span>
           <span className="lg"><span className="sw" style={{ background: '#fff', border: '1px solid #aaa' }} /> Prosto</span>
           <span className="lg"><span className="sw" style={{ background: '#f7ece8', border: '1px solid #a56650' }} /> Jour férié / Dimanche</span>
@@ -685,7 +651,7 @@ export default function KuhinjaTab({
           </tbody>
         </table>
         <div className="doc-legend">
-          <span>{usedShifts.map((s) => SHIFT_LABELS_FR[s]).join(' · ')} &nbsp;·&nbsp; <strong>—</strong> Repos</span>
+          <span><strong>Matin</strong> 6h-12h &nbsp;·&nbsp; <strong>Après-midi</strong> 12h-15h / 17h-21h &nbsp;·&nbsp; <strong>—</strong> Repos</span>
         </div>
       </div>
 
