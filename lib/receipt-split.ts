@@ -14,7 +14,7 @@ const BAR_WORDS = [
   'pivo', 'beer', 'vino', 'wine', 'sirup',
   'sok', 'juice', 'cola', 'coca', 'fanta', 'sprite', 'fizz', 'gaziran', 'limonad',
   'rhum', 'rum', 'viski', 'whisky', 'whiskey', 'vodka', 'gin', 'liker',
-  'red bull', 'energijsk',
+  'red bull', 'energijsk', 'slamice', 'zobotrebec',
 ]
 
 const ROOM_WORDS = [
@@ -30,7 +30,8 @@ const KITCHEN_WORDS = [
   'omak', 'preliv', 'palacink', 'palačink', 'majonez', 'olje', 'oljk', 'kumaric', 'kapr', 'pistac',
   'tort', 'drobtin', 'testenin', 'tagliatelle', 'cvetač', 'cvetac', 'brokol',
   'mleko', 'krema', 'sladoled', 'moka', 'moulinet', 'meso', 'riba', 'kruh', 'riž', 'riz',
-  'jajc', 'sladkor', 'sol', 'čokolad', 'cokolad', 'zelenjav', 'sadje', 'začimb', 'zacimb',
+  'jajc', 'sladkor', 'sol', 'piščan', 'piscan', 'čips', 'cips', 'kakec', 'nabodal',
+  'čokolad', 'cokolad', 'zelenjav', 'sadje', 'začimb', 'zacimb',
   'paradižnik', 'paradiznik', 'čebul', 'cebul', 'krompir', 'solat', 'korenj',
   'pomivanje', 'gobica', 'gobice', 'drgnjen',
 ]
@@ -99,7 +100,7 @@ function isCancelled(line: string): boolean {
 export function supplierFromTranslation(text: string): string | null {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\*/g, '').trim()
-    const match = line.match(/^(?:dobavitelj\s*\/\s*trgovina|dobavitelj|trgovina)\s*:\s*(.+)$/i)
+    const match = line.match(/(?:dobavitelj\w*(?:\s*\/\s*trgovin\w*)?|trgovin\w*)\s*:\s*(.+)$/i)
     const name = match?.[1]?.trim()
     if (!name) continue
     // Na nekaterih računih prepis zamenja kupca in dobavitelja.
@@ -115,7 +116,7 @@ export function receiptTotalFromTranslation(text: string): number | null {
     const folded = fold(line)
     const amount = lineAmount(line)
     if (!amount) continue
-    if (/za placilo|net a payer|total ttc/.test(folded)) candidates.push({ score: 3, amount })
+    if (/za placilo|net a payer|total ttc|koncni znesek/.test(folded)) candidates.push({ score: 3, amount })
     else if (/skupni znesek \(z ddv\)|znesek z ddv/.test(folded) && !/brez/.test(folded)) candidates.push({ score: 2, amount })
     else if (/skupn.*ddv/.test(folded) && !/brez/.test(folded)) candidates.push({ score: 1, amount })
   }

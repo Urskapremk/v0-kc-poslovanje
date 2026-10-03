@@ -164,12 +164,12 @@ export async function razporediStroskiRacun(id: string): Promise<ReceiptSplitRes
   const result = await db.execute(sql`SELECT translation FROM stroski_receipts WHERE id = ${id} LIMIT 1`)
   const translation = ((result.rows[0]?.translation as string | null) ?? '').trim()
   if (!translation) return { ok: false, error: 'Najprej preberi račun.' }
-  const split = await fillReceiptSplitFromTranslation(id, translation)
+  const split = await fillReceiptSplitFromTranslation(id, translation, true)
   revalidatePath('/statistika')
   return split
 }
 
-async function fillReceiptSplitFromTranslation(id: string, translation: string): Promise<ReceiptSplitResult> {
+async function fillReceiptSplitFromTranslation(id: string, translation: string, replace = false): Promise<ReceiptSplitResult> {
   const text = translation.trim()
   if (!text) return { ok: false, error: 'Najprej preberi račun.' }
   const result = await db.execute(
@@ -177,7 +177,7 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string):
   )
   const row = result.rows[0]
   if (!row) return { ok: false, error: 'Račun ni najden.' }
-  if (parseCategories(row.categories).length > 0) return { ok: false, error: 'Ta račun je že razporejen.' }
+  if (!replace && parseCategories(row.categories).length > 0) return { ok: false, error: 'Ta račun je že razporejen.' }
 
   const rate = await getExchangeRate()
   const safeRate = rate > 0 ? rate : 4800

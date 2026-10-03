@@ -447,6 +447,10 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
     setAllocatingId(r.id)
     setActionError(null)
     try {
+      if (r.categories.length > 0 && !window.confirm('To zamenja sedanjo razporeditev s pravilom iz prepisa. Nadaljujem?')) {
+        setAllocatingId(null)
+        return
+      }
       const res = await razporediStroskiRacun(r.id)
       if (!res.ok || !res.categories) {
         setActionError(res.error || 'Razporeditev ni uspela.')
@@ -966,7 +970,19 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
 
                             {/* Razbitje po kategorijah */}
                             <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
-                              <p className="mb-2 text-[10px] uppercase tracking-wider text-white/40">Razporedi po kategorijah (klikni ime za cel znesek)</p>
+                              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                <p className="text-[10px] uppercase tracking-wider text-white/40">Razporedi po kategorijah (klikni ime za cel znesek)</p>
+                                {r.translation && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAllocate(r)}
+                                    disabled={allocatingId === r.id}
+                                    className="rounded-md bg-[#c59b5b] px-3 py-1.5 text-xs font-semibold text-[#152329] transition-all hover:bg-[#d4af37] disabled:opacity-60"
+                                  >
+                                    {allocatingId === r.id ? 'Razporejam...' : 'Razporedi'}
+                                  </button>
+                                )}
+                              </div>
                               <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                                 {STROSEK_CATEGORIES.map((c) => (
                                   <div key={c} className="flex flex-col gap-1">
@@ -1433,7 +1449,7 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
                                 </span>
                               )}
                               <div className="flex items-center gap-2">
-                                {r.translation && r.categories.length === 0 && (
+                                {r.translation && (
                                   <button
                                     onClick={() => handleAllocate(r)}
                                     disabled={allocatingId === r.id}
