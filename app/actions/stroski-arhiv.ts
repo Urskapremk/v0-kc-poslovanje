@@ -148,15 +148,36 @@ export async function saveStroskiTranslation(id: string, translation: string) {
   revalidatePath('/statistika')
 }
 
-async function fillReceiptSplitFromTranslation(id: string, translation: string) {
+export type ReceiptSplitResult = {
+  ok: boolean
+  error?: string
+  categories?: CategoryAllocation[]
+  amountOriginal?: number
+  amountEur?: number
+  currency?: Currency
+  description?: string
+}
+
+// Gumb »Razporedi«: po že shranjenem prepisu, brez ponovnega branja fotografije.
+// Ročno razporejenega računa ne prepiše.
+export async function razporediStroskiRacun(id: string): Promise<ReceiptSplitResult> {
+  const result = await db.execute(sql`SELECT translation FROM stroski_receipts WHERE id = ${id} LIMIT 1`)
+  const translation = ((result.rows[0]?.translation as string | null) ?? '').trim()
+  if (!translation) return { ok: false, error: 'Najprej preberi račun.' }
+  const split = await fillReceiptSplitFromTranslation(id, translation)
+  revalidatePath('/statistika')
+  return split
+}
+
+async function fillReceiptSplitFromTranslation(id: string, translation: string): Promise<ReceiptSplitResult> {
   const text = translation.trim()
-  if (!text) return
+  if (!text) return { ok: false, error: 'Najprej preberi račun.' }
   const result = await db.execute(
     sql`SELECT description, currency, "amountOriginal", "amountEur", categories FROM stroski_receipts WHERE id = ${id} LIMIT 1`
   )
   const row = result.rows[0]
-  if (!row) return
-  if (parseCategories(row.categories).length > 0) return
+  if (!row) return { ok: false, error: 'Račun ni najden.' }
+  if (parseCategories(row.categories).length > 0) return { ok: false, error: 'Ta račun je že razporejen.' }
 
   const rate = await getExchangeRate()
   const safeRate = rate > 0 ? rate : 4800
@@ -170,7 +191,7 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string) 
       : 0
 
   const categories = splitReceiptTranslation(text, safeRate, bookedAr > 0 ? bookedAr : null, amountEur > 0 ? amountEur : null)
-  if (categories.length === 0) return
+  if (categories.length === 0) return { ok: false, error: 'Iz prepisa ni bilo mogoče razbrati postavk.' }
 
   const currentDesc = ((row.description as string | null) ?? '').trim()
   const description = currentDesc || supplierFromTranslation(text) || ''
@@ -179,7 +200,14 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string) 
     await db.execute(
       sql`UPDATE stroski_receipts SET categories = ${JSON.stringify(categories)}::jsonb, description = ${description} WHERE id = ${id}`
     )
-    return
+    return {
+      ok: true,
+      categories,
+      amountOriginal: currency === 'Ar' ? amountOriginal : bookedAr,
+      amountEur,
+      currency,
+      description,
+    }
   }
 
   const totalAr = categories.reduce((sum, item) => sum + (item.amountOriginal ?? 0), 0)
@@ -193,6 +221,14 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string) 
             "amountEur" = ${totalEur}
         WHERE id = ${id}`
   )
+  return {
+    ok: true,
+    categories,
+    amountOriginal: totalAr,
+    amountEur: totalEur,
+    currency: 'Ar',
+    description,
+  }
 }
 
 // Posodobi podatke arhiviranega računa (datum, opis, znesek).

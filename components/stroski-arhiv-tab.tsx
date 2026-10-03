@@ -9,6 +9,7 @@ import {
   updateStroskiReceipt,
   addStroskiReceiptPages,
   saveStroskiTranslation,
+  razporediStroskiRacun,
   mergeStroskiReceipts,
   splitStroskiReceipt,
   getAccountingEmail,
@@ -155,6 +156,7 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [merging, setMerging] = useState(false)
   const [splittingId, setSplittingId] = useState<string | null>(null)
+  const [allocatingId, setAllocatingId] = useState<string | null>(null)
   const [openTranslations, setOpenTranslations] = useState<Set<string>>(new Set())
 
   // Pošiljanje v računovodstvo
@@ -441,6 +443,33 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
   }
 
   // Prepozna vsebino računa (vse strani) in jo prevede v slovenščino
+  async function handleAllocate(r: StroskiReceipt) {
+    setAllocatingId(r.id)
+    setActionError(null)
+    try {
+      const res = await razporediStroskiRacun(r.id)
+      if (!res.ok || !res.categories) {
+        setActionError(res.error || 'Razporeditev ni uspela.')
+        return
+      }
+      if (editId === r.id) {
+        setEditCurrency(res.currency === 'Ar' ? 'Ar' : 'EUR')
+        setEditAmount(String(res.currency === 'Ar' ? res.amountOriginal : res.amountEur))
+        if (res.description) setEditDesc(res.description)
+        const next = emptyAlloc()
+        for (const c of res.categories) {
+          next[c.category] = String(res.currency === 'Ar' ? c.amountOriginal : c.amountEur)
+        }
+        setEditAlloc(next)
+      }
+      refresh()
+    } catch {
+      setActionError('Razporeditev ni uspela. Poskusi znova.')
+    } finally {
+      setAllocatingId(null)
+    }
+  }
+
   async function handleTranslate(r: StroskiReceipt) {
     setTranslatingId(r.id)
     setActionError(null)
@@ -1403,14 +1432,26 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
                                   Prepis in prevod (slovenščina)
                                 </span>
                               )}
-                              <button
-                                onClick={() => handleTranslate(r)}
-                                disabled={translatingId === r.id}
-                                className="flex items-center gap-1.5 rounded-md bg-[#8fae92]/15 px-2.5 py-1 text-xs font-medium text-[#8fae92] transition-all hover:bg-[#8fae92]/25 disabled:opacity-60"
-                              >
-                                {translatingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Languages className="h-3.5 w-3.5" />}
-                                {translatingId === r.id ? 'Berem...' : r.translation ? 'Osveži prepis' : 'Prepoznaj + prevedi'}
-                              </button>
+                              <div className="flex items-center gap-2">
+                                {r.translation && r.categories.length === 0 && (
+                                  <button
+                                    onClick={() => handleAllocate(r)}
+                                    disabled={allocatingId === r.id}
+                                    className="flex items-center gap-1.5 rounded-md bg-[#c59b5b]/15 px-2.5 py-1 text-xs font-medium text-[#c59b5b] transition-all hover:bg-[#c59b5b]/25 disabled:opacity-60"
+                                  >
+                                    {allocatingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanLine className="h-3.5 w-3.5" />}
+                                    {allocatingId === r.id ? 'Razporejam...' : 'Razporedi'}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleTranslate(r)}
+                                  disabled={translatingId === r.id}
+                                  className="flex items-center gap-1.5 rounded-md bg-[#8fae92]/15 px-2.5 py-1 text-xs font-medium text-[#8fae92] transition-all hover:bg-[#8fae92]/25 disabled:opacity-60"
+                                >
+                                  {translatingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Languages className="h-3.5 w-3.5" />}
+                                  {translatingId === r.id ? 'Berem...' : r.translation ? 'Osveži prepis' : 'Prepoznaj + prevedi'}
+                                </button>
+                              </div>
                             </div>
                             {r.translation ? (
                               openTranslations.has(r.id) ? (

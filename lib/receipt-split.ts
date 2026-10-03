@@ -27,9 +27,10 @@ const ROOM_WORDS = [
 
 const KITCHEN_WORDS = [
   'jogurt', 'maslo', 'sir', 'piškot', 'piskot', 'smetan', 'mortadel', 'salam', 'klobas',
-  'omak', 'olje', 'tort', 'drobtin', 'testenin', 'tagliatelle', 'cvetač', 'cvetac', 'brokol',
+  'omak', 'preliv', 'palacink', 'palačink', 'majonez', 'olje', 'oljk', 'kumaric', 'kapr', 'pistac',
+  'tort', 'drobtin', 'testenin', 'tagliatelle', 'cvetač', 'cvetac', 'brokol',
   'mleko', 'krema', 'sladoled', 'moka', 'moulinet', 'meso', 'riba', 'kruh', 'riž', 'riz',
-  'jajc', 'sladkor', 'čokolad', 'cokolad', 'zelenjav', 'sadje', 'začimb', 'zacimb',
+  'jajc', 'sladkor', 'sol', 'čokolad', 'cokolad', 'zelenjav', 'sadje', 'začimb', 'zacimb',
   'paradižnik', 'paradiznik', 'čebul', 'cebul', 'krompir', 'solat', 'korenj',
   'pomivanje', 'gobica', 'gobice', 'drgnjen',
 ]
@@ -69,12 +70,19 @@ export function classifyReceiptLine(name: string): StrosekCategory {
 }
 
 function lineAmount(line: string): number | null {
-  const match = line.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:ar|ariary)\s*$/i)
+  const trimmed = line.trim()
+  if (/%\s*$/.test(trimmed)) return null
+  const withCurrency = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:ar|ariary)\s*$/i)
+  const match = withCurrency ?? trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)[.,](\d{2})\s*$/)
   if (!match) return null
   const whole = match[1].replace(/[ \u00a0]/g, '')
   const value = match[2] ? Number(`${whole}.${match[2]}`) : Number(whole)
   if (!Number.isFinite(value) || value <= 0) return null
   return Math.round(value)
+}
+
+function plainLine(line: string): string {
+  return line.replace(/\*/g, '').trim()
 }
 
 function isTotalLine(line: string): boolean {
@@ -92,22 +100,83 @@ export function supplierFromTranslation(text: string): string | null {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\*/g, '').trim()
     const match = line.match(/^(?:dobavitelj\s*\/\s*trgovina|dobavitelj|trgovina)\s*:\s*(.+)$/i)
-    if (match?.[1]?.trim()) return match[1].trim()
+    const name = match?.[1]?.trim()
+    if (!name) continue
+    // Na nekaterih računih prepis zamenja kupca in dobavitelja.
+    if (/komba cabana/i.test(name)) continue
+    return name
   }
   return null
 }
 
 export function receiptTotalFromTranslation(text: string): number | null {
+  const candidates: { score: number; amount: number }[] = []
   for (const line of text.split(/\r?\n/)) {
-    if (/skupn.*ddv|znesek z ddv|total ttc|net a payer/i.test(fold(line))) {
+    const folded = fold(line)
+    const amount = lineAmount(line)
+    if (!amount) continue
+    if (/za placilo|net a payer|total ttc/.test(folded)) candidates.push({ score: 3, amount })
+    else if (/skupni znesek \(z ddv\)|znesek z ddv/.test(folded) && !/brez/.test(folded)) candidates.push({ score: 2, amount })
+    else if (/skupn.*ddv/.test(folded) && !/brez/.test(folded)) candidates.push({ score: 1, amount })
+  }
+  candidates.sort((a, b) => b.score - a.score)
+  return candidates[0]?.amount ?? null
+}
+
+// Račun, kjer je vsaka postavka v več vrsticah: ime, količina, znesek brez DDV, stopnja DDV.
+function detailedReceiptLines(text: string): { line: string; amount: number; category: StrosekCategory }[] | null {
+  const items: { name: string; ht: number | null; rate: number }[] = []
+  let current: { name: string; ht: number | null; rate: number } | null = null
+  let sawLineTotal = false
+
+  const close = () => {
+    if (current) items.push(current)
+    current = null
+  }
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = plainLine(rawLine)
+    if (!line) continue
+    const folded = fold(line)
+    if (/povzetek|koncni znesek|skupni bruto|neto znesek|osnova za ddv|znesek za placilo|predplacilo/.test(folded)) {
+      close()
+      continue
+    }
+    const itemMatch = line.match(/^(\d+)\.\s+(.+)$/)
+    if (itemMatch) {
+      close()
+      current = { name: itemMatch[2].trim(), ht: null, rate: 0 }
+      continue
+    }
+    if (!current) continue
+    if (/znesek \(brez ddv\)/.test(folded) && !/skupn|neto|bruto/.test(folded)) {
       const amount = lineAmount(line)
-      if (amount) return amount
+      if (amount) {
+        current.ht = amount
+        sawLineTotal = true
+      }
+    } else if (/ddv\s*:/.test(folded) && /%/.test(line)) {
+      const rate = line.match(/(\d+(?:[.,]\d+)?)\s*%/)
+      if (rate) current.rate = Number(rate[1].replace(',', '.'))
     }
   }
-  return null
+  close()
+  if (!sawLineTotal) return null
+
+  const rows: { line: string; amount: number; category: StrosekCategory }[] = []
+  for (const item of items) {
+    if (!item.ht || isCancelled(item.name)) continue
+    const amount = Math.round((item.ht * (100 + (item.rate || 0))) / 100)
+    if (amount <= 0) continue
+    rows.push({ line: item.name, amount, category: classifyReceiptLine(item.name) })
+  }
+  return rows.length > 0 ? rows : null
 }
 
 export function receiptLinesForSplit(text: string): { line: string; amount: number; category: StrosekCategory }[] {
+  const detailed = detailedReceiptLines(text)
+  if (detailed) return detailed
+
   const rows: { line: string; amount: number; category: StrosekCategory }[] = []
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim()
