@@ -633,7 +633,8 @@ async function buildInvoiceData(
   reservationId: string,
   lang: InvoiceLang,
   excludeAccommodation = false,
-  onlyStayMeals = false
+  onlyStayMeals = false,
+  hidePayments = false
 ): Promise<{ data: InvoiceData; reservation: AnyRec } | { error: string }> {
   const [reservation, orderItems0, notes0, discounts0] = await Promise.all([
     getReservationById(reservationId) as Promise<AnyRec | null>,
@@ -731,7 +732,8 @@ async function buildInvoiceData(
     !i.isFree &&
     (i.category === 'Izlet' || i.category === 'Transfer') &&
     Number(i.refPriceAr || 0) > 0 &&
-    !isAgencyBookingE
+    !isAgencyBookingE &&
+    !hidePayments
   const separatePaidAr = (invoiceOrderItems as AnyRec[])
     .filter(isSeparatelyPaidService)
     .reduce((s, i) => s + Number(i.refPriceAr || 0), 0)
@@ -855,7 +857,9 @@ async function buildInvoiceData(
   const isTransferItem = (i: AnyRec) => i.category === 'Transfer'
   const isMealItem = (i: AnyRec) => i.category === 'Prehrana'
   const isExcursionItem = (i: AnyRec) => i.category === 'Izlet'
-  const isChargeableOrShown = (i: AnyRec) => i.paymentStatus !== 'PAID' || !!i.isFree || isTransferItem(i) || isMealItem(i) || isExcursionItem(i)
+  const isChargeableOrShown = (i: AnyRec) =>
+    i.paymentStatus !== 'PAID' || !!i.isFree || isMealItem(i) ||
+    (!hidePayments && (isTransferItem(i) || isExcursionItem(i)))
   const days = dayKeys
     .map((day) => {
       const note = noteByDateRaw.get(day)
@@ -1002,7 +1006,7 @@ export async function getInvoiceEmailPreview(
   onlyStayMeals = false,
   hidePayments = false
 ): Promise<{ html?: string; to?: string; error?: string }> {
-  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals)
+  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals, hidePayments)
   if ('error' in built) return { error: built.error }
   return {
     html: buildInvoiceEmailHtml({ ...built.data, hidePayments }),
@@ -1021,7 +1025,7 @@ export async function sendInvoiceEmail(
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) return { success: false, error: 'E-pošta še ni nastavljena (manjka RESEND_API_KEY).' }
 
-  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals)
+  const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals, hidePayments)
   if ('error' in built) return { success: false, error: built.error }
   const { data, reservation } = built
 

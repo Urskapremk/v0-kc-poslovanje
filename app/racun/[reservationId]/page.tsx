@@ -388,7 +388,8 @@ export default function RacunPage() {
     !item.isFree &&
     (item.category === 'Izlet' || item.category === 'Transfer') &&
     Number(item.refPriceAr || 0) > 0 &&
-    !isAgencyBooking
+    !isAgencyBooking &&
+    showPayments
   const separatePaidAr = invoiceOrderItems
     .filter(isSeparatelyPaidService)
     .reduce((sum, item) => sum + Number(item.refPriceAr || 0), 0)
@@ -435,8 +436,10 @@ export default function RacunPage() {
   const isTransferItem = (i: OrderItem) => i.category === 'Transfer'
   const isMealItem = (i: OrderItem) => i.category === 'Prehrana'
   const isExcursionItem = (i: OrderItem) => i.category === 'Izlet'
+  // With payments switched off, already-paid transfers/excursions are dropped entirely.
   const shownOnInvoiceDay = (i: OrderItem) =>
-    i.paymentStatus !== 'PAID' || i.isFree || isTransferItem(i) || isMealItem(i) || isExcursionItem(i)
+    i.paymentStatus !== 'PAID' || i.isFree || isMealItem(i) ||
+    (showPayments && (isTransferItem(i) || isExcursionItem(i)))
   // A day can have MORE THAN ONE delivery note (e.g. an extra empty note). Merge all notes'
   // items per day so a later/empty note never clobbers a note that actually has items.
   const noteDay = (d: string) => (d && d.includes('T') ? d.split('T')[0] : d)
