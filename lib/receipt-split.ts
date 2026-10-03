@@ -11,8 +11,8 @@ const BAR_WORDS = [
   'servet', 'serviet', 'prtick', 'prtic', 'napkin',
   'kava', 'kavo', 'coffee',
   'čaj', 'caj',
-  'pivo', 'beer', 'vino', 'wine', 'sirup',
-  'sok', 'juice', 'cola', 'coca', 'fanta', 'sprite', 'fizz', 'gaziran', 'limonad',
+  'pivo', 'beer', 'pilsener', 'pilsner', 'vino', 'wine', 'sirup',
+  'sok', 'juice', 'eau vive', 'voda', 'cristal', 'cola', 'coca', 'fanta', 'sprite', 'fizz', 'gaziran', 'limonad',
   'rhum', 'rum', 'viski', 'whisky', 'whiskey', 'vodka', 'gin', 'liker',
   'red bull', 'energijsk', 'slamice', 'zobotrebec',
 ]
@@ -34,7 +34,8 @@ const KITCHEN_WORDS = [
   'tort', 'drobtin', 'testenin', 'tagliatelle', 'cvetač', 'cvetac', 'brokol',
   'mleko', 'krema', 'sladoled', 'moka', 'moulinet', 'meso', 'riba', 'kruh', 'riž', 'riz',
   'jajc', 'sladkor', 'sol', 'piščan', 'piscan', 'čips', 'cips', 'kakec', 'nabodal',
-  'jastog', 'langoust', 'homar', 'sigal', 'cigal', 'kozic', 'rakov',
+  'jastog', 'langoust', 'langust', 'homar', 'sigal', 'cigal', 'kozic', 'rakov',
+  'baget', 'štruc', 'struc', 'roglj', 'rozin', 'svinj', 'kotlet', 'socolait', 'pak choi',
   'karamel', 'toffee', 'sardin', 'zamrzoval', 'pripravek', 'kečap', 'kecap',
   'čokolad', 'cokolad', 'chocolat', 'zelenjav', 'sadje', 'začimb', 'zacimb',
   'paradižnik', 'paradiznik', 'čebul', 'cebul', 'krompir', 'solat', 'korenj',
@@ -73,22 +74,31 @@ function hasWord(text: string, words: string[]): boolean {
 }
 
 export function classifyReceiptLine(name: string): StrosekCategory {
-  if (hasWord(name, BAR_WORDS)) return 'bar'
+  // "Kristalno olje" ni pijača, čeprav je v imenu cristal.
+  if (!hasWord(name, ['olje', 'huile']) && hasWord(name, BAR_WORDS)) return 'bar'
   if (hasWord(name, ROOM_WORDS)) return 'nocitve'
   if (hasWord(name, KITCHEN_WORDS)) return 'kuhinja'
   return 'ostalo'
 }
 
 function moneyFrom(raw: string, allowBare = false): number | null {
-  const trimmed = raw.trim()
+  const trimmed = raw.trim().replace(/\u00a0/g, ' ')
   if (!trimmed || /%\s*$/.test(trimmed)) return null
-  const withCurrency = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:ar|ariary|mga)\s*$/i)
-  const withM = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*m\s*$/i)
-  const decimal = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)[.,](\d{2})\s*$/)
-  const bare = allowBare ? trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)\s*$/) : null
+  // 3.200.000 AR in 80.000 AR: pike ločujejo tisočice, ne decimalk.
+  const dotted = trimmed.match(/(\d{1,3}(?:\.\d{3})+)(?:,(\d{1,2}))?\s*(?:ar|ariary|mga|m)?\s*$/i)
+  const dottedHasCurrency = !!dotted && /(?:ar|ariary|mga|m)\s*$/i.test(trimmed)
+  if (dotted && (dottedHasCurrency || allowBare)) {
+    const whole = dotted[1].replace(/\./g, '')
+    const value = dotted[2] ? Number(`${whole}.${dotted[2]}`) : Number(whole)
+    if (Number.isFinite(value) && value > 0) return Math.round(value)
+  }
+  const withCurrency = trimmed.match(/(\d{1,3}(?: \d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:ar|ariary|mga)\s*$/i)
+  const withM = trimmed.match(/(\d{1,3}(?: \d{3})+|\d+)(?:[.,](\d{1,2}))?\s*m\s*$/i)
+  const decimal = trimmed.match(/(\d{1,3}(?: \d{3})+|\d+)[.,](\d{2})\s*$/)
+  const bare = allowBare ? trimmed.match(/(\d{1,3}(?: \d{3})+|\d+)\s*$/) : null
   const match = withCurrency ?? withM ?? decimal ?? bare
   if (!match) return null
-  const whole = match[1].replace(/[ \u00a0]/g, '')
+  const whole = match[1].replace(/ /g, '')
   const value = match[2] ? Number(`${whole}.${match[2]}`) : Number(whole)
   if (!Number.isFinite(value) || value <= 0) return null
   return Math.round(value)
@@ -168,14 +178,16 @@ export function receiptTotalFromTranslation(text: string): number | null {
   const candidates: { score: number; amount: number }[] = []
   for (const line of text.split(/\r?\n/)) {
     const folded = fold(line)
-    const isFooter = /za placilo|net a payer|total ttc|koncni znesek/.test(folded)
-      || (/skupni znesek \(z ddv\)|znesek z ddv/.test(folded) && !/brez/.test(folded))
+    const isPayable = /za placilo|net a payer|total ttc|koncni znesek/.test(folded)
+    const isWithTax = (/skupaj z ddv|skupni znesek/.test(folded) && !/brez|postavk|za postavko/.test(folded))
       || (/skupn.*ddv/.test(folded) && !/brez/.test(folded))
+    const isBareTotal = /^skupaj\b/.test(folded)
+    const isFooter = isPayable || isWithTax || isBareTotal
     const amount = lineAmount(line) ?? (isFooter ? moneyFrom(line, true) : null)
     if (!amount) continue
-    if (/za placilo|net a payer|total ttc|koncni znesek/.test(folded)) candidates.push({ score: 3, amount })
-    else if (/skupni znesek \(z ddv\)|znesek z ddv/.test(folded) && !/brez/.test(folded)) candidates.push({ score: 2, amount })
-    else if (/skupn.*ddv/.test(folded) && !/brez/.test(folded)) candidates.push({ score: 1, amount })
+    if (isPayable) candidates.push({ score: 3, amount })
+    else if (isWithTax) candidates.push({ score: 2, amount })
+    else if (isBareTotal) candidates.push({ score: 1, amount })
   }
   candidates.sort((a, b) => b.score - a.score)
   return candidates[0]?.amount ?? null
@@ -213,6 +225,97 @@ function pricedReceiptLines(text: string): { line: string; amount: number; categ
     let name = line.replace(/^\d+\.\s*/, '').split('|')[0].trim()
     name = name.replace(/\s*znesek\s*:.*$/i, '').replace(/[, ]+$/g, '').trim()
     if (!name || /^(kolicina|cena)\b/.test(fold(name))) continue
+    rows.push({ line: name, amount, category: classifyReceiptLine(name) })
+  }
+  return rows.length > 0 ? rows : null
+}
+
+function isFieldLabel(line: string): boolean {
+  const folded = fold(line).replace(/^[-*]\s*/, '').replace(/^\d+\.\s*/, '')
+  return /^(kolicina|cena|znesek|popust|ddv|tva|davek|skupaj|skupni|koncni|vmesni|sous)\b/.test(folded)
+}
+
+function isInvoiceFooter(folded: string): boolean {
+  if (/^(popust|ddv|tva|davek|predplacilo|acompte|placilo)\b/.test(folded)) return true
+  if (/koncni znesek|total ttc|total ht|sous-total|vmesni sestev|skupaj brez|skupaj z ddv|skupni znesek racuna|skupaj za |skupni znesek postavk/.test(folded)) return true
+  if (/^skupni znesek\b/.test(folded) && !/za postavko/.test(folded)) return true
+  return false
+}
+
+function productName(nameLine: string): string {
+  let name = nameLine.split('|')[0]
+  name = name.replace(/\b(skupni znesek|skupaj|znesek)\b.*$/i, '')
+  name = name.replace(/\s*[:\-]\s*\d[\d\s.,]*\s*(?:ar|ariary|mga|m)?\s*$/i, '')
+  name = name.replace(/^\s*naziv artikla\s*:\s*/i, '')
+  return name.trim().replace(/[, ]+$/g, '')
+}
+
+function amountFromBlock(lines: string[]): number | null {
+  for (const line of lines) {
+    const folded = fold(line)
+    if (/cena na enoto|popust|kolicina/.test(folded) && !/skupaj|znesek/.test(folded)) continue
+    const labeled = line.match(/(?:skupni znesek[^:]*|skupaj|znesek)\s*:\s*(.+)$/i)
+    if (!labeled || /brez ddv|\bht\b|popust/.test(folded)) continue
+    const amount = moneyFrom(labeled[1], true)
+    if (amount) return amount
+  }
+  for (const line of lines) {
+    if (/cena na enoto/.test(fold(line)) && /davk|ttc|\bar\b|mga/.test(fold(line))) {
+      const labeled = line.match(/:\s*(.+)$/)
+      const amount = labeled ? moneyFrom(labeled[1], true) : null
+      if (amount) return amount
+    }
+  }
+  const trail = lines[0].match(/(?::|-)\s*([0-9][^:-]*)$/)
+  if (!trail) return null
+  return moneyFrom(trail[1], true)
+}
+
+// Postavka in znesek nista vedno v isti obliki: nekje je "Znesek:", drugje
+// "Skupaj:", "12 000" na koncu vrstice ali znesek v naslednji vrstici.
+function looseReceiptLines(text: string): { line: string; amount: number; category: StrosekCategory }[] | null {
+  const blocks: { name: string; lines: string[] }[] = []
+  let current: { name: string; lines: string[] } | null = null
+  const close = () => {
+    if (current) blocks.push(current)
+    current = null
+  }
+
+  const itemText = (raw: string) => raw.replace(/\*\*/g, '').replace(/^\s*(?:[-*•]|\d+\.)\s+/, '').trim()
+  const hasMarker = (raw: string) => /^\s*(?:[-*•]|\d+\.)\s+/.test(raw.replace(/\*\*/g, ''))
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = itemText(rawLine)
+    if (!line) continue
+    const folded = fold(line)
+    if (/^(postavke|zneski|povzetek)\b/.test(folded)) {
+      close()
+      continue
+    }
+    if (isInvoiceFooter(folded) || isCancelled(line)) {
+      close()
+      continue
+    }
+    const label = isFieldLabel(line)
+    const lineTotal = /^skupaj\b/.test(folded)
+    if (current && (label || lineTotal)) {
+      current.lines.push(line)
+      continue
+    }
+    if (hasMarker(rawLine) && !label && !lineTotal) {
+      close()
+      current = { name: line, lines: [line] }
+      continue
+    }
+    close()
+  }
+  close()
+
+  const rows: { line: string; amount: number; category: StrosekCategory }[] = []
+  for (const block of blocks) {
+    const amount = amountFromBlock(block.lines)
+    const name = productName(block.name)
+    if (!name || !amount || isCancelled(name)) continue
     rows.push({ line: name, amount, category: classifyReceiptLine(name) })
   }
   return rows.length > 0 ? rows : null
@@ -273,6 +376,8 @@ export function receiptLinesForSplit(text: string): { line: string; amount: numb
   if (market) return market
   const priced = pricedReceiptLines(text)
   if (priced) return priced
+  const loose = looseReceiptLines(text)
+  if (loose) return loose
   const detailed = detailedReceiptLines(text)
   if (detailed) return detailed
 

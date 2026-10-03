@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { get } from '@vercel/blob'
 import { parseCategories, type CategoryAllocation } from '@/lib/stroski-categories'
-import { receiptDateFromTranslation, splitReceiptTranslation, supplierFromTranslation } from '@/lib/receipt-split'
+import { receiptDateFromTranslation, receiptTotalFromTranslation, splitReceiptTranslation, supplierFromTranslation } from '@/lib/receipt-split'
 import { readReceiptFromImages } from '@/lib/receipt-ocr'
 import { getExchangeRate } from './komba'
 import { addCashExpense, deleteCashExpense, getBankTransactions } from './banka'
@@ -139,9 +139,9 @@ export async function addStroskiReceiptPages(id: string, newPages: ReceiptPage[]
 }
 
 // Shrani prepis + prevod vsebine računa v slovenščino.
-// Če kategorije še niso vpisane, jih pravilo razporedi: hrana v kuhinjo,
-// pijača in papirnati serveti v bar, pripomočki za sobe v nočitve.
-// Ročno razporejenih računov ne prepiše.
+// Pri vsakem prepisu: artikle razporedi, če kategorij še ni; znesek vpiše, če ga ni;
+// v opis vpiše dobavitelja, če ga ni. Velja za vsak znesek, ki ga prepis pokaže.
+// Ročno razporejenih kategorij ne prepiše.
 export async function saveStroskiTranslation(id: string, translation: string) {
   await db.execute(sql`UPDATE stroski_receipts SET translation = ${translation} WHERE id = ${id}`)
   await fillReceiptSplitFromTranslation(id, translation)
@@ -177,7 +177,6 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string, 
   )
   const row = result.rows[0]
   if (!row) return { ok: false, error: 'Račun ni najden.' }
-  if (!replace && parseCategories(row.categories).length > 0) return { ok: false, error: 'Ta račun je že razporejen.' }
 
   const rate = await getExchangeRate()
   const safeRate = rate > 0 ? rate : 4800
@@ -190,57 +189,81 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string, 
       ? Math.round(amountEur * safeRate)
       : 0
 
-  const categories = splitReceiptTranslation(text, safeRate, bookedAr > 0 ? bookedAr : null, amountEur > 0 ? amountEur : null)
-  if (categories.length === 0) return { ok: false, error: 'Iz prepisa ni bilo mogoče razbrati postavk.' }
-
+  const existingCategories = parseCategories(row.categories)
   const currentDesc = ((row.description as string | null) ?? '').trim()
-  const description = currentDesc || supplierFromTranslation(text) || ''
-  const invoiceDate = bookedAr > 0 ? null : receiptDateFromTranslation(text)
-  const invoiceYear = invoiceDate ? Number(invoiceDate.slice(0, 4)) : null
-  const invoiceMonth = invoiceDate ? Number(invoiceDate.slice(5, 7)) : null
+  const supplier = supplierFromTranslation(text)
+  const description = currentDesc || supplier || ''
+  const writeDescription = !currentDesc && description.length > 0
 
-  if (bookedAr > 0) {
-    await db.execute(
-      sql`UPDATE stroski_receipts SET categories = ${JSON.stringify(categories)}::jsonb, description = ${description} WHERE id = ${id}`
-    )
+  const wantCategories = replace || existingCategories.length === 0
+  const parsed = wantCategories
+    ? splitReceiptTranslation(
+        text,
+        safeRate,
+        bookedAr > 0 ? bookedAr : null,
+        bookedAr > 0 && amountEur > 0 ? amountEur : null,
+      )
+    : []
+  const writeCategories = parsed.length > 0
+  const categories = writeCategories ? parsed : existingCategories
+
+  const footer = receiptTotalFromTranslation(text)
+  const parsedTotal = categories.reduce((sum, item) => sum + (item.amountOriginal ?? 0), 0)
+  const totalAr = writeCategories && parsedTotal > 0 ? parsedTotal : (footer ?? 0)
+  const writeAmount = bookedAr === 0 && totalAr > 0
+  const totalEur = writeAmount
+    ? (writeCategories
+        ? Math.round(categories.reduce((sum, item) => sum + item.amountEur, 0) * 100) / 100
+        : Math.round((totalAr / safeRate) * 100) / 100)
+    : amountEur
+
+  if (!writeDescription && !writeCategories && !writeAmount) {
     return {
-      ok: true,
-      categories,
-      amountOriginal: currency === 'Ar' ? amountOriginal : bookedAr,
-      amountEur,
-      currency,
-      description,
+      ok: false,
+      error: existingCategories.length > 0 && !replace
+        ? 'Ta račun je že razporejen.'
+        : 'Iz prepisa ni bilo mogoče razbrati postavk.',
     }
   }
 
-  const totalAr = categories.reduce((sum, item) => sum + (item.amountOriginal ?? 0), 0)
-  const totalEur = Math.round(categories.reduce((sum, item) => sum + item.amountEur, 0) * 100) / 100
-  await db.execute(
-    invoiceDate
-      ? sql`UPDATE stroski_receipts
-            SET categories = ${JSON.stringify(categories)}::jsonb,
-                description = ${description},
-                currency = 'Ar',
-                "amountOriginal" = ${totalAr},
-                "amountEur" = ${totalEur},
-                date = ${invoiceDate},
-                year = ${invoiceYear},
-                month = ${invoiceMonth}
-            WHERE id = ${id}`
-      : sql`UPDATE stroski_receipts
-            SET categories = ${JSON.stringify(categories)}::jsonb,
-                description = ${description},
-                currency = 'Ar',
-                "amountOriginal" = ${totalAr},
-                "amountEur" = ${totalEur}
-            WHERE id = ${id}`
-  )
+  const invoiceDate = writeAmount ? receiptDateFromTranslation(text) : null
+  const invoiceYear = invoiceDate ? Number(invoiceDate.slice(0, 4)) : null
+  const invoiceMonth = invoiceDate ? Number(invoiceDate.slice(5, 7)) : null
+  const nextCurrency: Currency = writeAmount ? 'Ar' : currency
+  const nextOriginal = writeAmount ? totalAr : amountOriginal
+  const nextEur = writeAmount ? totalEur : amountEur
+
+  if (writeCategories || writeAmount) {
+    await db.execute(
+      invoiceDate
+        ? sql`UPDATE stroski_receipts
+              SET categories = ${JSON.stringify(categories)}::jsonb,
+                  description = ${description},
+                  currency = ${nextCurrency},
+                  "amountOriginal" = ${nextOriginal},
+                  "amountEur" = ${nextEur},
+                  date = ${invoiceDate},
+                  year = ${invoiceYear},
+                  month = ${invoiceMonth}
+              WHERE id = ${id}`
+        : sql`UPDATE stroski_receipts
+              SET categories = ${JSON.stringify(categories)}::jsonb,
+                  description = ${description},
+                  currency = ${nextCurrency},
+                  "amountOriginal" = ${nextOriginal},
+                  "amountEur" = ${nextEur}
+              WHERE id = ${id}`
+    )
+  } else {
+    await db.execute(sql`UPDATE stroski_receipts SET description = ${description} WHERE id = ${id}`)
+  }
+
   return {
     ok: true,
     categories,
-    amountOriginal: totalAr,
-    amountEur: totalEur,
-    currency: 'Ar',
+    amountOriginal: nextOriginal,
+    amountEur: nextEur,
+    currency: nextCurrency,
     description,
   }
 }
