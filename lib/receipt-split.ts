@@ -31,6 +31,7 @@ const KITCHEN_WORDS = [
   'tort', 'drobtin', 'testenin', 'tagliatelle', 'cvetač', 'cvetac', 'brokol',
   'mleko', 'krema', 'sladoled', 'moka', 'moulinet', 'meso', 'riba', 'kruh', 'riž', 'riz',
   'jajc', 'sladkor', 'sol', 'piščan', 'piscan', 'čips', 'cips', 'kakec', 'nabodal',
+  'jastog', 'langoust', 'homar', 'sigal', 'cigal', 'kozic', 'rakov',
   'čokolad', 'cokolad', 'zelenjav', 'sadje', 'začimb', 'zacimb',
   'paradižnik', 'paradiznik', 'čebul', 'cebul', 'krompir', 'solat', 'korenj',
   'pomivanje', 'gobica', 'gobice', 'drgnjen',
@@ -70,16 +71,23 @@ export function classifyReceiptLine(name: string): StrosekCategory {
   return 'ostalo'
 }
 
-function lineAmount(line: string): number | null {
-  const trimmed = line.trim()
-  if (/%\s*$/.test(trimmed)) return null
-  const withCurrency = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:ar|ariary)\s*$/i)
-  const match = withCurrency ?? trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)[.,](\d{2})\s*$/)
+function moneyFrom(raw: string, allowBare = false): number | null {
+  const trimmed = raw.trim()
+  if (!trimmed || /%\s*$/.test(trimmed)) return null
+  const withCurrency = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*(?:ar|ariary|mga)\s*$/i)
+  const withM = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)(?:[.,](\d{1,2}))?\s*m\s*$/i)
+  const decimal = trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)[.,](\d{2})\s*$/)
+  const bare = allowBare ? trimmed.match(/(\d{1,3}(?:[ \u00a0]\d{3})+|\d+)\s*$/) : null
+  const match = withCurrency ?? withM ?? decimal ?? bare
   if (!match) return null
   const whole = match[1].replace(/[ \u00a0]/g, '')
   const value = match[2] ? Number(`${whole}.${match[2]}`) : Number(whole)
   if (!Number.isFinite(value) || value <= 0) return null
   return Math.round(value)
+}
+
+function lineAmount(line: string): number | null {
+  return moneyFrom(line, false)
 }
 
 function plainLine(line: string): string {
@@ -110,11 +118,29 @@ export function supplierFromTranslation(text: string): string | null {
   return null
 }
 
+export function receiptDateFromTranslation(text: string): string | null {
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\*/g, '').trim()
+    const match = line.match(/datum\s*:\s*(\d{1,2})[./](\d{1,2})[./](\d{2,4})/i)
+    if (!match) continue
+    const day = Number(match[1])
+    const month = Number(match[2])
+    let year = Number(match[3])
+    if (year < 100) year += 2000
+    if (month < 1 || month > 12 || day < 1 || day > 31) continue
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
+  return null
+}
+
 export function receiptTotalFromTranslation(text: string): number | null {
   const candidates: { score: number; amount: number }[] = []
   for (const line of text.split(/\r?\n/)) {
     const folded = fold(line)
-    const amount = lineAmount(line)
+    const isFooter = /za placilo|net a payer|total ttc|koncni znesek/.test(folded)
+      || (/skupni znesek \(z ddv\)|znesek z ddv/.test(folded) && !/brez/.test(folded))
+      || (/skupn.*ddv/.test(folded) && !/brez/.test(folded))
+    const amount = lineAmount(line) ?? (isFooter ? moneyFrom(line, true) : null)
     if (!amount) continue
     if (/za placilo|net a payer|total ttc|koncni znesek/.test(folded)) candidates.push({ score: 3, amount })
     else if (/skupni znesek \(z ddv\)|znesek z ddv/.test(folded) && !/brez/.test(folded)) candidates.push({ score: 2, amount })
@@ -122,6 +148,23 @@ export function receiptTotalFromTranslation(text: string): number | null {
   }
   candidates.sort((a, b) => b.score - a.score)
   return candidates[0]?.amount ?? null
+}
+
+// Tržnica in podobni listi: v isti vrstici sta opis in znesek, brez besede AR.
+function marketReceiptLines(text: string): { line: string; amount: number; category: StrosekCategory }[] | null {
+  const rows: { line: string; amount: number; category: StrosekCategory }[] = []
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = plainLine(rawLine)
+    const folded = fold(line)
+    if (!/opis\s*:/.test(folded) || !/znesek\s*:/.test(folded)) continue
+    if (/skupn|koncn/.test(folded)) continue
+    const name = line.match(/opis\s*:\s*([^,]+)/i)?.[1]?.trim()
+    const amountText = line.match(/znesek\s*:\s*(.+)$/i)?.[1] ?? ''
+    const amount = moneyFrom(amountText, true)
+    if (!name || !amount || isCancelled(name)) continue
+    rows.push({ line: name, amount, category: classifyReceiptLine(name) })
+  }
+  return rows.length > 0 ? rows : null
 }
 
 // Račun, kjer je vsaka postavka v več vrsticah: ime, količina, znesek brez DDV, stopnja DDV.
@@ -175,6 +218,8 @@ function detailedReceiptLines(text: string): { line: string; amount: number; cat
 }
 
 export function receiptLinesForSplit(text: string): { line: string; amount: number; category: StrosekCategory }[] {
+  const market = marketReceiptLines(text)
+  if (market) return market
   const detailed = detailedReceiptLines(text)
   if (detailed) return detailed
 

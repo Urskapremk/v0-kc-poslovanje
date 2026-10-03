@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { get } from '@vercel/blob'
 import { parseCategories, type CategoryAllocation } from '@/lib/stroski-categories'
-import { splitReceiptTranslation, supplierFromTranslation } from '@/lib/receipt-split'
+import { receiptDateFromTranslation, splitReceiptTranslation, supplierFromTranslation } from '@/lib/receipt-split'
 import { readReceiptFromImages } from '@/lib/receipt-ocr'
 import { getExchangeRate } from './komba'
 import { addCashExpense, deleteCashExpense, getBankTransactions } from './banka'
@@ -195,6 +195,9 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string, 
 
   const currentDesc = ((row.description as string | null) ?? '').trim()
   const description = currentDesc || supplierFromTranslation(text) || ''
+  const invoiceDate = bookedAr > 0 ? null : receiptDateFromTranslation(text)
+  const invoiceYear = invoiceDate ? Number(invoiceDate.slice(0, 4)) : null
+  const invoiceMonth = invoiceDate ? Number(invoiceDate.slice(5, 7)) : null
 
   if (bookedAr > 0) {
     await db.execute(
@@ -213,13 +216,24 @@ async function fillReceiptSplitFromTranslation(id: string, translation: string, 
   const totalAr = categories.reduce((sum, item) => sum + (item.amountOriginal ?? 0), 0)
   const totalEur = Math.round(categories.reduce((sum, item) => sum + item.amountEur, 0) * 100) / 100
   await db.execute(
-    sql`UPDATE stroski_receipts
-        SET categories = ${JSON.stringify(categories)}::jsonb,
-            description = ${description},
-            currency = 'Ar',
-            "amountOriginal" = ${totalAr},
-            "amountEur" = ${totalEur}
-        WHERE id = ${id}`
+    invoiceDate
+      ? sql`UPDATE stroski_receipts
+            SET categories = ${JSON.stringify(categories)}::jsonb,
+                description = ${description},
+                currency = 'Ar',
+                "amountOriginal" = ${totalAr},
+                "amountEur" = ${totalEur},
+                date = ${invoiceDate},
+                year = ${invoiceYear},
+                month = ${invoiceMonth}
+            WHERE id = ${id}`
+      : sql`UPDATE stroski_receipts
+            SET categories = ${JSON.stringify(categories)}::jsonb,
+                description = ${description},
+                currency = 'Ar',
+                "amountOriginal" = ${totalAr},
+                "amountEur" = ${totalEur}
+            WHERE id = ${id}`
   )
   return {
     ok: true,
