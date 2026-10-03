@@ -23,6 +23,9 @@ const ROOM_WORDS = [
   'toaletni', 'wc papir', 'papier toilette',
   'komar', 'rokavic', 'brisač', 'brisac',
   'šampon', 'sampon', 'milo', 'mehčalec', 'mehcalec',
+  'zobn', 'colgate', 'dentifric',
+  'parfum', 'parfem', 'kolonij',
+  'robčk', 'robck',
 ]
 
 const KITCHEN_WORDS = [
@@ -32,7 +35,8 @@ const KITCHEN_WORDS = [
   'mleko', 'krema', 'sladoled', 'moka', 'moulinet', 'meso', 'riba', 'kruh', 'riž', 'riz',
   'jajc', 'sladkor', 'sol', 'piščan', 'piscan', 'čips', 'cips', 'kakec', 'nabodal',
   'jastog', 'langoust', 'homar', 'sigal', 'cigal', 'kozic', 'rakov',
-  'čokolad', 'cokolad', 'zelenjav', 'sadje', 'začimb', 'zacimb',
+  'karamel', 'toffee', 'sardin', 'zamrzoval', 'pripravek', 'kečap', 'kecap',
+  'čokolad', 'cokolad', 'chocolat', 'zelenjav', 'sadje', 'začimb', 'zacimb',
   'paradižnik', 'paradiznik', 'čebul', 'cebul', 'krompir', 'solat', 'korenj',
   'pomivanje', 'gobica', 'gobice', 'drgnjen',
 ]
@@ -50,14 +54,18 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+// Kratka imena pijač, ki se sicer skrijejo v daljšo besedo (cola v chocolat).
+const WHOLE_DRINK_STEMS = new Set(['cola', 'coca'])
+
 function hasWord(text: string, words: string[]): boolean {
   const folded = fold(text)
   return words.some((word) => {
     const needle = fold(word)
     if (needle.includes(' ')) return folded.includes(needle)
     // Kratke besede (sir, sok, gin) samo kot cela beseda, da ne zadenemo sosednje.
-    // Daljše ostanejo kot koren: "servet" znotraj "serveti", "fizz" znotraj "JOLIEFIZZ".
-    if (needle.length <= 3) {
+    // cola in coca prav tako, da "chocolat" ostane hrana. Daljši koreni ostanejo:
+    // "servet" znotraj "serveti", "fizz" znotraj "JOLIEFIZZ".
+    if (needle.length <= 3 || WHOLE_DRINK_STEMS.has(needle)) {
       return new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(needle)}(?:[^a-z0-9]|$)`).test(folded)
     }
     return folded.includes(needle)
@@ -118,16 +126,39 @@ export function supplierFromTranslation(text: string): string | null {
   return null
 }
 
+const SL_MONTHS: Record<string, number> = {
+  januar: 1, januarja: 1,
+  februar: 2, februarja: 2,
+  marec: 3, marca: 3,
+  april: 4, aprila: 4,
+  maj: 5, maja: 5,
+  junij: 6, junija: 6,
+  julij: 7, julija: 7,
+  avgust: 8, avgusta: 8,
+  september: 9, septembra: 9,
+  oktober: 10, oktobra: 10,
+  november: 11, novembra: 11,
+  december: 12, decembra: 12,
+}
+
 export function receiptDateFromTranslation(text: string): string | null {
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\*/g, '').trim()
-    const match = line.match(/datum\s*:\s*(\d{1,2})[./](\d{1,2})[./](\d{2,4})/i)
-    if (!match) continue
-    const day = Number(match[1])
-    const month = Number(match[2])
-    let year = Number(match[3])
-    if (year < 100) year += 2000
-    if (month < 1 || month > 12 || day < 1 || day > 31) continue
+    const numeric = line.match(/datum\s*:\s*(\d{1,2})[./](\d{1,2})[./](\d{2,4})/i)
+    if (numeric) {
+      const day = Number(numeric[1])
+      const month = Number(numeric[2])
+      let year = Number(numeric[3])
+      if (year < 100) year += 2000
+      if (month < 1 || month > 12 || day < 1 || day > 31) continue
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    }
+    const named = line.match(/datum\s*:\s*(\d{1,2})\.?\s+([a-zčšž]+)\.?\s+(\d{4})/i)
+    if (!named) continue
+    const day = Number(named[1])
+    const month = SL_MONTHS[fold(named[2])]
+    const year = Number(named[3])
+    if (!month || day < 1 || day > 31) continue
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
   return null
@@ -162,6 +193,26 @@ function marketReceiptLines(text: string): { line: string; amount: number; categ
     const amountText = line.match(/znesek\s*:\s*(.+)$/i)?.[1] ?? ''
     const amount = moneyFrom(amountText, true)
     if (!name || !amount || isCancelled(name)) continue
+    rows.push({ line: name, amount, category: classifyReceiptLine(name) })
+  }
+  return rows.length > 0 ? rows : null
+}
+
+// Vrstica s postavko in zneskom v isti vrsti, npr.
+// "1. Jogurt | Količina: 6 | Cena/kos: 1 500 | Znesek: 9 000"
+// Znesek je končni znesek postavke, brez besede AR in brez dodajanja DDV.
+function pricedReceiptLines(text: string): { line: string; amount: number; category: StrosekCategory }[] | null {
+  const rows: { line: string; amount: number; category: StrosekCategory }[] = []
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = plainLine(rawLine)
+    if (!line || isTotalLine(line) || isCancelled(line)) continue
+    if (!/znesek\s*:/i.test(line)) continue
+    const amountText = line.match(/znesek\s*:\s*(.+)$/i)?.[1] ?? ''
+    const amount = moneyFrom(amountText, true)
+    if (!amount) continue
+    let name = line.replace(/^\d+\.\s*/, '').split('|')[0].trim()
+    name = name.replace(/\s*znesek\s*:.*$/i, '').replace(/[, ]+$/g, '').trim()
+    if (!name || /^(kolicina|cena)\b/.test(fold(name))) continue
     rows.push({ line: name, amount, category: classifyReceiptLine(name) })
   }
   return rows.length > 0 ? rows : null
@@ -220,6 +271,8 @@ function detailedReceiptLines(text: string): { line: string; amount: number; cat
 export function receiptLinesForSplit(text: string): { line: string; amount: number; category: StrosekCategory }[] {
   const market = marketReceiptLines(text)
   if (market) return market
+  const priced = pricedReceiptLines(text)
+  if (priced) return priced
   const detailed = detailedReceiptLines(text)
   if (detailed) return detailed
 
