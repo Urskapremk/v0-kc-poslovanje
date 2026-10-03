@@ -147,6 +147,7 @@ type InvoiceData = {
   accommodationPartiallyPaid: boolean
   accPaymentNote?: string
   paymentSpec?: { label: string; methodDate: string; eur: number; separate: boolean }[]
+  hidePayments?: boolean
   extensionNote?: string | null
   services: { name: string; eur: number; paid: boolean; free?: boolean; included?: boolean }[]
   servicesTotalEur: number
@@ -381,8 +382,8 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
             </tr>
           </table>
         </td></tr>
-          ${paymentsSection}
-          ${paymentSpecSection}
+${opts.hidePayments ? '' : paymentsSection}
+        ${opts.hidePayments ? '' : paymentSpecSection}
         <tr><td align="center" bgcolor="#0a2029" style="background-color:#0a2029;padding:24px 20px 8px 20px;border-top:1px solid #1f2f36;">
           <p style="margin:16px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#b9c6ca;">${t.thankYou}</p>
           <p style="margin:4px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#7e786d;">${t.tagline} &middot; Nosy Komba, Madagascar</p>
@@ -561,6 +562,7 @@ async function buildInvoicePdfBase64(d: InvoiceData): Promise<string | null> {
     doc.text(`${t.exchangeRate}: 1 EUR = ${formatAr(d.exchangeRate)} Ar`, pageW - marginX, y, { align: 'right' })
     y += 8
 
+    if (!d.hidePayments) {
     // Payments
     ensure(24)
     doc.setFillColor(240, 248, 245)
@@ -605,6 +607,7 @@ async function buildInvoicePdfBase64(d: InvoiceData): Promise<string | null> {
         y += 5
       }
       y += 5
+    }
     }
 
     // Footer
@@ -996,12 +999,13 @@ export async function getInvoiceEmailPreview(
   reservationId: string,
   lang: InvoiceLang = 'en',
   excludeAccommodation = false,
-  onlyStayMeals = false
+  onlyStayMeals = false,
+  hidePayments = false
 ): Promise<{ html?: string; to?: string; error?: string }> {
   const built = await buildInvoiceData(reservationId, lang, excludeAccommodation, onlyStayMeals)
   if ('error' in built) return { error: built.error }
   return {
-    html: buildInvoiceEmailHtml(built.data),
+    html: buildInvoiceEmailHtml({ ...built.data, hidePayments }),
     to: (built.reservation.email || '').trim(),
   }
 }
@@ -1011,7 +1015,8 @@ export async function sendInvoiceEmail(
   toEmail?: string,
   lang: InvoiceLang = 'en',
   excludeAccommodation = false,
-  onlyStayMeals = false
+  onlyStayMeals = false,
+  hidePayments = false
 ): Promise<{ success: boolean; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) return { success: false, error: 'E-pošta še ni nastavljena (manjka RESEND_API_KEY).' }
@@ -1023,7 +1028,7 @@ export async function sendInvoiceEmail(
   const to = (toEmail || reservation.email || '').trim()
   if (!to) return { success: false, error: 'Gost nima vpisanega email naslova.' }
 
-  const html = buildInvoiceEmailHtml(data)
+  const html = buildInvoiceEmailHtml({ ...data, hidePayments })
 
   const from = process.env.EMAIL_FROM || 'Komba Cabana <info@kombacabana.app>'
   const subject = lang === 'fr' ? 'Votre facture — Komba Cabana' : 'Your invoice — Komba Cabana'

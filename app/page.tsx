@@ -1730,7 +1730,7 @@ export default function KombaCabanaApp() {
   const [emailingGuest, setEmailingGuest] = React.useState(false);
   const [emailingInvoice, setEmailingInvoice] = React.useState(false);
   const [loadingInvoicePreview, setLoadingInvoicePreview] = React.useState(false);
-  const [invoicePreview, setInvoicePreview] = React.useState<{ html: string; to: string; excludeAccommodation: boolean; onlyStayMeals: boolean } | null>(null);
+  const [invoicePreview, setInvoicePreview] = React.useState<{ html: string; to: string; excludeAccommodation: boolean; onlyStayMeals: boolean; hidePayments?: boolean } | null>(null);
   const [loadingCheckinPreview, setLoadingCheckinPreview] = React.useState(false);
   const [checkinPreview, setCheckinPreview] = React.useState<{ html: string; to: string; guests: { slot: 'first' | 'second' | 'third' | 'fourth'; label: string; expanded: boolean; data: Record<CheckinGuestField, string> }[] } | null>(null);
   const [savingCheckinNames, setSavingCheckinNames] = React.useState(false);
@@ -10404,7 +10404,22 @@ function GuestCard() {
               />
             </div>
 
-            <div className="flex items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-white/10 px-5 py-4">
+              <button
+                onClick={async () => {
+                  const rid = activeReservation()?.id;
+                  if (!rid || !invoicePreview) return;
+                  const next = !invoicePreview.hidePayments;
+                  const { getInvoiceEmailPreview } = await import("@/app/actions/invoice-email");
+                  const result = await getInvoiceEmailPreview(rid, "en", invoicePreview.excludeAccommodation, invoicePreview.onlyStayMeals, next);
+                  if (result.html) setInvoicePreview({ ...invoicePreview, html: result.html, hidePayments: next });
+                }}
+                disabled={emailingInvoice}
+                aria-pressed={!invoicePreview.hidePayments}
+                className={`mr-auto rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-50 ${invoicePreview.hidePayments ? "border-white/15 text-white/50 hover:bg-white/5" : "border-[#8fae92]/40 text-[#8fae92] hover:bg-[#8fae92]/10"}`}
+              >
+                {invoicePreview.hidePayments ? "Plačila: izklopljena" : "Plačila: vklopljena"}
+              </button>
               <button
                 onClick={() => setInvoicePreview(null)}
                 disabled={emailingInvoice}
@@ -10433,7 +10448,7 @@ function GuestCard() {
                   setEmailingInvoice(true);
                   try {
                     const { sendInvoiceEmail } = await import("@/app/actions/invoice-email");
-                    const result = await sendInvoiceEmail(rid, invoicePreview.to, "en", invoicePreview.excludeAccommodation, invoicePreview.onlyStayMeals);
+                    const result = await sendInvoiceEmail(rid, invoicePreview.to, "en", invoicePreview.excludeAccommodation, invoicePreview.onlyStayMeals, !!invoicePreview.hidePayments);
                     if (result.success) {
                       showMsg(`Račun poslan gostu (${invoicePreview.to}).`);
                       setSentEmailsRefresh((n) => n + 1);
