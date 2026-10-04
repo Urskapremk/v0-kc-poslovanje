@@ -382,6 +382,106 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
   return result
 }
 
+export type KitchenLeaveAdvanceMonth = {
+  year: number
+  month: number
+  scheduledDays: number
+  leaveWorkDays: number
+  amountAr: number
+}
+
+// Plačilo dopusta vnaprej: cela mesečna plača krije delovne dni po razporedu
+// (prosti dnevi niso v delitelju in niso dopust). Dopust šteje samo dneve,
+// ko je oseba razporejena na delo.
+export type KitchenLeaveAdvance = {
+  amountAr: number
+  salaryAr: number
+  scheduledDays: number
+  leaveWorkDays: number
+  workedDates: string[]
+  freeDates: string[]
+  months: KitchenLeaveAdvanceMonth[]
+}
+
+function samePerson(a: string, b: string): boolean {
+  const norm = (name: string) =>
+    (name || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+  const na = norm(a)
+  const nb = norm(b)
+  if (!na || !nb) return false
+  if (na === nb) return true
+  const key = Math.min(4, na.length, nb.length)
+  return na.slice(0, key) === nb.slice(0, key)
+}
+
+export function kitchenLeaveAdvancePay(
+  staffName: string,
+  startDate: string,
+  endDate: string,
+  monthlySalary: number,
+): KitchenLeaveAdvance | null {
+  const start = String(startDate ?? '').slice(0, 10)
+  const end = String(endDate ?? '').slice(0, 10)
+  const salary = Math.round(Number(monthlySalary))
+  if (!staffName || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null
+  if (!(salary > 0) || start > end) return null
+
+  let y = Number(start.slice(0, 4))
+  let m = Number(start.slice(5, 7))
+  const endY = Number(end.slice(0, 4))
+  const endM = Number(end.slice(5, 7))
+
+  const months: KitchenLeaveAdvanceMonth[] = []
+  const freeDates: string[] = []
+  const workedDates: string[] = []
+
+  while (y < endY || (y === endY && m <= endM)) {
+    const schedule = generateKitchenSchedule(y, m)
+    const key = Object.keys(schedule[0]?.assignments ?? {}).find((k) => samePerson(k, staffName))
+    if (key) {
+      let scheduledDays = 0
+      let leaveWorkDays = 0
+      for (const day of schedule) {
+        const shift = day.assignments[key]
+        const working = !!shift && shift !== 'OFF'
+        if (working) scheduledDays += 1
+        const inLeave = day.date >= start && day.date <= end
+        if (inLeave && working) leaveWorkDays += 1
+        else if (inLeave) freeDates.push(day.date)
+        else if (working) workedDates.push(day.date)
+      }
+      months.push({
+        year: y,
+        month: m,
+        scheduledDays,
+        leaveWorkDays,
+        amountAr: scheduledDays > 0 ? Math.round((salary * leaveWorkDays) / scheduledDays) : 0,
+      })
+    }
+    m += 1
+    if (m > 12) {
+      m = 1
+      y += 1
+    }
+  }
+
+  const scheduledDays = months.reduce((sum, month) => sum + month.scheduledDays, 0)
+  if (scheduledDays === 0) return null
+  return {
+    amountAr: months.reduce((sum, month) => sum + month.amountAr, 0),
+    salaryAr: salary,
+    scheduledDays,
+    leaveWorkDays: months.reduce((sum, month) => sum + month.leaveWorkDays, 0),
+    workedDates,
+    freeDates,
+    months,
+  }
+}
+
 /** Counts worked shifts and hours per person (morning 6 h, afternoon 7 h). */
 export function computeKitchenStats(schedule: DaySchedule[]) {
   const stats: Record<string, { shifts: number; hours: number }> = {}

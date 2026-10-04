@@ -27,8 +27,49 @@ import {
   proratedAnnualQuota,
   usedDaysInYear,
 } from '@/lib/leave'
+import { kitchenLeaveAdvancePay, type KitchenLeaveAdvance } from '@/lib/kitchen'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
+
+const MONTHS_SL = [
+  'januar', 'februar', 'marec', 'april', 'maj', 'junij',
+  'julij', 'avgust', 'september', 'oktober', 'november', 'december',
+]
+const WEEKDAYS_SL = ['nedelja', 'ponedeljek', 'torek', 'sreda', 'četrtek', 'petek', 'sobota']
+
+function joinSl(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? ''
+  return `${items.slice(0, -1).join(', ')} in ${items[items.length - 1]}`
+}
+
+function nextIso(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const dt = new Date(y, m - 1, d + 1)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+
+function dayLabel(iso: string, withWeekday = false): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const base = `${d}. ${MONTHS_SL[m - 1]}`
+  if (!withWeekday) return base
+  return `${base} (${WEEKDAYS_SL[new Date(y, m - 1, d).getDay()]})`
+}
+
+function compactRanges(dates: string[]): string {
+  const groups: string[][] = []
+  for (const date of dates) {
+    const prev = groups[groups.length - 1]
+    if (prev && nextIso(prev[prev.length - 1]) === date) prev.push(date)
+    else groups.push([date])
+  }
+  return joinSl(groups.map((group) => {
+    if (group.length === 1) return dayLabel(group[0])
+    const [, ma, da] = group[0].split('-').map(Number)
+    const [, mb, db] = group[group.length - 1].split('-').map(Number)
+    if (ma === mb) return `${da}.–${db}. ${MONTHS_SL[ma - 1]}`
+    return `${dayLabel(group[0])} – ${dayLabel(group[group.length - 1])}`
+  }))
+}
 
 export default function LeaveDocument({ department }: { department: LeaveDepartment }) {
   const { data: allStaff } = useSWR('all-staff', getAllStaffMembers)
@@ -40,6 +81,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   const [printKind, setPrintKind] = useState<'leave' | 'advance'>('leave')
   const [advanceInputs, setAdvanceInputs] = useState<Record<string, string>>({})
   const [advanceError, setAdvanceError] = useState<string | null>(null)
+  const [printPay, setPrintPay] = useState<KitchenLeaveAdvance | null>(null)
   const [selectedStaffId, setSelectedStaffId] = useState<string>('')
   const [year, setYear] = useState(new Date().getFullYear())
   const [uploadingId, setUploadingId] = useState<string | null>(null)
@@ -220,8 +262,23 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     }, 100)
   }
 
-  async function handlePrintAdvance(leave: LeaveRequest) {
-    const amount = parseAr(advanceValue(leave))
+  function advanceFor(leave: LeaveRequest): KitchenLeaveAdvance | null {
+    if (department !== 'kitchen') return null
+    const staff = (allStaff ?? []).find(s => s.id === leave.staffId)
+    const monthly = Number(staff?.monthlySalary)
+    const official = Number(staff?.officialSalary)
+    const salary = monthly > 0 ? monthly : official
+    if (!(salary > 0)) return null
+    return kitchenLeaveAdvancePay(
+      leave.staffName,
+      String(leave.startDate).slice(0, 10),
+      String(leave.endDate).slice(0, 10),
+      salary,
+    )
+  }
+
+  async function handlePrintAdvance(leave: LeaveRequest, pay: KitchenLeaveAdvance | null) {
+    const amount = pay ? pay.amountAr : parseAr(advanceValue(leave))
     if (!amount) {
       setAdvanceError(leave.id)
       return
@@ -231,6 +288,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     await mutate(`leaves-${department}`)
     const staff = (allStaff ?? []).find(s => s.id === leave.staffId)
     setPrintKind('advance')
+    setPrintPay(pay)
     setPrintDoc({ ...leave, advancePayAr: amount })
     ;(window as any).__leaveStaff = staff
     document.body.classList.add('printing-leave')
@@ -504,6 +562,12 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
         <div className="mt-4 space-y-2">
           {viewedLeaves.map(l => {
             const longLeave = l.leaveType === 'annual' && isLongLeave(l.startDate, l.endDate)
+            const pay = longLeave ? advanceFor(l) : null
+            const start = String(l.startDate).slice(0, 10)
+            const end = String(l.endDate).slice(0, 10)
+            const workedBefore = pay?.workedDates.filter(d => d < start) ?? []
+            const workedAfter = pay?.workedDates.filter(d => d > end) ?? []
+            const oneMonth = pay?.months.length === 1 ? pay.months[0] : null
             return (
             <div
               key={l.id}
@@ -579,22 +643,49 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
             </div>
             {longLeave && (
               <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-white/10 pt-3">
-                <div>
-                  <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/40">Plačilo dopusta vnaprej (Ar)</label>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={advanceValue(l)}
-                    onChange={e => {
-                      setAdvanceError(null)
-                      setAdvanceInputs(prev => ({ ...prev, [l.id]: e.target.value }))
-                    }}
-                    placeholder="npr. 450000"
-                    className="w-40 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c59b5b]/50 focus:outline-none"
-                  />
-                </div>
+                {pay ? (
+                  <div className="w-full space-y-1 text-[12px] leading-relaxed text-white/70">
+                    <p className="text-[10px] uppercase tracking-wider text-white/40">Plačilo dopusta vnaprej</p>
+                    <p>Plača za cel mesec je <span className="text-white">{formatAr(pay.salaryAr)}</span>.</p>
+                    <p>
+                      {oneMonth
+                        ? `Po razporedu je v mesecu ${MONTHS_SL[oneMonth.month - 1]} ${oneMonth.scheduledDays} delovnih dni.`
+                        : `Po razporedu je v teh mesecih skupaj ${pay.scheduledDays} delovnih dni.`}
+                    </p>
+                    {workedBefore.length > 0 && (
+                      <p>Do začetka dopusta je po razporedu {workedBefore.length} delovnih dni ({compactRanges(workedBefore)}).</p>
+                    )}
+                    {workedAfter.length > 0 && (
+                      <p>Po dopustu je po razporedu še {workedAfter.length} delovnih dni ({compactRanges(workedAfter)}).</p>
+                    )}
+                    {pay.freeDates.length > 0 && (
+                      <p>Prosti dnevi ostanejo prosti in niso dopust: {joinSl(pay.freeDates.map(d => dayLabel(d, true)))}.</p>
+                    )}
+                    <p>Dopust je {pay.leaveWorkDays} delovnih dni.</p>
+                    <p className="text-base font-medium text-[#c59b5b]">
+                      {oneMonth
+                        ? `Plačilo vnaprej: ${formatAr(pay.salaryAr)} × ${oneMonth.leaveWorkDays} / ${oneMonth.scheduledDays} = ${formatAr(pay.amountAr)}`
+                        : `Plačilo vnaprej: ${formatAr(pay.amountAr)}`}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/40">Plačilo dopusta vnaprej (Ar)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={advanceValue(l)}
+                      onChange={e => {
+                        setAdvanceError(null)
+                        setAdvanceInputs(prev => ({ ...prev, [l.id]: e.target.value }))
+                      }}
+                      placeholder="npr. 450000"
+                      className="w-40 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c59b5b]/50 focus:outline-none"
+                    />
+                  </div>
+                )}
                 <button
-                  onClick={() => handlePrintAdvance(l)}
+                  onClick={() => handlePrintAdvance(l, pay)}
                   className="flex items-center gap-1 rounded-lg bg-[#c59b5b]/20 px-3 py-2 text-xs font-medium text-[#c59b5b] hover:bg-[#c59b5b]/30"
                 >
                   <Printer className="h-3.5 w-3.5" /> Natisni potrdilo
@@ -603,7 +694,9 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                   Plača je za mesec nazaj. Pri tako dolgem dopustu delavec s podpisom potrdi, da je plačilo za cel dopust prejel vnaprej.
                 </p>
                 {advanceError === l.id && (
-                  <p className="w-full text-[11px] text-amber-300">Najprej vpiši znesek v ariarijih.</p>
+                  <p className="w-full text-[11px] text-amber-300">
+                    {pay ? 'Po razporedu ni delovnih dni dopusta, zato zneska ni.' : 'Najprej vpiši znesek v ariarijih.'}
+                  </p>
                 )}
               </div>
             )}
@@ -639,6 +732,16 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
               <p><span className="doc-label">Période / Obdobje :</span> {leaveDateFr(String(printDoc.startDate).slice(0, 10))} – {leaveDateFr(String(printDoc.endDate).slice(0, 10))} ({printDoc.days} jours)</p>
             </div>
             <p className="doc-amount">{formatAr(printDoc.advancePayAr || 0)}</p>
+            {printPay && printPay.months.length === 1 && (
+              <>
+                <p className="doc-para">
+                  Calcul selon le planning : salaire du mois entier {formatAr(printPay.salaryAr)} × {printPay.months[0].leaveWorkDays} jours de congé / {printPay.months[0].scheduledDays} jours de travail prévus. Les jours de repos ne sont pas comptés comme congé.
+                </p>
+                <p className="doc-para doc-para-en">
+                  Izračun po razporedu: plača za cel mesec {formatAr(printPay.salaryAr)} × {printPay.months[0].leaveWorkDays} dni dopusta / {printPay.months[0].scheduledDays} predvidenih delovnih dni. Prosti dnevi niso dopust.
+                </p>
+              </>
+            )}
             <p className="doc-para">
               Je soussigné(e) confirme avoir reçu à l&apos;avance le paiement de la totalité de mon congé payé pour la période indiquée. Le salaire étant versé pour le mois précédent, ce montant couvre le congé de ce mois.
             </p>
