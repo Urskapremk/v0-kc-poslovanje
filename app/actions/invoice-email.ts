@@ -748,7 +748,7 @@ async function buildInvoiceData(
   const accommodationEurFull = Number(reservation.totalAmount || 0)
   const accommodationEur = excludeAccommodation ? 0 : accommodationEurFull
   const accommodationAr = Math.round(accommodationEur * exchangeRate)
-  const applicableDiscounts = excludeAccommodation ? discounts0.filter((d) => d.kind !== 'stay') : discounts0
+  const applicableDiscounts = discounts0
   const subtotalAr = accommodationAr + servicesTotalAr + barTotalAr
   const discountTotalAr = applicableDiscounts.reduce((s, d) => s + Number(d.amountAr || 0), 0)
   const grandTotalAr = Math.max(0, subtotalAr - discountTotalAr)

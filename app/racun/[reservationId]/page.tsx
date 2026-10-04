@@ -464,10 +464,7 @@ export default function RacunPage() {
   const accommodationEur = excludeAccommodation ? 0 : accommodationEurFull
   const accommodationAr = Math.round(accommodationEur * exchangeRate)
   const subtotalAr = accommodationAr + servicesTotal + barTotal
-  // Stay discounts only apply when accommodation is on the invoice.
-  const applicableDiscounts = excludeAccommodation
-    ? invoiceDiscounts.filter((d) => d.kind !== 'stay')
-    : invoiceDiscounts
+  const applicableDiscounts = invoiceDiscounts
   const discountTotalAr = applicableDiscounts.reduce((sum, d) => sum + (d.amountAr || 0), 0)
   const grandTotalAr = Math.max(0, subtotalAr - discountTotalAr)
   const grandTotalEur = grandTotalAr / exchangeRate
