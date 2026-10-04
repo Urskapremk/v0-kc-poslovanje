@@ -264,9 +264,10 @@ function buildVoucherEmailHtml(data: VoucherData): string {
   // the badge's #0a2029 text versus terracotta's 5.57:1, so it would read far lighter than its pair.
   const badgeColor = data.type === 'arrival' ? '#3fae5a' : '#c8846b'
 
-  // Boat-only transfers get the ship mark on the Route card. `legs` is only populated when a
-  // Herman car leg exists, so an empty herman route means the whole trip is by boat.
-  const boatOnly = !!data.routeName && !data.hermanRouteName
+  // The ship mark sits on the Route card whenever the transfer includes a boat — a boat-only
+  // trip and a car-plus-boat trip alike. `routeName` is the boat route; the car, when there is
+  // one, lives in `hermanRouteName` and must not hide the boat.
+  const showBoat = !!data.routeName
   // The boat flies the guest's flag: one animated GIF per country (icon-boat-<code>.gif), each a
   // ship with a mast and a flag that waves as the hull rocks. Unknown nationality falls back to
   // the plain ship. Same nationality mapping the flag row uses.
@@ -435,7 +436,7 @@ function buildVoucherEmailHtml(data: VoucherData): string {
                   <div style="height:1px;line-height:1px;font-size:0;margin-top:10px;background-color:${GOLD_HAIRLINE};">&nbsp;</div>
                   ${legsHtml}
                 </td>
-                ${boatOnly
+                ${showBoat
                   ? `<td width="100" align="right" valign="middle" style="width:100px;vertical-align:middle;padding-left:16px;">
                   <!-- PNG, not inline SVG: Gmail strips inline SVG from email bodies. The shape is
                        lucide Ship — the very icon the app uses for transfers — rasterised onto a
