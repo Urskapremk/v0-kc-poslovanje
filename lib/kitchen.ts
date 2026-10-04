@@ -370,6 +370,12 @@ export function generateKitchenSchedule(year: number, month: number): DaySchedul
 
     const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
     if (date >= NEW_PATTERN_START) applyThreeShiftPattern(assignments, offset)
+    // Verginie keeps the September rhythm (6 mornings, Tuesday off) through October.
+    // The three-shift roster has no place for her, so that pattern would otherwise
+    // mark every day from 3 October as free.
+    if (date >= NEW_PATTERN_START && Object.prototype.hasOwnProperty.call(assignments, 'Verginie')) {
+      assignments['Verginie'] = offset === 1 ? 'OFF' : 'MORNING'
+    }
     result.push({ date, assignments })
   }
 

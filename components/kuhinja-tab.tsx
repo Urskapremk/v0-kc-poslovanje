@@ -134,7 +134,7 @@ export default function KuhinjaTab({
     for (const p of activeStaff) {
       const entries = schedule.map((day, i) => {
         const shift = (day.assignments[p] || 'OFF') as KitchenShift
-        return { day: i + 1, hours: SHIFT_HOURS[shift] ?? 0, onLeave: !!leaveByStaff[p]?.[i + 1] }
+        return { day: i + 1, hours: SHIFT_HOURS[shift] ?? 0, onLeave: shift !== 'OFF' && !!leaveByStaff[p]?.[i + 1] }
       })
       map[p] = summarizeMonthHours(year, month, entries)
     }
@@ -460,7 +460,7 @@ export default function KuhinjaTab({
                   </td>
                   {visibleStaff.map((p) => {
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
-                    const leave = leaveByStaff[p]?.[dayNum]
+                    const leave = shift !== 'OFF' ? leaveByStaff[p]?.[dayNum] : undefined
                     return (
                       <td key={p} className="py-1.5 px-2">
                         {leave ? (
@@ -469,7 +469,6 @@ export default function KuhinjaTab({
                             title={LEAVE_TYPES[leave.type as LeaveType]?.sl}
                           >
                             <span className="font-semibold">DOPUST</span>
-                            <span className="text-[10px] opacity-70">{SHIFT_LABELS[shift]}</span>
                           </span>
                         ) : (
                           <span className={`inline-block rounded-md px-2 py-0.5 text-xs ${shiftClasses(shift, pill, t.offText)}`}>
@@ -510,7 +509,8 @@ export default function KuhinjaTab({
               const groups: Record<KitchenShift, string[]> = { EARLY: [], MORNING: [], MIDDAY: [], AFTERNOON: [], EVENING: [], OFF: [] }
               for (const p of activeStaff) {
                 const shift = (day.assignments[p] || 'OFF') as KitchenShift
-                groups[shift].push(p)
+                const onLeave = shift !== 'OFF' && !!leaveByStaff[p]?.[dayNum]
+                groups[onLeave ? 'OFF' : shift].push(p)
               }
               const renderCell = (shift: KitchenShift) => (
                 <div className="flex flex-wrap gap-1">
@@ -518,7 +518,8 @@ export default function KuhinjaTab({
                     <span className={readOnly ? 'text-[#2b2622]/30' : 'text-white/25'}>—</span>
                   ) : (
                     groups[shift].map((p) => {
-                      const onLeave = !!leaveByStaff[p]?.[dayNum]
+                      const ownShift = (day.assignments[p] || 'OFF') as KitchenShift
+                      const onLeave = ownShift !== 'OFF' && !!leaveByStaff[p]?.[dayNum]
                       return (
                         <span
                           key={p}
@@ -605,12 +606,11 @@ export default function KuhinjaTab({
                   </td>
                   {visibleStaff.map((p) => {
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
-                    const leave = leaveByStaff[p]?.[dayNum]
+                    const leave = shift !== 'OFF' ? leaveByStaff[p]?.[dayNum] : undefined
                     if (leave) {
                       return (
                         <td key={p} className="kc-cell kc-leave">
                           DOPUST
-                          <small>{SHIFT_LABELS[shift]}</small>
                         </td>
                       )
                     }
@@ -622,7 +622,7 @@ export default function KuhinjaTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Skupaj ur</td>
               {visibleStaff.map((p) => (
-                <td key={p}>{stats[p]?.hours ?? 0} h</td>
+                <td key={p}>{breakdowns[p]?.totalHours ?? stats[p]?.hours ?? 0} h</td>
               ))}
             </tr>
           </tbody>
@@ -671,7 +671,8 @@ export default function KuhinjaTab({
                   <td className="g-day">{dayNum} {MONTHS_FR[month - 1].slice(0, 4).toLowerCase()}.</td>
                   {visibleStaff.map((p) => {
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
-                    return <td key={p}>{shift === 'OFF' ? '—' : SHIFT_LABELS_FR[shift]}</td>
+                    const leave = shift !== 'OFF' && !!leaveByStaff[p]?.[dayNum]
+                    return <td key={p}>{leave ? 'Congé' : shift === 'OFF' ? '—' : SHIFT_LABELS_FR[shift]}</td>
                   })}
                 </tr>
               )
@@ -679,7 +680,7 @@ export default function KuhinjaTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Total heures</td>
               {visibleStaff.map((p) => (
-                <td key={p}>{stats[p].hours} h</td>
+                <td key={p}>{breakdowns[p]?.totalHours ?? stats[p]?.hours ?? 0} h</td>
               ))}
             </tr>
           </tbody>
@@ -733,7 +734,7 @@ export default function KuhinjaTab({
               </tbody>
             </table>
             <div className="doc-legend">
-              <span>Total heures prévues: <strong>{stats[p]?.hours ?? 0} h</strong> ({stats[p]?.shifts ?? 0} services)</span>
+              <span>Total heures prévues: <strong>{breakdowns[p]?.totalHours ?? stats[p]?.hours ?? 0} h</strong> ({(breakdowns[p] ? breakdowns[p].regularDays + breakdowns[p].sundayDays + breakdowns[p].holidayDays : stats[p]?.shifts) ?? 0} services)</span>
               <span>Signature du responsable: ______________________</span>
             </div>
             <p className="doc-note">Par ma signature, je confirme ma présence au travail pour les jours indiqués.</p>
