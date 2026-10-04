@@ -6,6 +6,7 @@ import Link from "next/link";
 import useSWR, { mutate } from "swr";
   import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart } from "lucide-react";
   import { bungalowDisplayName } from "@/lib/bungalow";
+  import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
   import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, type ChildrenAges } from "@/lib/meal-plan";
@@ -2718,9 +2719,47 @@ async function handleCreateReservation() {
             const pickup = pickupPointField || arrivalRouteName.split(' - ')[0]?.trim() || '';
             // Arrival time ("Ura prihoda" = flightTime), shown next to the pickup place.
             const pickupTime = showArrival && hasArrivalTransfer ? (src.transfers?.arrival?.flightTime || '') : '';
+            // Day before arrival and the arrival day: the guide's phone and the
+            // pickup place/time blink blue, so reception sees who to call and where
+            // the boat is without opening the note.
+            const arrivalDay = String(src.arrival || '').slice(0, 10);
+            const arrivalSoon = showArrival && isDayBeforeOrArrival(arrivalDay, today());
+            const guidePhone = arrivalSoon ? guidePhoneFromNotes(src.notes) : null;
 
-            if (!left && !right) return null;
-            return { left, right, pickup, pickupTime };
+            if (!left && !right && !guidePhone && !pickup) return null;
+            return { left, right, pickup, pickupTime, guidePhone, arrivalSoon };
+          };
+          const renderArrivalCallout = (
+            indicators: { pickup?: string; pickupTime?: string; guidePhone?: string | null; arrivalSoon?: boolean } | null,
+          ) => {
+            if (!indicators) return null;
+            if (indicators.arrivalSoon && (indicators.guidePhone || indicators.pickup)) {
+              return (
+                <div className="mt-1.5 pl-[1.25rem]">
+                  {indicators.guidePhone && (
+                    <p
+                      className="animate-arriving text-[15px] font-semibold tabular-nums tracking-[0.04em] text-[#1565c0]"
+                      title="Številka vodiča"
+                    >
+                      {indicators.guidePhone}
+                    </p>
+                  )}
+                  {indicators.pickup && (
+                    <p className="animate-arriving mt-0.5 text-[13px] font-medium tracking-[0.03em] text-[#1565c0]">
+                      {indicators.pickup}
+                      {indicators.pickupTime ? <span className="ml-1.5 tabular-nums">{indicators.pickupTime}</span> : null}
+                    </p>
+                  )}
+                </div>
+              );
+            }
+            if (!indicators.pickup) return null;
+            return (
+              <p className="mt-1 pl-[1.25rem] text-[10px] tracking-[0.06em] text-[#2b2622]/60">
+                <span className="text-[#2b2622]/45">Pick up:</span> {indicators.pickup}
+                {indicators.pickupTime && <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{indicators.pickupTime}</span>}
+              </p>
+            );
           };
           // Indicators for the collapsed card follow the bungalow's active guest,
           // and a separate set for the NEXT card so the upcoming guest's transport
@@ -2803,12 +2842,7 @@ async function handleCreateReservation() {
                           <div className="ml-auto flex items-center gap-2.5">{indicators.right}</div>
                         )}
                       </div>
-                      {indicators.pickup && (
-                        <p className="mt-1 pl-[1.25rem] text-[10px] tracking-[0.06em] text-[#2b2622]/60">
-                          <span className="text-[#2b2622]/45">Pick up:</span> {indicators.pickup}
-                          {indicators.pickupTime && <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{indicators.pickupTime}</span>}
-                        </p>
-                      )}
+                      {renderArrivalCallout(indicators)}
                     </>
                   )}
                   {/* Reservation notes — same rules as the collapsed NOW row, so notes typed on
@@ -3115,12 +3149,7 @@ async function handleCreateReservation() {
                         <div className="ml-auto flex items-center gap-2.5">{transportIndicators.right}</div>
                       )}
                     </div>
-                    {transportIndicators.pickup && (
-                      <p className="mt-1 pl-[1.25rem] text-[10px] tracking-[0.06em] text-[#2b2622]/60">
-                        <span className="text-[#2b2622]/45">Pick up:</span> {transportIndicators.pickup}
-                        {transportIndicators.pickupTime && <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{transportIndicators.pickupTime}</span>}
-                      </p>
-                    )}
+                    {renderArrivalCallout(transportIndicators)}
                   </>
                 )}
               </button>
