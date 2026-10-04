@@ -422,13 +422,15 @@ export function kitchenLeaveAdvancePay(
   staffName: string,
   startDate: string,
   endDate: string,
-  monthlySalary: number,
+  monthlySalary: number | ((year: number, month: number) => number),
 ): KitchenLeaveAdvance | null {
   const start = String(startDate ?? '').slice(0, 10)
   const end = String(endDate ?? '').slice(0, 10)
-  const salary = Math.round(Number(monthlySalary))
+  const salaryAt = (year: number, month: number) =>
+    Math.round(typeof monthlySalary === 'function' ? monthlySalary(year, month) : Number(monthlySalary))
   if (!staffName || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null
-  if (!(salary > 0) || start > end) return null
+  if (start > end) return null
+  if (typeof monthlySalary !== 'function' && !(salaryAt(Number(start.slice(0, 4)), Number(start.slice(5, 7))) > 0)) return null
 
   let y = Number(start.slice(0, 4))
   let m = Number(start.slice(5, 7))
@@ -454,12 +456,13 @@ export function kitchenLeaveAdvancePay(
         else if (inLeave) freeDates.push(day.date)
         else if (working) workedDates.push(day.date)
       }
+      const monthSalary = salaryAt(y, m)
       months.push({
         year: y,
         month: m,
         scheduledDays,
         leaveWorkDays,
-        amountAr: scheduledDays > 0 ? Math.round((salary * leaveWorkDays) / scheduledDays) : 0,
+        amountAr: scheduledDays > 0 && monthSalary > 0 ? Math.round((monthSalary * leaveWorkDays) / scheduledDays) : 0,
       })
     }
     m += 1
@@ -473,7 +476,7 @@ export function kitchenLeaveAdvancePay(
   if (scheduledDays === 0) return null
   return {
     amountAr: months.reduce((sum, month) => sum + month.amountAr, 0),
-    salaryAr: salary,
+    salaryAr: salaryAt(months[0]?.year ?? Number(start.slice(0, 4)), months[0]?.month ?? Number(start.slice(5, 7))),
     scheduledDays,
     leaveWorkDays: months.reduce((sum, month) => sum + month.leaveWorkDays, 0),
     workedDates,

@@ -12,6 +12,7 @@ import {
   type MgStaffOption,
   type MgEntry,
 } from '@/app/actions/payroll-mg'
+import { monthEnd, salaryOn } from '@/lib/employment'
 import {
   calcMgPayslip,
   minWageForCategory,
@@ -155,6 +156,8 @@ export default function ObracunPlaceMg({ year, month }: { year: number; month: n
   function loadStaff(s: MgStaffOption) {
     const periodEnd = `${year}-${String(month).padStart(2, '0')}-28`
     const years = completedYearsBetween(s.hireDate, periodEnd)
+    const inForce = salaryOn(s.realSalary, s.salaryChanges, monthEnd(year, month))
+    const separateOfficial = s.officialAmount > 0 && s.officialAmount !== Math.round(s.realSalary)
     setF((prev) => ({
       ...prev,
       staffId: s.id,
@@ -165,7 +168,7 @@ export default function ObracunPlaceMg({ year, month }: { year: number; month: n
       companyId: s.company === 'sarl' ? 'sarl' : 'tourism',
       cnapsNumber: s.cnapsNumber,
       ominoNumber: s.ominoNumber,
-      baseSalary: String(s.officialSalary || ''),
+      baseSalary: String(separateOfficial ? s.officialAmount : inForce || s.officialSalary || ''),
       contributionBaseManual: '',
       seniorityYears: years > 0 ? String(years) : '',
     }))

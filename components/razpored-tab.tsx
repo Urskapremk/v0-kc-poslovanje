@@ -10,6 +10,8 @@ import {
 } from '@/app/actions/housekeeping'
 import { HOUSEKEEPERS, type Shift } from '@/lib/housekeeping'
 import { getLeaveRequests } from '@/app/actions/leave'
+import { getAllStaffMembers } from '@/app/actions/statistics'
+import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
 import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
@@ -115,6 +117,9 @@ export default function RazporedTab({
     row.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [schedule, selectedStaff, todayDay])
 
+  const { data: staffMembers } = useSWR('all-staff-members', getAllStaffMembers)
+  const endByName = endDatesFor(HOUSEKEEPERS, staffMembers ?? [])
+  const roster = keptInMonth(HOUSEKEEPERS, endByName, year, month)
   const { data: leaves } = useSWR(['leave', 'housekeeper'], () => getLeaveRequests('housekeeper'))
   const leaveByStaff: Record<string, ReturnType<typeof leaveDaysForStaff>> = {}
   for (const name of HOUSEKEEPERS) leaveByStaff[name] = leaveDaysForStaff(leaves ?? [], name, year, month)
@@ -131,6 +136,7 @@ export default function RazporedTab({
   const stats: Record<string, { shifts: number; hours: number }> = {}
   for (const name of HOUSEKEEPERS) stats[name] = { shifts: 0, hours: 0 }
   for (const e of schedule || []) {
+    if (!employedOn(endByName[e.staffName], e.date)) continue
     if (e.shift === 'MORNING' || e.shift === 'AFTERNOON') {
       if (!stats[e.staffName]) stats[e.staffName] = { shifts: 0, hours: 0 }
       stats[e.staffName].shifts += 1
@@ -144,7 +150,7 @@ export default function RazporedTab({
     const entries = []
     for (let d = 1; d <= lastDay; d++) {
       const ds = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-      const shift = byDate[ds]?.[name]
+      const shift = employedOn(endByName[name], ds) ? byDate[ds]?.[name] : undefined
       const worked = shift === 'MORNING' || shift === 'AFTERNOON'
       entries.push({ day: d, hours: worked ? HOURS_PER_SHIFT : 0, onLeave: !!leaveByStaff[name]?.[d] })
     }
@@ -243,7 +249,7 @@ export default function RazporedTab({
       {/* Legend (click a name to show only that housekeeper) — always visible,
           it is how you pick a single person's schedule while viewing. */}
       <div className="no-print flex flex-wrap items-center gap-3 text-xs">
-        {HOUSEKEEPERS.map((name) => {
+        {roster.map((name) => {
           const active = selectedStaff === name
           return (
             <button
@@ -288,7 +294,7 @@ export default function RazporedTab({
               so a collapsed card would keep its full height and leave a blank gap. */}
           {toolsVisible && (
           <div className="no-print grid grid-cols-1 sm:grid-cols-3 gap-3 items-start">
-            {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
+            {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
               const c = STAFF_COLORS[name]
               const s = stats[name] || { shifts: 0, hours: 0 }
               return (
@@ -325,7 +331,7 @@ export default function RazporedTab({
               <tr className={`text-xs uppercase tracking-wider ${t.head}`}>
                 <th className="text-left py-2 px-2 font-semibold">Dan</th>
                 <th className="text-left py-2 px-2 font-semibold">Datum</th>
-                {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
+                {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
                   <th key={name} className="text-left py-2 px-2 font-semibold">{name}</th>
                 ))}
               </tr>
@@ -366,7 +372,10 @@ export default function RazporedTab({
                         )}
                       </div>
                     </td>
-                    {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
+                    {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
+                      if (!employedOn(endByName[name], ds)) {
+                        return <td key={name} className="py-1.5 px-2 text-white/25">—</td>
+                      }
                       const shift = shifts[name] || 'OFF'
                       const c = shiftColors[shift as Shift] ?? shiftColors.OFF
                       const leave = leaveByStaff[name]?.[day]
@@ -432,7 +441,7 @@ export default function RazporedTab({
             <tr>
               <th className="sc-day">Dan</th>
               <th className="sc-date">Datum</th>
-              {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
+              {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
                 <th key={name}>{name}</th>
               ))}
             </tr>
@@ -453,7 +462,8 @@ export default function RazporedTab({
                     {holiday && <small style={{ display: 'block', color: '#a56650', fontWeight: 600 }}>{holiday}</small>}
                     {!holiday && sunday && <small style={{ display: 'block', color: '#28708d' }}>Dimanche</small>}
                   </td>
-                  {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
+                  {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
+                    if (!employedOn(endByName[name], ds)) return <td key={name} className="sc-cell" />
                     const shift = (shifts[name] || 'OFF') as Shift
                     const leave = leaveByStaff[name]?.[day]
                     if (leave) {
@@ -476,7 +486,7 @@ export default function RazporedTab({
             })}
             <tr className="sc-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Skupaj ur</td>
-              {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
+              {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
                 <td key={name}>{stats[name]?.hours ?? 0} h</td>
               ))}
             </tr>
@@ -513,7 +523,7 @@ export default function RazporedTab({
               <tr>
                 <th className="sched-col-day">Jour</th>
                 <th className="sched-col-date">Date</th>
-                {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
+                {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
                   <th key={name}>{name}</th>
                 ))}
               </tr>
@@ -528,7 +538,8 @@ export default function RazporedTab({
                   <tr key={day}>
                     <td className="sched-col-day">{DAY_NAMES_FR[weekday]}</td>
                     <td className="sched-col-date">{day} {MONTHS_FR[month - 1].slice(0, 4).toLowerCase()}.</td>
-                    {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
+                    {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => {
+                      if (!employedOn(endByName[name], ds)) return <td key={name} className="sched-shift" />
                       const shift = (shifts[name] || 'OFF') as Shift
                       return (
                         <td key={name} className="sched-shift">
@@ -543,7 +554,7 @@ export default function RazporedTab({
             <tfoot>
               <tr className="sched-total-row">
                 <td colSpan={2} className="sched-total-label">Total heures</td>
-                {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
+                {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
                   <td key={name} className="sched-total-val">{(stats[name]?.hours ?? 0)} h</td>
                 ))}
               </tr>
@@ -559,7 +570,7 @@ export default function RazporedTab({
 
       {/* Attendance sheets — one full page per housekeeper. Hidden on screen, shown only when printing attendance. */}
       <div className="attendance-print" aria-hidden="true">
-        {HOUSEKEEPERS.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
+        {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
           <div key={name} className="attendance-page doc-page">
             <div className="doc-header">
               <img className="doc-logo" src="/images/komba-logo-color.png" alt="Komba Cabana" />

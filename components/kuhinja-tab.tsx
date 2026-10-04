@@ -24,6 +24,7 @@ import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor, PILL, SWATCH, type SchedulePill } from '@/lib/schedule-theme'
+import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
@@ -113,6 +114,11 @@ export default function KuhinjaTab({
     return map
   }, [staffMembers])
   const displayName = (p: string) => nickByName[p] || p
+  const endByName = useMemo(
+    () => endDatesFor(activeStaff, staffMembers ?? []),
+    [activeStaff, staffMembers],
+  )
+  const roster = useMemo(() => keptInMonth(activeStaff, endByName, year, month), [activeStaff, endByName, year, month])
   const schedule = useMemo(() => generateKitchenSchedule(year, month), [year, month])
   const usedShifts = useMemo(
     () => SHIFT_ORDER.filter((s) => schedule.some((d) => Object.values(d.assignments).includes(s))),
@@ -131,17 +137,17 @@ export default function KuhinjaTab({
   // Per-staff monthly breakdown: regular / Sunday / holiday work + leave.
   const breakdowns = useMemo(() => {
     const map: Record<string, HoursBreakdown> = {}
-    for (const p of activeStaff) {
+    for (const p of roster) {
       const entries = schedule.map((day, i) => {
-        const shift = (day.assignments[p] || 'OFF') as KitchenShift
-        return { day: i + 1, hours: SHIFT_HOURS[shift] ?? 0, onLeave: shift !== 'OFF' && !!leaveByStaff[p]?.[i + 1] }
+        const shift = employedOn(endByName[p], day.date) ? ((day.assignments[p] || 'OFF') as KitchenShift) : null
+        return { day: i + 1, hours: shift ? (SHIFT_HOURS[shift] ?? 0) : 0, onLeave: !!shift && shift !== 'OFF' && !!leaveByStaff[p]?.[i + 1] }
       })
       map[p] = summarizeMonthHours(year, month, entries)
     }
     return map
-  }, [schedule, activeStaff, leaveByStaff, year, month])
+  }, [schedule, roster, leaveByStaff, year, month, endByName])
 
-  const visibleStaff = activeStaff.filter((p) => !selected || p === selected)
+  const visibleStaff = roster.filter((p) => !selected || p === selected)
 
   // Sand table for Borut's read-only view, original navy for editing.
   const t = themeFor(readOnly)
@@ -273,7 +279,7 @@ export default function KuhinjaTab({
               <Calendar className="h-5 w-5" />
               Razpored kuhinje
             </h2>
-            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · {activeStaff.join(', ')}</p>
+            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · {roster.join(', ')}</p>
           </div>
           {!readOnly && (
             <span className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">
@@ -323,7 +329,7 @@ export default function KuhinjaTab({
 
       {/* Legend / filter — always visible, it is how you pick one person's schedule. */}
       <div className="no-print flex flex-wrap items-center gap-2 text-xs">
-        {activeStaff.map((p) => {
+        {roster.map((p) => {
           const active = selected === p
           return (
             <button
@@ -459,6 +465,9 @@ export default function KuhinjaTab({
                     </div>
                   </td>
                   {visibleStaff.map((p) => {
+                    if (!employedOn(endByName[p], day.date)) {
+                      return <td key={p} className="py-1.5 px-2 text-white/25">—</td>
+                    }
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
                     const leave = shift !== 'OFF' ? leaveByStaff[p]?.[dayNum] : undefined
                     return (
@@ -507,7 +516,8 @@ export default function KuhinjaTab({
               const isToday = todayDay === dayNum
               // Razvrsti aktivno osebje po smenah tega dne.
               const groups: Record<KitchenShift, string[]> = { EARLY: [], MORNING: [], MIDDAY: [], AFTERNOON: [], EVENING: [], OFF: [] }
-              for (const p of activeStaff) {
+              for (const p of roster) {
+                if (!employedOn(endByName[p], day.date)) continue
                 const shift = (day.assignments[p] || 'OFF') as KitchenShift
                 const onLeave = shift !== 'OFF' && !!leaveByStaff[p]?.[dayNum]
                 groups[onLeave ? 'OFF' : shift].push(p)
@@ -605,6 +615,7 @@ export default function KuhinjaTab({
                     {!holiday && sunday && <small style={{ display: 'block', color: '#28708d' }}>Dimanche</small>}
                   </td>
                   {visibleStaff.map((p) => {
+                    if (!employedOn(endByName[p], day.date)) return <td key={p} className="kc-cell" />
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
                     const leave = shift !== 'OFF' ? leaveByStaff[p]?.[dayNum] : undefined
                     if (leave) {
@@ -670,6 +681,7 @@ export default function KuhinjaTab({
                   <td className="g-day">{DAY_NAMES_FR[weekday]}</td>
                   <td className="g-day">{dayNum} {MONTHS_FR[month - 1].slice(0, 4).toLowerCase()}.</td>
                   {visibleStaff.map((p) => {
+                    if (!employedOn(endByName[p], day.date)) return <td key={p} />
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
                     const leave = shift !== 'OFF' && !!leaveByStaff[p]?.[dayNum]
                     return <td key={p}>{leave ? 'Congé' : shift === 'OFF' ? '—' : SHIFT_LABELS_FR[shift]}</td>

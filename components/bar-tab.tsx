@@ -21,6 +21,7 @@ import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor, PILL, type SchedulePill } from '@/lib/schedule-theme'
+import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
@@ -100,6 +101,8 @@ export default function BarTab({
     return map
   }, [staffMembers])
   const displayName = (p: string) => nickByName[p] || p
+  const endByName = useMemo(() => endDatesFor(activeStaff, staffMembers ?? []), [activeStaff, staffMembers])
+  const roster = useMemo(() => keptInMonth(activeStaff, endByName, year, month), [activeStaff, endByName, year, month])
   const schedule = useMemo(() => generateBarSchedule(year, month), [year, month])
   const stats = useMemo(() => computeBarStats(schedule), [schedule])
   const lastDay = schedule.length
@@ -116,16 +119,17 @@ export default function BarTab({
   // Per-staff monthly breakdown: regular / Sunday / holiday work + leave.
   const breakdowns = useMemo(() => {
     const map: Record<string, HoursBreakdown> = {}
-    for (const p of activeStaff) {
+    for (const p of roster) {
       const entries = schedule.map((day, i) => {
-        return { day: i + 1, hours: barDayHours(day, p), onLeave: !!leaveByStaff[p]?.[i + 1] }
+        const away = !employedOn(endByName[p], day.date)
+        return { day: i + 1, hours: away ? 0 : barDayHours(day, p), onLeave: !away && !!leaveByStaff[p]?.[i + 1] }
       })
       map[p] = summarizeMonthHours(year, month, entries)
     }
     return map
-  }, [schedule, activeStaff, leaveByStaff, year, month])
+  }, [schedule, roster, leaveByStaff, year, month, endByName])
 
-  const visibleStaff = activeStaff.filter((p) => !selected || p === selected)
+  const visibleStaff = roster.filter((p) => !selected || p === selected)
 
   // Sand table for Borut's read-only view, original navy for editing.
   const t = themeFor(readOnly)
@@ -258,7 +262,7 @@ export default function BarTab({
               <Calendar className="h-5 w-5" />
               Razpored bara
             </h2>
-            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · {activeStaff.map(displayName).join(', ')}</p>
+            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · {roster.map(displayName).join(', ')}</p>
           </div>
           {!readOnly && (
             <span className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">
@@ -307,7 +311,7 @@ export default function BarTab({
 
       {/* Legend / filter — always visible, it is how you pick one person's schedule. */}
       <div className="no-print flex flex-wrap items-center gap-2 text-xs">
-        {activeStaff.map((p) => {
+        {roster.map((p) => {
           const active = selected === p
           return (
             <button
@@ -437,6 +441,9 @@ export default function BarTab({
                     </div>
                   </td>
                   {visibleStaff.map((p) => {
+                    if (!employedOn(endByName[p], day.date)) {
+                      return <td key={p} className="py-1.5 px-2 text-white/25">—</td>
+                    }
                     const shift = (day.assignments[p] || 'OFF') as BarShift
                     const leave = leaveByStaff[p]?.[dayNum]
                     return (
@@ -503,7 +510,8 @@ export default function BarTab({
               const isToday = todayDay === dayNum
               // Razvrsti aktivno osebje po smenah tega dne.
               const groups: Record<BarShift, string[]> = { MORNING: [], MIDDAY: [], EVENING: [], OFF: [] }
-              for (const p of activeStaff) {
+              for (const p of roster) {
+                if (!employedOn(endByName[p], day.date)) continue
                 const shift = (day.assignments[p] || 'OFF') as BarShift
                 groups[shift].push(p)
               }
@@ -599,6 +607,7 @@ export default function BarTab({
                     {!holiday && sunday && <small style={{ display: 'block', color: '#28708d' }}>Dimanche</small>}
                   </td>
                   {visibleStaff.map((p) => {
+                    if (!employedOn(endByName[p], day.date)) return <td key={p} className="bc-cell" />
                     const shift = (day.assignments[p] || 'OFF') as BarShift
                     const leave = leaveByStaff[p]?.[dayNum]
                     if (leave) {
@@ -677,6 +686,7 @@ export default function BarTab({
                   <td className="g-day">{DAY_NAMES_FR[weekday]}</td>
                   <td className="g-day">{dayNum} {MONTHS_FR[month - 1].slice(0, 4).toLowerCase()}.</td>
                   {visibleStaff.map((p) => {
+                    if (!employedOn(endByName[p], day.date)) return <td key={p} />
                     const shift = (day.assignments[p] || 'OFF') as BarShift
                     const extras = barExtrasFor(day, p)
                     return (

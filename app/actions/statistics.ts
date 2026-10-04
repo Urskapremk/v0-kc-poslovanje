@@ -25,6 +25,7 @@ import { eq, and, gte, lte, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { getNabavaPurchasesForMonth } from './nabava'
+import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
 
 // Get exchange rate from settings
 async function getExchangeRate(): Promise<number> {
@@ -1189,20 +1190,22 @@ export async function getMonthlyStatistics(year: number, month: number) {
   
   // Operativa salaries (vrtnar, sobarica, barman, kuhinja) - celotna mesečna plača
   // Accommodation salaries (vrtnar, sobarica) - celotna mesečna plača
+  const monthSalary = (s: { monthlySalary: string; salaryChanges?: { from: string; amount: number }[]; endDate?: string | null }) =>
+    salaryForMonth(Number(s.monthlySalary), s.salaryChanges, year, month, s.endDate)
   const accommodationStaff = activeStaff.filter(s => s.allocateTo === 'accommodation')
-  const accommodationSalaryCost = accommodationStaff.reduce((sum, s) => sum + Number(s.monthlySalary), 0) / rate
+  const accommodationSalaryCost = accommodationStaff.reduce((sum, s) => sum + monthSalary(s), 0) / rate
   
-  // Bar salaries - celotna mesečna plača
+  // Bar salaries - celotna mesečna plača, ki velja ta mesec
   const barStaff = activeStaff.filter(s => s.allocateTo === 'bar')
-  const barSalaryCost = barStaff.reduce((sum, s) => sum + Number(s.monthlySalary), 0) / rate
+  const barSalaryCost = barStaff.reduce((sum, s) => sum + monthSalary(s), 0) / rate
   
-  // Kuhinja salaries - celotna mesečna plača
+  // Kuhinja salaries - celotna mesečna plača, ki velja ta mesec
   const kuhinjaStaff = activeStaff.filter(s => s.allocateTo === 'kuhinja')
-  const kuhinjaSalaryCost = kuhinjaStaff.reduce((sum, s) => sum + Number(s.monthlySalary), 0) / rate
+  const kuhinjaSalaryCost = kuhinjaStaff.reduce((sum, s) => sum + monthSalary(s), 0) / rate
   
-  // Management salaries - celotna mesečna plača
+  // Management salaries - celotna mesečna plača, ki velja ta mesec
   const managementStaff = activeStaff.filter(s => s.allocateTo === 'management')
-  const managementSalaryCost = managementStaff.reduce((sum, s) => sum + Number(s.monthlySalary), 0) / rate
+  const managementSalaryCost = managementStaff.reduce((sum, s) => sum + monthSalary(s), 0) / rate
   
   // Fixed monthly costs for accommodation
   // Marketing, Booking and Optima plus costs are the sum of individually entered
@@ -1860,7 +1863,13 @@ export async function getYearlyStatistics(year: number) {
 
 // ============ STAFF MEMBERS MANAGEMENT ============
 
+async function ensureStaffEmploymentColumns() {
+  await db.execute(sql`ALTER TABLE staff_members ADD COLUMN IF NOT EXISTS "endDate" date`)
+  await db.execute(sql`ALTER TABLE staff_members ADD COLUMN IF NOT EXISTS "salaryChanges" jsonb NOT NULL DEFAULT '[]'::jsonb`)
+}
+
 export async function getAllStaffMembers() {
+  await ensureStaffEmploymentColumns()
   const result = await db.execute(
     sql`SELECT * FROM staff_members ORDER BY "staffName"`
   )
@@ -1875,6 +1884,7 @@ export async function getAllStaffMembers() {
     activeMonths: r.activeMonths as number[],
     startDate: r.startDate as string | null,
     endDate: r.endDate as string | null,
+    salaryChanges: parseSalaryChanges(r.salaryChanges),
     active: r.active !== false,
     isRegularEmployee: r.isRegularEmployee === true,
     employmentType: (r.employmentType as string | null) ?? '',
@@ -1966,6 +1976,39 @@ export async function setStaffEmploymentType(id: string, type: 'regular' | 'cont
 
 export async function updateStaffStartDate(id: string, startDate: string | null) {
   await db.execute(sql`UPDATE staff_members SET "startDate" = ${startDate} WHERE id = ${id}`)
+  revalidatePath('/statistika')
+}
+
+export async function updateStaffEndDate(id: string, endDate: string | null) {
+  await ensureStaffEmploymentColumns()
+  const day = endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate) ? endDate : null
+  await db.execute(sql`UPDATE staff_members SET "endDate" = ${day} WHERE id = ${id}`)
+  revalidatePath('/statistika')
+}
+
+export async function addStaffSalaryChange(id: string, from: string, amount: number) {
+  await ensureStaffEmploymentColumns()
+  const day = String(from || '').slice(0, 10)
+  const nextAmount = Math.round(Number(amount))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !(nextAmount > 0)) return
+  const current = await db.execute(sql`SELECT "salaryChanges" FROM staff_members WHERE id = ${id}`)
+  const changes = parseSalaryChanges(current.rows[0]?.salaryChanges).filter((row) => row.from !== day)
+  changes.push({ from: day, amount: nextAmount })
+  changes.sort((a, b) => a.from.localeCompare(b.from))
+  await db.execute(
+    sql`UPDATE staff_members SET "salaryChanges" = ${JSON.stringify(changes)}::jsonb WHERE id = ${id}`
+  )
+  revalidatePath('/statistika')
+}
+
+export async function removeStaffSalaryChange(id: string, from: string) {
+  await ensureStaffEmploymentColumns()
+  const day = String(from || '').slice(0, 10)
+  const current = await db.execute(sql`SELECT "salaryChanges" FROM staff_members WHERE id = ${id}`)
+  const changes = parseSalaryChanges(current.rows[0]?.salaryChanges).filter((row) => row.from !== day)
+  await db.execute(
+    sql`UPDATE staff_members SET "salaryChanges" = ${JSON.stringify(changes)}::jsonb WHERE id = ${id}`
+  )
   revalidatePath('/statistika')
 }
 

@@ -28,6 +28,7 @@ import {
   usedDaysInYear,
 } from '@/lib/leave'
 import { kitchenLeaveAdvancePay, type KitchenLeaveAdvance } from '@/lib/kitchen'
+import { salaryForMonth } from '@/lib/employment'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 
@@ -273,7 +274,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       leave.staffName,
       String(leave.startDate).slice(0, 10),
       String(leave.endDate).slice(0, 10),
-      salary,
+      (year, month) => salaryForMonth(salary, staff?.salaryChanges, year, month, staff?.endDate),
     )
   }
 

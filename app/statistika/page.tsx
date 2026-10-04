@@ -17,9 +17,13 @@ import {
   deleteStaffMember,
   toggleStaffActive,
   updateStaffStartDate,
+  updateStaffEndDate,
+  addStaffSalaryChange,
+  removeStaffSalaryChange,
   setStaffRegularEmployee,
   setStaffEmploymentType
 } from '@/app/actions/statistics'
+import { isoDate, periodCovers, periodLabel, salaryHistory, salaryOn, slDate } from '@/lib/employment'
 import RazporedTab from '@/components/razpored-tab'
 import VrtnarjiTab from '@/components/vrtnarji-tab'
 import KuhinjaTab from '@/components/kuhinja-tab'
@@ -102,8 +106,13 @@ function StatistikaContent() {
     allocateTo: 'management',
     activeMonths: [1,2,3,4,5,6,7,8,9,10,11,12] as number[],
     startDate: '',
+    endDate: '',
   })
   const [savingEdit, setSavingEdit] = useState(false)
+  const [salaryEditId, setSalaryEditId] = useState<string | null>(null)
+  const [salaryFrom, setSalaryFrom] = useState('')
+  const [salaryAmount, setSalaryAmount] = useState('')
+  const [savingSalary, setSavingSalary] = useState(false)
   const [newStaff, setNewStaff] = useState({ 
     staffType: 'other', 
     staffName: '', 
@@ -168,6 +177,33 @@ function StatistikaContent() {
     mutateStaff()
   }
 
+  const handleUpdateEndDate = async (id: string, endDate: string) => {
+    await updateStaffEndDate(id, endDate || null)
+    mutateStaff()
+  }
+
+  const handleSaveSalaryChange = async (id: string) => {
+    const amount = Number(salaryAmount)
+    if (!salaryFrom || !(amount > 0)) return
+    setSavingSalary(true)
+    try {
+      await addStaffSalaryChange(id, salaryFrom, amount)
+      setSalaryEditId(null)
+      setSalaryFrom('')
+      setSalaryAmount('')
+      mutateStaff()
+      mutate()
+    } finally {
+      setSavingSalary(false)
+    }
+  }
+
+  const handleRemoveSalaryChange = async (id: string, from: string) => {
+    await removeStaffSalaryChange(id, from)
+    mutateStaff()
+    mutate()
+  }
+
   const handleToggleRegular = async (id: string, current: boolean) => {
     await setStaffRegularEmployee(id, !current)
     mutateStaff()
@@ -192,6 +228,7 @@ function StatistikaContent() {
       allocateTo: staff.allocateTo || 'management',
       activeMonths: staff.activeMonths?.length ? staff.activeMonths : [1,2,3,4,5,6,7,8,9,10,11,12],
       startDate: staff.startDate ? staff.startDate.split('T')[0] : '',
+      endDate: staff.endDate ? String(staff.endDate).slice(0, 10) : '',
     })
   }
 
@@ -212,6 +249,7 @@ function StatistikaContent() {
         activeMonths: editForm.activeMonths,
         startDate: editForm.startDate || null,
       })
+      await updateStaffEndDate(id, editForm.endDate || null)
       setEditingStaff(null)
       mutateStaff()
       mutate()
@@ -1467,6 +1505,13 @@ function StatistikaContent() {
                           className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm [color-scheme:dark] focus:border-[#8fae92]/40 focus:outline-none"
                           title="Datum vstopa"
                         />
+                        <input
+                          type="date"
+                          value={editForm.endDate}
+                          onChange={(e) => setEditForm(s => ({ ...s, endDate: e.target.value }))}
+                          className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm [color-scheme:dark] focus:border-[#8fae92]/40 focus:outline-none"
+                          title="Datum izstopa. Od tega dne ga ni več v razporedu."
+                        />
                         <select
                           value={editForm.allocateTo}
                           onChange={(e) => setEditForm(s => ({ ...s, allocateTo: e.target.value }))}
@@ -1517,6 +1562,7 @@ function StatistikaContent() {
                       </div>
                     </div>
                     ) : (
+                    <>
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex items-center gap-4">
                         <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${isActive ? 'bg-[#8fae92]/20' : 'bg-red-500/20'}`}>
@@ -1528,27 +1574,51 @@ function StatistikaContent() {
     {staff.nickname && <span className="ml-2 text-[#c59b5b]">„{staff.nickname}"</span>}
   </p>
   <p className="text-white/50 text-sm">{typeInfo.label}</p>
-  <div className="flex items-center gap-2 mt-1">
-    <Calendar className="h-3 w-3 text-[#7fa8b8]" />
-    <input
-      type="date"
-      value={staff.startDate ? staff.startDate.split('T')[0] : ''}
-      onChange={(e) => handleUpdateStartDate(staff.id, e.target.value)}
-      className="bg-transparent text-[#7fa8b8] text-xs border-none p-0 focus:outline-none [color-scheme:dark] cursor-pointer"
-      title="Datum vstopa"
-    />
+  <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1">
+    <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-white/40">
+      Vstop
+      <input
+        type="date"
+        value={staff.startDate ? String(staff.startDate).slice(0, 10) : ''}
+        onChange={(e) => handleUpdateStartDate(staff.id, e.target.value)}
+        className="bg-transparent text-[#7fa8b8] text-xs normal-case tracking-normal border-none p-0 focus:outline-none [color-scheme:dark] cursor-pointer"
+        title="Datum vstopa"
+      />
+    </label>
+    <label className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-white/40">
+      Izstop
+      <input
+        type="date"
+        value={staff.endDate ? String(staff.endDate).slice(0, 10) : ''}
+        onChange={(e) => handleUpdateEndDate(staff.id, e.target.value)}
+        className="bg-transparent text-[#c8846b] text-xs normal-case tracking-normal border-none p-0 focus:outline-none [color-scheme:dark] cursor-pointer"
+        title="Od tega dne ga ni več v razporedu"
+      />
+    </label>
   </div>
+  {staff.endDate && (
+    <p className="mt-1 text-[11px] text-[#c8846b]">Od {slDate(isoDate(String(staff.endDate)))} ni več v razporedu.</p>
+  )}
   {!isActive && <span className="text-red-400 text-xs">Neaktiven</span>}
   </div>
   </div>
                       
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:gap-6">
                         <div className="text-left sm:text-right">
-                          <p className="text-[#c59b5b] font-bold">{formatEur(Number(staff.monthlySalary) / (stats?.exchangeRate || 4800))}</p>
-                          <p className="text-white/30 text-xs">{Number(staff.monthlySalary).toLocaleString()} Ar</p>
-                          {staff.officialSalary !== '' && Number(staff.officialSalary) !== Number(staff.monthlySalary) && (
-                            <p className="text-[#7fa8b8]/70 text-xs">Uradno: {Number(staff.officialSalary).toLocaleString()} Ar</p>
-                          )}
+                          {(() => {
+                            const today = new Date()
+                            const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+                            const inForce = salaryOn(Number(staff.monthlySalary), staff.salaryChanges, todayIso)
+                            return (
+                              <>
+                                <p className="text-[#c59b5b] font-bold">{formatEur(inForce / (stats?.exchangeRate || 4800))}</p>
+                                <p className="text-white/30 text-xs">{inForce.toLocaleString('sl-SI')} Ar</p>
+                                {staff.officialSalary !== '' && Number(staff.officialSalary) !== inForce && (
+                                  <p className="text-[#7fa8b8]/70 text-xs">Uradno: {Number(staff.officialSalary).toLocaleString('sl-SI')} Ar</p>
+                                )}
+                              </>
+                            )
+                          })()}
                           <p className={`text-xs ${allocateColor}`}>Strošek: {allocateLabel}</p>
                         </div>
                         
@@ -1612,6 +1682,88 @@ function StatistikaContent() {
                         </div>
                       </div>
                     </div>
+                    {(() => {
+                      const today = new Date()
+                      const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+                      const periods = salaryHistory(Number(staff.monthlySalary), staff.salaryChanges)
+                      const hasChange = periods.some((period) => period.changeFrom)
+                      return (
+                        <div className="mt-3 border-t border-white/10 pt-3">
+                          {hasChange && (
+                            <div className="mb-2 space-y-1">
+                              {periods.map((period) => {
+                                const current = periodCovers(period, todayIso)
+                                return (
+                                  <div key={period.changeFrom || 'base'} className="flex flex-wrap items-center gap-2 text-xs">
+                                    <span className={current ? 'text-white' : 'text-white/50'}>
+                                      {periodLabel(period)}: {period.amount.toLocaleString('sl-SI')} Ar
+                                      {current ? ' · velja zdaj' : ''}
+                                    </span>
+                                    {period.changeFrom && (
+                                      <button
+                                        onClick={() => handleRemoveSalaryChange(staff.id, period.changeFrom!)}
+                                        className="text-[11px] text-red-300/80 hover:text-red-200"
+                                      >
+                                        Odstrani
+                                      </button>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                          {salaryEditId === staff.id ? (
+                            <div className="flex flex-wrap items-end gap-2">
+                              <label className="text-[10px] uppercase tracking-wider text-white/40">
+                                Od katerega dne velja nova plača
+                                <input
+                                  type="date"
+                                  value={salaryFrom}
+                                  onChange={(e) => setSalaryFrom(e.target.value)}
+                                  className="mt-1 block rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm normal-case tracking-normal text-white [color-scheme:dark]"
+                                />
+                              </label>
+                              <label className="text-[10px] uppercase tracking-wider text-white/40">
+                                Nova plača (Ar)
+                                <input
+                                  type="number"
+                                  value={salaryAmount}
+                                  onChange={(e) => setSalaryAmount(e.target.value)}
+                                  placeholder="npr. 350000"
+                                  className="mt-1 block w-36 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm normal-case tracking-normal text-white"
+                                />
+                              </label>
+                              <button
+                                onClick={() => handleSaveSalaryChange(staff.id)}
+                                disabled={savingSalary || !salaryFrom || !(Number(salaryAmount) > 0)}
+                                className="rounded-lg bg-[#8fae92] px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+                              >
+                                {savingSalary ? 'Shranjujem...' : 'Shrani spremembo'}
+                              </button>
+                              <button
+                                onClick={() => setSalaryEditId(null)}
+                                className="rounded-lg bg-white/5 px-3 py-2 text-xs text-white/60"
+                              >
+                                Prekliči
+                              </button>
+                              <p className="w-full text-[11px] text-white/40">Do vpisanega dne velja dosedanja plača. Od tega dne velja nova.</p>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setSalaryEditId(staff.id)
+                                setSalaryFrom('')
+                                setSalaryAmount('')
+                              }}
+                              className="text-xs font-medium text-[#c59b5b] hover:text-[#d7b27a]"
+                            >
+                              Sprememba plače
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()}
+                    </>
                     )}
 
 <StaffPersonalInfo

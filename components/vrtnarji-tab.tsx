@@ -14,6 +14,8 @@ import {
   type GardenPost,
 } from '@/lib/gardening'
 import { getLeaveRequests } from '@/app/actions/leave'
+import { getAllStaffMembers } from '@/app/actions/statistics'
+import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
 import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
@@ -50,6 +52,9 @@ export default function VrtnarjiTab({
   const [hiddenHours, setHiddenHours] = useState<Record<string, boolean>>({})
   const toggleHours = (name: string) => setHiddenHours((prev) => ({ ...prev, [name]: !prev[name] }))
 
+  const { data: staffMembers } = useSWR('all-staff-members', getAllStaffMembers)
+  const endByName = useMemo(() => endDatesFor(GARDENERS, staffMembers ?? []), [staffMembers])
+  const roster = useMemo(() => keptInMonth(GARDENERS, endByName, year, month), [endByName, year, month])
   const schedule = useMemo(() => generateGardenerSchedule(year, month), [year, month])
   const stats = useMemo(() => computeGardenerStats(schedule), [schedule])
   const lastDay = schedule.length
@@ -64,18 +69,19 @@ export default function VrtnarjiTab({
   // Per-gardener monthly breakdown: regular / Sunday / holiday work + leave.
   const breakdowns = useMemo(() => {
     const map: Record<string, HoursBreakdown> = {}
-    for (const g of GARDENERS) {
+    for (const g of roster) {
       const entries = schedule.map((day, i) => {
-        const post = (day.assignments[g] || 'OFF') as GardenPost
-        const worked = post !== 'OFF' && post !== 'RESERVE'
-        return { day: i + 1, hours: worked ? hoursForPost(post) : 0, onLeave: !!leaveByStaff[g]?.[i + 1] }
+        const away = !employedOn(endByName[g], day.date)
+        const post = away ? null : ((day.assignments[g] || 'OFF') as GardenPost)
+        const worked = !!post && post !== 'OFF' && post !== 'RESERVE'
+        return { day: i + 1, hours: worked ? hoursForPost(post) : 0, onLeave: !away && !!leaveByStaff[g]?.[i + 1] }
       })
       map[g] = summarizeMonthHours(year, month, entries)
     }
     return map
-  }, [schedule, leaveByStaff, year, month])
+  }, [schedule, roster, leaveByStaff, year, month, endByName])
 
-  const visibleGardeners = GARDENERS.filter((g) => !selected || g === selected)
+  const visibleGardeners = roster.filter((g) => !selected || g === selected)
 
   // Sand table for Borut's read-only view, original navy for editing.
   const t = themeFor(readOnly)
@@ -210,7 +216,7 @@ export default function VrtnarjiTab({
               <Calendar className="h-5 w-5" />
               Razpored vrtnarjev
             </h2>
-            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · {GARDENERS.join(', ')}</p>
+            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · {roster.join(', ')}</p>
           </div>
           {!readOnly && (
             <span className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">
@@ -259,7 +265,7 @@ export default function VrtnarjiTab({
 
       {/* Legend / filter — always visible, it is how you pick one person's schedule. */}
       <div className="no-print flex flex-wrap items-center gap-2 text-xs">
-        {GARDENERS.map((g) => {
+        {roster.map((g) => {
           const active = selected === g
           return (
             <button
@@ -376,7 +382,10 @@ export default function VrtnarjiTab({
                 const groups: Record<GardenPost, string[]> = {
                   BEACH_AM: [], BEACH_PM: [], GARDEN_AM: [], GARDEN_PM: [], RESERVE: [], OFF: [],
                 }
-                for (const g of GARDENERS) groups[(day.assignments[g] || 'OFF') as GardenPost].push(g)
+                for (const g of roster) {
+                  if (!employedOn(endByName[g], day.date)) continue
+                  groups[(day.assignments[g] || 'OFF') as GardenPost].push(g)
+                }
                 const cell = (post: GardenPost) => {
                   const names = groups[post]
                   if (names.length === 0) return <span className={t.offText}>—</span>
@@ -471,6 +480,9 @@ export default function VrtnarjiTab({
                         </div>
                       </td>
                   {visibleGardeners.map((g) => {
+                    if (!employedOn(endByName[g], day.date)) {
+                      return <td key={g} className="py-1.5 px-2 text-white/25">—</td>
+                    }
                     const post = (day.assignments[g] || 'OFF') as GardenPost
                     const isOff = post === 'OFF'
                     const isReserve = post === 'RESERVE'
@@ -548,6 +560,7 @@ export default function VrtnarjiTab({
                     {!holiday && sunday && <small style={{ display: 'block', color: '#28708d' }}>Dimanche</small>}
                   </td>
                   {visibleGardeners.map((g) => {
+                    if (!employedOn(endByName[g], day.date)) return <td key={g} className="gc-cell" />
                     const post = (day.assignments[g] || 'OFF') as GardenPost
                     const leave = leaveByStaff[g]?.[dayNum]
                     if (leave) {
@@ -625,6 +638,7 @@ export default function VrtnarjiTab({
                   <td className="g-day">{DAY_NAMES_FR[weekday]}</td>
                   <td className="g-day">{dayNum} {MONTHS_FR[month - 1].slice(0, 4).toLowerCase()}.</td>
                   {visibleGardeners.map((g) => {
+                    if (!employedOn(endByName[g], day.date)) return <td key={g} />
                     const post = (day.assignments[g] || 'OFF') as GardenPost
                     return <td key={g}>{post === 'OFF' ? '—' : POST_LABELS_FR[post]}</td>
                   })}

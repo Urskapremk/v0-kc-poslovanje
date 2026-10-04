@@ -13,6 +13,7 @@ import {
   type AttendanceMonth,
 } from '@/lib/attendance'
 import { computeLeaveBalance, type LeaveBalance } from '@/lib/payroll-mg'
+import { parseSalaryChanges } from '@/lib/employment'
 
 const MG_CONFIG_KEY = 'payroll_mg_config'
 
@@ -155,6 +156,8 @@ export type MgStaffOption = {
   hireDate: string | null
   officialSalary: number
   realSalary: number
+  officialAmount: number
+  salaryChanges: { from: string; amount: number }[]
   numberOfDependents: number
   // Osebni podatki za placilno listo (iz osebne izkaznice / kadrovske kartice)
   dateOfBirth: string
@@ -174,10 +177,11 @@ const STAFF_TYPE_FONCTION: Record<string, string> = {
 }
 
 export async function getMgPayrollStaff(): Promise<MgStaffOption[]> {
+  await db.execute(sql`ALTER TABLE staff_members ADD COLUMN IF NOT EXISTS "salaryChanges" jsonb NOT NULL DEFAULT '[]'::jsonb`)
   const result = await db.execute(
     sql`SELECT id, "staffName", "firstName", "lastName", "staffType", company,
                "cnapsNumber", "ominoNumber", "wageCategory", "startDate",
-               "officialSalary", "monthlySalary", "numberOfDependents",
+               "officialSalary", "monthlySalary", "salaryChanges", "numberOfDependents",
                "dateOfBirth", "placeOfBirth", "documentNumber", address
         FROM staff_members
         WHERE "isRegularEmployee" = true AND active IS NOT FALSE
@@ -200,7 +204,9 @@ export async function getMgPayrollStaff(): Promise<MgStaffOption[]> {
       category: (r.wageCategory as string) || null,
       hireDate: (r.startDate as string) || null,
       officialSalary: official > 0 ? official : real,
+      officialAmount: official,
       realSalary: real,
+      salaryChanges: parseSalaryChanges(r.salaryChanges),
       numberOfDependents: num(r.numberOfDependents),
       dateOfBirth: (r.dateOfBirth as string) || '',
       placeOfBirth: (r.placeOfBirth as string) || '',
