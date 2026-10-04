@@ -8959,11 +8959,11 @@ function GuestCard() {
               <p className="text-[10px] font-semibold text-[#8f6d3a]">Za plačilo prevoznikoma:</p>
               <div className="flex flex-wrap gap-x-3 text-[10px] text-[#8f6d3a]/90">
                 {dilipCostAr > 0 && (t.skipBoatPay
-                  ? <span>Dilip (čoln): ni za plačilo — isti čoln</span>
+                  ? <span className="font-semibold text-[#1d4f86]">Dilip (čoln): ni za plačilo — isti čoln</span>
                   : <span>Dilip (čoln): {ar(dilipCostAr)}</span>)}
                 {hermanCostAr > 0 && <span>{taxiName}: {ar(hermanCostAr)}</span>}
               </div>
-              {t.skipBoatPay && <p className="mt-1 text-[10px] text-[#3d4650]">Gostu se prevoz še vedno zaračuna.</p>}
+              {t.skipBoatPay && <p className="mt-1 text-[10px] font-semibold text-[#1d4f86]">Gostu se prevoz še vedno zaračuna.</p>}
               {hermanCostAr > 0 && (<p className="mt-1 text-[10px] font-semibold text-[#4f7a54]">Pokliči tudi {taxiName} ({dbRoutes.find((rt: { id: string; name: string }) => rt.id === t.hermanRouteId)?.name || 'avto'})</p>)}
             </div>
           )}
@@ -8971,10 +8971,10 @@ function GuestCard() {
             <button
               type="button"
               onClick={async () => { await updateTransfer(r.id, item.type, { skipBoatPay: !t.skipBoatPay }); refresh(); }}
-              className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+              className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] transition-colors ${
                 t.skipBoatPay
-                  ? 'border-[#5b6470] bg-[#5b6470]/15 text-[#3d4650]'
-                  : 'border-dashed border-[#8f6d3a]/50 bg-transparent text-[#8f6d3a] hover:bg-[#8f6d3a]/10'
+                  ? 'border-[#1d4f86] bg-[#1d4f86] text-white'
+                  : 'border-[#1d4f86] bg-[#1d4f86] text-white hover:bg-[#163e6b]'
               }`}
             >
               <Ship className="h-3.5 w-3.5" />
