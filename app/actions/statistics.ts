@@ -1239,10 +1239,16 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const nabavaPurchases = await getNabavaPurchasesForMonth(year, month)
   // Najemnina hiše (Borut plača gotovino v Nabavi Komba) = samostojen strošek, ločen od ostalih kategorij.
   let najemninaHisaAr = 0
+  let stipendijaAr = 0
   let izletNabavaAr = 0
   for (const p of nabavaPurchases) {
   if (p.category === "najemnina") {
     najemninaHisaAr += p.amountAr
+    continue
+  }
+  // Štipendija (šolnina) je samostojen strošek, ne bremeni oddelkov.
+  if (p.category === "stipendija") {
+    stipendijaAr += p.amountAr
     continue
   }
   // Gotovinsko plačilo dobavitelju za izlet (npr. gosta na vrh Kombe) gre v strošek izletov.
@@ -1267,6 +1273,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Tekoče vzdrževanje nepremičnin = samostojen strošek; NE bremeni oddelkov, znižuje skupni dobiček.
   const receiptsVzdrzevanjeCost = receiptsByCategory.vzdrzevanje || 0
   const najemninaHisaCost = najemninaHisaAr / rate
+  const stipendijaCost = stipendijaAr / rate
   const izletGotovinaCost = izletNabavaAr / rate
 
   // Nosači in Tuc tuc = vsak SVOJ samostojen strošek (npr. Borutove nabave HV/Komba). Vir so gotovinski odlivi
@@ -1300,7 +1307,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const depreciationCost = depreciation.total
 
   const totalSalaryCost = accommodationSalaryCost + barSalaryCost + kuhinjaSalaryCost + managementSalaryCost
-  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + portersCost + tuctucCost + depreciationCost
+  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + stipendijaCost + portersCost + tuctucCost + depreciationCost
 
   // ===== PER-GUEST BREAKDOWN (analytics) =====
   // Attribute revenue and costs to each reservation/guest. Salaries are allocated
@@ -1556,6 +1563,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
       receiptsReprezentanca: Math.round(receiptsReprezentancaCost * 100) / 100,
       receiptsVzdrzevanje: Math.round(receiptsVzdrzevanjeCost * 100) / 100,
       najemninaHisa: Math.round(najemninaHisaCost * 100) / 100,
+      stipendija: Math.round(stipendijaCost * 100) / 100,
       porters: Math.round(portersCost * 100) / 100,
       tuctuc: Math.round(tuctucCost * 100) / 100,
       depreciation: Math.round(depreciationCost * 100) / 100,
@@ -1814,6 +1822,7 @@ export async function getYearlyStatistics(year: number) {
       receiptsReprezentanca: 0,
       receiptsVzdrzevanje: 0,
       najemninaHisa: 0,
+      stipendija: 0,
       porters: 0,
       tuctuc: 0,
       depreciation: 0,
@@ -1849,6 +1858,7 @@ export async function getYearlyStatistics(year: number) {
     yearly.costs.receiptsReprezentanca += (m.costs as { receiptsReprezentanca?: number }).receiptsReprezentanca || 0
     yearly.costs.receiptsVzdrzevanje += (m.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0
     yearly.costs.najemninaHisa += (m.costs as { najemninaHisa?: number }).najemninaHisa || 0
+    yearly.costs.stipendija += (m.costs as { stipendija?: number }).stipendija || 0
     yearly.costs.porters += (m.costs as { porters?: number }).porters || 0
     yearly.costs.tuctuc += (m.costs as { tuctuc?: number }).tuctuc || 0
     yearly.costs.depreciation += (m.costs as { depreciation?: number }).depreciation || 0

@@ -22,13 +22,15 @@ const LOAN_CAT = "posojilo_gostu"
 const WIP_CAT = "sredstvo_v_izdelavi"
 const RENT_CAT = "najemnina"
 const IZLET_CAT = "izlet"
+const STIPEND_CAT = "stipendija"
 const RENT_NAME = "Najemnina hiša"
-type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT | typeof IZLET_CAT
+type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT | typeof IZLET_CAT | typeof STIPEND_CAT
 const ASSET_COLOR = "#c9a86a"
 const LOAN_COLOR = "#3f6b7d"
 const WIP_COLOR = "#a0662f"
 const RENT_COLOR = "#8a4f72"
 const IZLET_COLOR = "#c59b5b"
+const STIPEND_COLOR = "#6d5a8a"
 
 const CAT_COLORS: Record<StrosekCategory, string> = {
   bar: "#3f6b7d",
@@ -40,7 +42,7 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   ostalo: "#6b6b6b",
 }
 const catColor = (c: NabavaCategory) =>
-  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : c === IZLET_CAT ? IZLET_COLOR : CAT_COLORS[c]
+  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : c === IZLET_CAT ? IZLET_COLOR : c === STIPEND_CAT ? STIPEND_COLOR : CAT_COLORS[c]
 const catLabel = (c: NabavaCategory) =>
   c === ASSET_CAT
     ? "Osnovno sredstvo"
@@ -52,7 +54,9 @@ const catLabel = (c: NabavaCategory) =>
           ? RENT_NAME
           : c === IZLET_CAT
             ? "Izlet"
-            : CATEGORY_LABELS[c]
+            : c === STIPEND_CAT
+              ? "Štipendija"
+              : CATEGORY_LABELS[c]
 
 function RentButton({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
@@ -393,8 +397,20 @@ export function NabavaPurchasesSection({
                   {(showRent || eCategory === RENT_CAT) && (
                     <RentButton active={eCategory === RENT_CAT} onClick={() => setECategory(RENT_CAT)} />
                   )}
+                  <button
+                    onClick={() => setECategory(STIPEND_CAT)}
+                    className={catBtnClass(eCategory === STIPEND_CAT)}
+                    style={eCategory === STIPEND_CAT ? { backgroundColor: `${STIPEND_COLOR}22`, borderColor: `${STIPEND_COLOR}66`, color: STIPEND_COLOR } : undefined}
+                  >
+                    Štipendija
+                  </button>
                 </div>
                 {eCategory === RENT_CAT && <RentNote />}
+                {eCategory === STIPEND_CAT && (
+                  <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
+                    Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
+                  </p>
+                )}
                 {eCategory === WIP_CAT && <WipAssetPicker assets={wipAssets} value={eAssetId} onChange={setEAssetId} />}
                 {eCategory === LOAN_CAT && (
                   <LoanGuestPicker
@@ -578,8 +594,23 @@ export function NabavaPurchasesSection({
                 }}
               />
             )}
+            <button
+              onClick={() => {
+                setCategory(STIPEND_CAT)
+                if (!name.trim()) setName("Štipendija")
+              }}
+              className={catBtnClass(category === STIPEND_CAT)}
+              style={category === STIPEND_CAT ? { backgroundColor: `${STIPEND_COLOR}22`, borderColor: `${STIPEND_COLOR}66`, color: STIPEND_COLOR } : undefined}
+            >
+              Štipendija
+            </button>
           </div>
           {category === RENT_CAT && <RentNote />}
+          {category === STIPEND_CAT && (
+            <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
+              Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
+            </p>
+          )}
           {category === WIP_CAT && <WipAssetPicker assets={wipAssets} value={assetId} onChange={setAssetId} />}
           {category === LOAN_CAT && <LoanGuestPicker guests={loanGuests} value={guestId} onChange={setGuestId} />}
           <div className="flex items-center gap-2">
