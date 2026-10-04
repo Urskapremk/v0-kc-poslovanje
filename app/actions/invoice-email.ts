@@ -149,6 +149,7 @@ type InvoiceData = {
   paymentSpec?: { label: string; methodDate: string; eur: number; separate: boolean }[]
   hidePayments?: boolean
   extensionNote?: string | null
+  invoiceNote?: string | null
   services: { name: string; eur: number; paid: boolean; free?: boolean; included?: boolean }[]
   servicesTotalEur: number
   notes: { date: string; count: number; totalEur: number; totalAr: number; items: { qty: number; name: string; eur: number; covered?: boolean; free?: boolean }[] }[]
@@ -384,6 +385,14 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
         </td></tr>
 ${opts.hidePayments ? '' : paymentsSection}
         ${opts.hidePayments ? '' : paymentSpecSection}
+        ${opts.invoiceNote ? `<tr><td bgcolor="#0a2029" style="background-color:#0a2029;padding:16px 20px 4px 20px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#143a49" style="background-color:#143a49;border:1px solid #1d4a5c;border-radius:12px;">
+            <tr><td style="padding:14px 16px;">
+              <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:2px;color:#c59b5b;text-transform:uppercase;margin-bottom:6px;">${opts.lang === 'fr' ? 'Remarque' : 'Note'}</div>
+              <div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.6;color:#d6e0e3;">${escapeHtml(opts.invoiceNote).replace(/\n/g, '<br>')}</div>
+            </td></tr>
+          </table>
+        </td></tr>` : ''}
         <tr><td align="center" bgcolor="#0a2029" style="background-color:#0a2029;padding:24px 20px 8px 20px;border-top:1px solid #1f2f36;">
           <p style="margin:16px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#b9c6ca;">${t.thankYou}</p>
           <p style="margin:4px 0 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#7e786d;">${t.tagline} &middot; Nosy Komba, Madagascar</p>
@@ -953,6 +962,7 @@ async function buildInvoiceData(
     accPaymentNote,
     paymentSpec,
     extensionNote: reservation.extensionNote,
+    invoiceNote: (reservation as { invoiceNote?: string | null }).invoiceNote ?? null,
     services: invoiceOrderItems.filter(isChargeableOrShown).map((i) => ({
       name: i.name,
       eur: Number(i.priceAr || 0) / exchangeRate,
