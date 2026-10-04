@@ -168,7 +168,7 @@ export default function PotrdilaPrejemaPlace() {
         <div className="mx-auto max-w-4xl px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Link href="/statistika" className="text-white/60 hover:text-white transition-colors">
+              <Link href="/statistika?tab=kadri" className="text-white/60 hover:text-white transition-colors">
                 <ArrowLeft className="h-5 w-5" />
               </Link>
               <h1 className="text-lg font-semibold text-white">Potrdilo o prejemu plače</h1>
