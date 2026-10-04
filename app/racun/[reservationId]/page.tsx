@@ -6,7 +6,7 @@ import useSWR from 'swr'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowLeft, CreditCard, Banknote, Smartphone, HelpCircle, Plus, X, Check, Printer, Users, FileText, FileDown, Tag, Gift } from 'lucide-react'
-import { getReservationById, getOrderItems, completeCheckout, getDashboardData, getInvoiceDiscounts, addInvoiceDiscount, deleteInvoiceDiscount } from '@/app/actions/komba'
+import { getReservationById, getOrderItems, completeCheckout, getDashboardData, getInvoiceDiscounts, addInvoiceDiscount, deleteInvoiceDiscount, setInvoiceNote } from '@/app/actions/komba'
 import { getDeliveryNotesForReservation } from '@/app/actions/delivery'
 import { bungalowDisplayName } from '@/lib/bungalow'
 
@@ -304,6 +304,8 @@ export default function RacunPage() {
   // Discount form state
   const [discountKind, setDiscountKind] = useState<'stay' | 'item'>('stay')
   const [discountLabel, setDiscountLabel] = useState('')
+  const [noteDraft, setNoteDraft] = useState<string | null>(null)
+  const [savingNote, setSavingNote] = useState(false)
   const [discountAmount, setDiscountAmount] = useState('')
   const [addingDiscount, setAddingDiscount] = useState(false)
   
@@ -563,6 +565,66 @@ export default function RacunPage() {
     }
   }
   
+  const savedInvoiceNote = ((reservation as { invoiceNote?: string | null }).invoiceNote || '').trim()
+  const noteValue = noteDraft ?? savedInvoiceNote
+  const noteDirty = noteDraft !== null && noteDraft.trim() !== savedInvoiceNote
+
+  const handleSaveNote = async () => {
+    if (noteDraft === null) return
+    setSavingNote(true)
+    try {
+      await setInvoiceNote(reservationId, noteDraft)
+      await mutate()
+      setNoteDraft(null)
+    } catch (err) {
+      console.error('Save invoice note error:', err)
+      alert('Napaka pri shranjevanju opombe')
+    } finally {
+      setSavingNote(false)
+    }
+  }
+
+  const noteEditor = (
+    <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">
+      <div className="px-4 py-3 border-b border-white/10 bg-white/[0.02] flex items-center gap-2">
+        <FileText className="h-4 w-4 text-[#c59b5b]" />
+        <p className="text-sm font-medium text-white/70 uppercase tracking-wider">Opomba na računu</p>
+      </div>
+      <div className="p-4 space-y-3">
+        <label htmlFor="invoice-note" className="sr-only">Opomba na računu</label>
+        <textarea
+          id="invoice-note"
+          value={noteValue}
+          onChange={(e) => setNoteDraft(e.target.value)}
+          rows={3}
+          placeholder="Npr. Popust zaradi izpada elektrike 12. 10. (razlaga se izpiše na računu)"
+          className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-white/30 focus:outline-none focus:border-white/30 resize-y"
+        />
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-white/40">Besedilo se izpiše na računu, PDF-ju in emailu točno tako, kot ga napišeš.</p>
+          <div className="flex items-center gap-2">
+            {savedInvoiceNote && !noteDirty && (
+              <button
+                onClick={async () => { setNoteDraft(''); setSavingNote(true); try { await setInvoiceNote(reservationId, ''); await mutate(); setNoteDraft(null) } finally { setSavingNote(false) } }}
+                className="px-3 py-2 rounded-lg text-sm text-white/50 hover:text-red-400 hover:bg-white/10"
+              >
+                Odstrani
+              </button>
+            )}
+            <button
+              onClick={handleSaveNote}
+              disabled={!noteDirty || savingNote}
+              className="px-4 py-2 rounded-lg bg-[#c59b5b] text-gray-900 text-sm font-medium hover:bg-[#d6ae7d] disabled:opacity-40 flex items-center gap-1.5"
+            >
+              <Check className="h-4 w-4" />
+              {savingNote ? 'Shranjujem...' : 'Shrani opombo'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+
   const handlePrint = () => {
     setShowPrintPreview(true)
     setTimeout(() => {
@@ -1193,10 +1255,21 @@ export default function RacunPage() {
               </div>
             )}
 
+            {savedInvoiceNote && (
+              <div className="inv-pay-box mb-8 p-5 rounded-2xl border">
+                <h3 className="inv-gold font-semibold mb-2 text-sm uppercase tracking-wider">{invoiceLang === 'fr' ? 'Remarque' : 'Note'}</h3>
+                <p className="text-sm leading-relaxed whitespace-pre-line">{savedInvoiceNote}</p>
+              </div>
+            )}
+
             {/* Footer */}
             <div className="inv-footer inv-head inv-muted text-center text-sm mt-12 pt-6 border-t">
               <p>{t.thankYou} {t.tagline}</p>
             </div>
+          </div>
+
+          <div className="no-print max-w-3xl mx-auto px-5 pb-10">
+            {noteEditor}
           </div>
 
           {/* Action buttons - no print */}
@@ -1409,6 +1482,8 @@ export default function RacunPage() {
           </div>
         </div>
         
+        {!viewOnly && noteEditor}
+
         {/* Discounts (editable, not in view-only) */}
         {!viewOnly && (
           <div className="rounded-2xl border border-white/10 bg-white/[0.02] overflow-hidden">

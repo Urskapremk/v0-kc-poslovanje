@@ -69,6 +69,15 @@ export async function deleteInvoiceDiscount(id: string, reservationId: string) {
   revalidatePath(`/racun/${reservationId}`)
 }
 
+export async function setInvoiceNote(reservationId: string, note: string) {
+  const trimmed = note.trim()
+  await db
+    .update(reservations)
+    .set({ invoiceNote: trimmed || null })
+    .where(eq(reservations.id, reservationId))
+  revalidatePath(`/racun/${reservationId}`)
+}
+
 // ============ RESERVATIONS ============
 
 // Get a single reservation by ID (including archived)

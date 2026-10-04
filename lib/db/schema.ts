@@ -193,6 +193,8 @@ export const reservations = pgTable('reservations', {
   checkedOutAt: timestamp('checkedOutAt'),
   notes: text('notes'),
   extensionNote: text('extensionNote'), // Guest-facing note about stay extensions (shown on invoice)
+  invoiceNote: text('invoiceNote'), // Free-text explanation printed on the invoice
+
   excludeFromTaxes: boolean('excludeFromTaxes').default(false), // Izključi to rezervacijo iz obračuna taks
   excludeFromBar: boolean('excludeFromBar').default(false), // Ne prikaži v bar dobavnicah (fakturira se na drug bungalov)
   showNoteOnCard: boolean('showNoteOnCard').default(true), // Ali se opomba prikaže na kartici bungalova
