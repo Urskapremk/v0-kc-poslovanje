@@ -8,7 +8,7 @@ import {
   generateHousekeepingSchedule,
   setHousekeepingShift,
 } from '@/app/actions/housekeeping'
-import { HOUSEKEEPERS, type Shift } from '@/lib/housekeeping'
+import { HOUSEKEEPERS, HOUSEKEEPING_NEW_FROM, housekeepingHours, housekeepingLabels, type Shift } from '@/lib/housekeeping'
 import { getLeaveRequests } from '@/app/actions/leave'
 import { getAllStaffMembers } from '@/app/actions/statistics'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
@@ -61,12 +61,6 @@ const SHIFT_COLORS_SAND: Record<Shift, { bg: string; text: string; border: strin
 
 // Everything else the table paints now lives in lib/schedule-theme, shared by
 // all four schedules.
-
-const SHIFT_LABEL: Record<Shift, string> = {
-  MORNING: 'Dopoldan 6-12:30',
-  AFTERNOON: 'Popoldan 12-18:30',
-  OFF: 'Prosto',
-}
 
 export default function RazporedTab({
   year,
@@ -136,8 +130,6 @@ export default function RazporedTab({
     byDate[e.date][e.staffName] = e.shift
   }
 
-  // Each shift is 6.5 hours (morning 06:00-12:30, afternoon 12:00-18:30).
-  const HOURS_PER_SHIFT = 6.5
   const stats: Record<string, { shifts: number; hours: number }> = {}
   for (const name of HOUSEKEEPERS) stats[name] = { shifts: 0, hours: 0 }
   for (const e of schedule || []) {
@@ -145,7 +137,7 @@ export default function RazporedTab({
     if (e.shift === 'MORNING' || e.shift === 'AFTERNOON') {
       if (!stats[e.staffName]) stats[e.staffName] = { shifts: 0, hours: 0 }
       stats[e.staffName].shifts += 1
-      stats[e.staffName].hours += HOURS_PER_SHIFT
+      stats[e.staffName].hours += housekeepingHours(e.date)
     }
   }
   const printHours: Record<string, number> = {}
@@ -154,7 +146,7 @@ export default function RazporedTab({
     if (e.date < printFrom) continue
     if (!employedOn(endByName[e.staffName], e.date)) continue
     if (e.shift === 'MORNING' || e.shift === 'AFTERNOON') {
-      printHours[e.staffName] = (printHours[e.staffName] || 0) + HOURS_PER_SHIFT
+      printHours[e.staffName] = (printHours[e.staffName] || 0) + housekeepingHours(e.date)
     }
   }
 
@@ -166,7 +158,7 @@ export default function RazporedTab({
       const ds = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
       const shift = employedOn(endByName[name], ds) ? byDate[ds]?.[name] : undefined
       const worked = shift === 'MORNING' || shift === 'AFTERNOON'
-      entries.push({ day: d, hours: worked ? HOURS_PER_SHIFT : 0, onLeave: !!leaveByStaff[name]?.[d] })
+      entries.push({ day: d, hours: worked ? housekeepingHours(ds) : 0, onLeave: !!leaveByStaff[name]?.[d] })
     }
     breakdowns[name] = summarizeMonthHours(year, month, entries)
   }
@@ -224,7 +216,10 @@ export default function RazporedTab({
               <Calendar className="h-5 w-5" />
               Razpored sobaric
             </h2>
-            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · Eniki, Felicia, Christaline, Mela</p>
+            <p className="text-white/40 text-sm">{MONTHS[month - 1]} {year} · {roster.join(', ')}</p>
+            {`${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}` >= HOUSEKEEPING_NEW_FROM && (
+              <p className="mt-1 text-xs text-white/45">Od 6. oktobra: dopoldan 7–13, popoldan 13–19. Christaline je dopoldan pomoč. Eniki in Felicia se vsak teden zamenjata. Če je popoldanska prosta, jo zamenja druga.</p>
+            )}
           </div>
           {!readOnly && (
             <span className="flex flex-shrink-0 items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/40">
@@ -309,8 +304,18 @@ export default function RazporedTab({
             Pokaži vse
           </button>
         )}
-              <div className="flex items-center gap-1 text-white/40"><Sun className="h-3.5 w-3.5" /> Dopoldan 6-12:30</div>
-              <div className="flex items-center gap-1 text-white/40"><Sunset className="h-3.5 w-3.5" /> Popoldan 12-18:30</div>
+              {`${year}-${String(month).padStart(2, '0')}-01` < HOUSEKEEPING_NEW_FROM && (
+                <>
+                  <div className="flex items-center gap-1 text-white/40"><Sun className="h-3.5 w-3.5" /> Dopoldan 6-12:30</div>
+                  <div className="flex items-center gap-1 text-white/40"><Sunset className="h-3.5 w-3.5" /> Popoldan 12-18:30</div>
+                </>
+              )}
+              {`${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}` >= HOUSEKEEPING_NEW_FROM && (
+                <>
+                  <div className="flex items-center gap-1 text-white/40"><Sun className="h-3.5 w-3.5" /> Dopoldan 7-13</div>
+                  <div className="flex items-center gap-1 text-white/40"><Sunset className="h-3.5 w-3.5" /> Popoldan 13-19</div>
+                </>
+              )}
         <div className="flex items-center gap-1 text-white/40"><Moon className="h-3.5 w-3.5" /> Prosto</div>
       </div>
 
@@ -433,7 +438,7 @@ export default function RazporedTab({
                                   leave ? t.leaveCell : `${c.bg} ${c.text} ${c.border}`
                                 } ${shift === 'OFF' && !leave ? t.offDim : ''}`}
                               >
-                                {shift === 'MORNING' ? 'Dop 6-12:30' : shift === 'AFTERNOON' ? 'Pop 12-18:30' : 'Prosto'}
+                                {shift === 'MORNING' ? housekeepingLabels(ds).morningShort : shift === 'AFTERNOON' ? housekeepingLabels(ds).afternoonShort : 'Prosto'}
                               </span>
                             ) : (
                             <select
@@ -443,8 +448,8 @@ export default function RazporedTab({
                                 leave ? t.leaveCell : `${c.bg} ${c.text} ${c.border}`
                               } ${shift === 'OFF' && !leave ? t.offDim : ''}`}
                             >
-              <option value="MORNING" className="bg-[#0b2731] text-white">Dop 6-12:30</option>
-              <option value="AFTERNOON" className="bg-[#0b2731] text-white">Pop 12-18:30</option>
+              <option value="MORNING" className="bg-[#0b2731] text-white">{housekeepingLabels(ds).morningShort}</option>
+              <option value="AFTERNOON" className="bg-[#0b2731] text-white">{housekeepingLabels(ds).afternoonShort}</option>
                               <option value="OFF" className="bg-[#0b2731] text-white">Prosto</option>
                             </select>
                             )}
@@ -515,7 +520,7 @@ export default function RazporedTab({
                     const cls = shift === 'MORNING' ? 'sc-morning' : shift === 'AFTERNOON' ? 'sc-afternoon' : 'sc-off'
                     return (
                       <td key={name} className={`sc-cell ${cls}`}>
-                        {shift === 'MORNING' ? 'Dopoldan' : shift === 'AFTERNOON' ? 'Popoldan' : '—'}
+                        {shift === 'MORNING' ? housekeepingLabels(ds).morning : shift === 'AFTERNOON' ? housekeepingLabels(ds).afternoon : '—'}
                       </td>
                     )
                   })}
@@ -531,8 +536,18 @@ export default function RazporedTab({
           </tbody>
         </table>
         <div className="sc-legend">
-              <span className="lg"><span className="sw" style={{ background: '#f3e7d8', border: '1px solid #785224' }} /> Dopoldan 6-12:30</span>
-              <span className="lg"><span className="sw" style={{ background: '#e5f3f8', border: '1px solid #28708d' }} /> Popoldan 12-18:30</span>
+              {printFrom < HOUSEKEEPING_NEW_FROM && (
+                <>
+                  <span className="lg"><span className="sw" style={{ background: '#f3e7d8', border: '1px solid #785224' }} /> Dopoldan 6-12:30</span>
+                  <span className="lg"><span className="sw" style={{ background: '#e5f3f8', border: '1px solid #28708d' }} /> Popoldan 12-18:30</span>
+                </>
+              )}
+              {dateStr(lastDay) >= HOUSEKEEPING_NEW_FROM && (
+                <>
+                  <span className="lg"><span className="sw" style={{ background: '#f3e7d8', border: '1px solid #785224' }} /> Dopoldan 7-13</span>
+                  <span className="lg"><span className="sw" style={{ background: '#e5f3f8', border: '1px solid #28708d' }} /> Popoldan 13-19</span>
+                </>
+              )}
           <span className="lg"><span className="sw" style={{ background: '#f0e0da', border: '1px solid #975b45' }} /> Dopust</span>
           <span className="lg"><span className="sw" style={{ background: '#fff', border: '1px solid #aaa' }} /> Prosto</span>
           <span className="lg"><span className="sw" style={{ background: '#f7ece8', border: '1px solid #a56650' }} /> Jour férié / Dimanche</span>
@@ -583,7 +598,7 @@ export default function RazporedTab({
                       const shift = (shifts[name] || 'OFF') as Shift
                       return (
                         <td key={name} className="sched-shift">
-                                {shift === 'MORNING' ? 'Matin 6h-12h30' : shift === 'AFTERNOON' ? 'Après-midi 12h-18h30' : '—'}
+                                {shift === 'MORNING' ? housekeepingLabels(ds).morningFr : shift === 'AFTERNOON' ? housekeepingLabels(ds).afternoonFr : '—'}
                         </td>
                       )
                     })}
@@ -601,8 +616,8 @@ export default function RazporedTab({
             </tfoot>
           </table>
           <div className="doc-legend">
-              <span><strong>Matin</strong> 6h-12h30</span>
-              <span><strong>Après-midi</strong> 12h-18h30</span>
+              {printFrom < HOUSEKEEPING_NEW_FROM && <span><strong>Matin</strong> 6h-12h30 · <strong>Après-midi</strong> 12h-18h30</span>}
+              {dateStr(lastDay) >= HOUSEKEEPING_NEW_FROM && <span><strong>Matin</strong> 7h-13h · <strong>Après-midi</strong> 13h-19h</span>}
             <span><strong>—</strong> Repos</span>
           </div>
         </div>
@@ -652,7 +667,7 @@ export default function RazporedTab({
               </tbody>
             </table>
             <div className="doc-legend">
-              <span>Total heures prévues: <strong>{stats[name]?.hours ?? 0} h</strong> ({stats[name]?.shifts ?? 0} services × 6,5 h)</span>
+              <span>Total heures prévues: <strong>{stats[name]?.hours ?? 0} h</strong> ({stats[name]?.shifts ?? 0} services)</span>
               <span>Signature du responsable: ______________________</span>
             </div>
             <p className="doc-note">Par ma signature, je confirme ma présence au travail pour les jours indiqués.</p>

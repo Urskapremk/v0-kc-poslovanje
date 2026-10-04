@@ -22,7 +22,7 @@ import { generateKitchenSchedule } from '@/lib/kitchen'
 import { generateGardenerSchedule } from '@/lib/gardening'
 import { generateBarSchedule } from '@/lib/bar'
 import { getHousekeepingSchedule } from './housekeeping'
-import { HOUSEKEEPERS } from '@/lib/housekeeping'
+import { housekeepingDay } from '@/lib/housekeeping'
 
 // --- Mesecni obracun (payroll_entries) ---
 
@@ -988,17 +988,16 @@ export async function getPlannedWorkDays(
   } catch {}
 
   // Sobarice: uporabi SHRANJEN razpored (NE generiraj — generiranje pise v bazo).
-  // Ce shranjenega ni, uporabi cisto off-rotacijo (pos = (dan-1)%7):
-  // Eniki off 0, Mela off 1, Felicia off 3, Christaline off 6; ostali delajo.
+  // Ce shranjenega ni, uporabi housekeepingDay (do 5. 10. 2026 stiri osebe, od 6. 10. tri).
   try {
     const hk = await getHousekeepingSchedule(year, month)
     if (hk && hk.length > 0) {
       for (const e of hk) add(e.staffName, dayOf(e.date), e.shift !== 'OFF')
     } else {
-      const offPos: Record<string, number> = { Eniki: 0, Mela: 1, Felicia: 3, Christaline: 6 }
       const dim = daysInMonthSql(year, month)
-      for (const name of HOUSEKEEPERS) {
-        for (let d = 1; d <= dim; d++) add(name, d, (d - 1) % 7 !== offPos[name])
+      for (let d = 1; d <= dim; d++) {
+        const date = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+        for (const [name, shift] of Object.entries(housekeepingDay(date))) add(name, d, shift !== 'OFF')
       }
     }
   } catch {}

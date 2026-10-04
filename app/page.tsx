@@ -9910,7 +9910,7 @@ function GuestCard() {
       barblagajna: "Dobavnice po bungalovih",
       prijave: "Kdo je bil prijavljen v blagajno",
       razporedi: "Pregled razporedov po oddelkih",
-      "razpored-sobarice": "Eniki, Felicia, Christaline, Mela",
+      "razpored-sobarice": "Eniki, Felicia, Christaline",
       "razpored-vrtnarji": "Hijaldo, Velo, Maxim, Francelj, KD",
       "razpored-kuhinja": "Anifa, Verginie, Angelina, Nazirah, Francia, Justin",
       "razpored-bar": "Alex, Fransia, Sandia, Walas, Jonny, Justin",
