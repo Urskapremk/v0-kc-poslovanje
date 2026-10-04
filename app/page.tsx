@@ -8959,11 +8959,11 @@ function GuestCard() {
               <p className="text-[10px] font-semibold text-[#8f6d3a]">Za plačilo prevoznikoma:</p>
               <div className="flex flex-wrap gap-x-3 text-[10px] text-[#8f6d3a]/90">
                 {dilipCostAr > 0 && (t.skipBoatPay
-                  ? <span className="font-semibold text-[#1d4f86]">Dilip (čoln): ni za plačilo — isti čoln</span>
+                  ? <span className="font-semibold text-[#1a346e]">Dilip (čoln): ni za plačilo — isti čoln</span>
                   : <span>Dilip (čoln): {ar(dilipCostAr)}</span>)}
                 {hermanCostAr > 0 && <span>{taxiName}: {ar(hermanCostAr)}</span>}
               </div>
-              {t.skipBoatPay && <p className="mt-1 text-[10px] font-semibold text-[#1d4f86]">Gostu se prevoz še vedno zaračuna.</p>}
+              {t.skipBoatPay && <p className="mt-1 text-[10px] font-semibold text-[#1a346e]">Gostu se prevoz še vedno zaračuna.</p>}
               {hermanCostAr > 0 && (<p className="mt-1 text-[10px] font-semibold text-[#4f7a54]">Pokliči tudi {taxiName} ({dbRoutes.find((rt: { id: string; name: string }) => rt.id === t.hermanRouteId)?.name || 'avto'})</p>)}
             </div>
           )}
@@ -8971,13 +8971,13 @@ function GuestCard() {
             <button
               type="button"
               onClick={async () => { await updateTransfer(r.id, item.type, { skipBoatPay: !t.skipBoatPay }); refresh(); }}
-              className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+              className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.15em] transition-opacity hover:opacity-90 ${
                 t.skipBoatPay
-                  ? 'border-[#1d4f86] bg-[#1d4f86] text-white'
-                  : 'border-[#1d4f86] bg-[#1d4f86] text-white hover:bg-[#163e6b]'
+                  ? 'border-[#2c4a7a] bg-gradient-to-br from-[#6a84bc] via-[#1a3068] to-[#070e1e] text-[#e7eef6]'
+                  : 'border-[#1a3068]/40 bg-[#1a3068]/10 text-[#1a3068] hover:bg-[#1a3068]/20'
               }`}
             >
-              <Ship className="h-3.5 w-3.5" />
+              <Ship className="h-4 w-4" />
               {t.skipBoatPay ? 'Čoln ni za plačilo · isti čoln' : 'Isti čoln — Dilipu ne plačaj'}
             </button>
           )}
