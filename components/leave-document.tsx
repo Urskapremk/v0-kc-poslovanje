@@ -4,7 +4,7 @@ import { useState } from 'react'
 import useSWR, { mutate } from 'swr'
 import { CalendarPlus, Printer, Trash2, X, Check, Upload, FileText, ChevronDown, Pencil } from 'lucide-react'
 import { getAllStaffMembers, setPriorLeaveYear } from '@/app/actions/statistics'
-import { getCompany } from '@/lib/payroll'
+import { formatAr, getCompany } from '@/lib/payroll'
 import {
   getLeaveRequests,
   createLeaveRequest,
@@ -12,6 +12,7 @@ import {
   deleteLeaveRequest,
   setLeaveSigned,
   setLeaveSignedDocument,
+  setLeaveAdvancePay,
 } from '@/app/actions/leave'
 import {
   LeaveDepartment,
@@ -19,6 +20,7 @@ import {
   LEAVE_TYPES,
   LeaveType,
   daysBetween,
+  isLongLeave,
   leaveDateSl,
   leaveDateFr,
   LeaveRequest,
@@ -35,6 +37,9 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   const [showForm, setShowForm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [printDoc, setPrintDoc] = useState<LeaveRequest | null>(null)
+  const [printKind, setPrintKind] = useState<'leave' | 'advance'>('leave')
+  const [advanceInputs, setAdvanceInputs] = useState<Record<string, string>>({})
+  const [advanceError, setAdvanceError] = useState<string | null>(null)
   const [selectedStaffId, setSelectedStaffId] = useState<string>('')
   const [year, setYear] = useState(new Date().getFullYear())
   const [uploadingId, setUploadingId] = useState<string | null>(null)
@@ -189,9 +194,20 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     await mutate(`leaves-${department}`)
   }
 
+  function advanceValue(leave: LeaveRequest) {
+    if (advanceInputs[leave.id] !== undefined) return advanceInputs[leave.id]
+    return leave.advancePayAr ? String(leave.advancePayAr) : ''
+  }
+
+  function parseAr(raw: string) {
+    const n = Number(String(raw).replace(/[^\d]/g, ''))
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+  }
+
   function handlePrint(leave: LeaveRequest) {
     const staff = (allStaff ?? []).find(s => s.id === leave.staffId)
-    setPrintDoc({ ...leave, ...(staff ? {} : {}) })
+    setPrintKind('leave')
+    setPrintDoc({ ...leave })
     // Sklicujemo se na HR podatke prek staffId; shranimo tudi za print
     ;(window as any).__leaveStaff = staff
     document.body.classList.add('printing-leave')
@@ -201,6 +217,26 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       if (!leave.signedAt) {
         setLeaveSigned(leave.id).then(() => mutate(`leaves-${department}`))
       }
+    }, 100)
+  }
+
+  async function handlePrintAdvance(leave: LeaveRequest) {
+    const amount = parseAr(advanceValue(leave))
+    if (!amount) {
+      setAdvanceError(leave.id)
+      return
+    }
+    setAdvanceError(null)
+    await setLeaveAdvancePay(leave.id, amount)
+    await mutate(`leaves-${department}`)
+    const staff = (allStaff ?? []).find(s => s.id === leave.staffId)
+    setPrintKind('advance')
+    setPrintDoc({ ...leave, advancePayAr: amount })
+    ;(window as any).__leaveStaff = staff
+    document.body.classList.add('printing-leave')
+    setTimeout(() => {
+      window.print()
+      document.body.classList.remove('printing-leave')
     }, 100)
   }
 
@@ -466,11 +502,14 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       {/* Seznam dopustov */}
       {viewedLeaves && viewedLeaves.length > 0 && (
         <div className="mt-4 space-y-2">
-          {viewedLeaves.map(l => (
+          {viewedLeaves.map(l => {
+            const longLeave = l.leaveType === 'annual' && isLongLeave(l.startDate, l.endDate)
+            return (
             <div
               key={l.id}
-              className="flex items-center justify-between rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3"
+              className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-4 py-3"
             >
+            <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-white">
                   {l.staffName}
@@ -538,13 +577,88 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                 </button>
               </div>
             </div>
-          ))}
+            {longLeave && (
+              <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-white/10 pt-3">
+                <div>
+                  <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/40">Plačilo dopusta vnaprej (Ar)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={advanceValue(l)}
+                    onChange={e => {
+                      setAdvanceError(null)
+                      setAdvanceInputs(prev => ({ ...prev, [l.id]: e.target.value }))
+                    }}
+                    placeholder="npr. 450000"
+                    className="w-40 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c59b5b]/50 focus:outline-none"
+                  />
+                </div>
+                <button
+                  onClick={() => handlePrintAdvance(l)}
+                  className="flex items-center gap-1 rounded-lg bg-[#c59b5b]/20 px-3 py-2 text-xs font-medium text-[#c59b5b] hover:bg-[#c59b5b]/30"
+                >
+                  <Printer className="h-3.5 w-3.5" /> Natisni potrdilo
+                </button>
+                <p className="w-full text-[11px] text-white/40">
+                  Plača je za mesec nazaj. Pri tako dolgem dopustu delavec s podpisom potrdi, da je plačilo za cel dopust prejel vnaprej.
+                </p>
+                {advanceError === l.id && (
+                  <p className="w-full text-[11px] text-amber-300">Najprej vpiši znesek v ariarijih.</p>
+                )}
+              </div>
+            )}
+            </div>
+            )
+          })}
         </div>
       )}
     </details>
 
       {/* Tiskovni dokument (skrit, viden samo pri tisku) — IZVEN no-print ovoja */}
-      {printDoc && printCompany && (
+      {printDoc && printCompany && printKind === 'advance' && (
+        <div className="leave-print">
+          <div className="doc-page">
+            <div className="doc-header">
+              <img src="/images/komba-logo-color.png" alt="Komba Cabana" className="doc-logo" />
+              <p className="doc-company">{printCompany.name}</p>
+              <p className="doc-location">{printCompany.address}</p>
+              <p className="doc-location">Nosy Komba, Madagascar</p>
+            </div>
+            <div className="doc-title-block">
+              <p className="doc-title">REÇU DE PAIEMENT ANTICIPÉ DU CONGÉ</p>
+              <p className="doc-subtitle">Potrdilo o vnaprejšnjem plačilu dopusta / Advance leave payment receipt</p>
+            </div>
+            <div className="doc-fields">
+              <p><span className="doc-label">Nom / Ime / Name :</span>
+                {' '}
+                {printStaff
+                  ? `${printStaff.lastName || ''} ${printStaff.firstName || ''}`.trim() || printDoc.staffName
+                  : printDoc.staffName}
+              </p>
+              <p><span className="doc-label">Poste / Delovno mesto :</span> {LEAVE_DEPARTMENTS[department].fr}</p>
+              <p><span className="doc-label">Période / Obdobje :</span> {leaveDateFr(String(printDoc.startDate).slice(0, 10))} – {leaveDateFr(String(printDoc.endDate).slice(0, 10))} ({printDoc.days} jours)</p>
+            </div>
+            <p className="doc-amount">{formatAr(printDoc.advancePayAr || 0)}</p>
+            <p className="doc-para">
+              Je soussigné(e) confirme avoir reçu à l&apos;avance le paiement de la totalité de mon congé payé pour la période indiquée. Le salaire étant versé pour le mois précédent, ce montant couvre le congé de ce mois.
+            </p>
+            <p className="doc-para">Par ma signature, je confirme avoir reçu ce paiement.</p>
+            <p className="doc-para doc-para-en">S podpisom potrjujem, da sem vnaprej prejel(a) plačilo za celoten plačani dopust.</p>
+            <p className="doc-para doc-para-en">By signing I confirm that I have received this payment for the whole paid leave in advance.</p>
+            <p className="doc-para">Fait à Nosy Komba, le {leaveDateFr(todayStr())}.</p>
+            <div className="doc-signatures">
+              <div>
+                <div className="doc-sign-line">L&apos;employé(e)<br />Podpis delavca / The employee</div>
+              </div>
+              <div>
+                <div className="doc-sign-line">Date<br />Datum / Date</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {printDoc && printCompany && printKind === 'leave' && (
         <div className="leave-print">
           <div className="doc-page">
             <div className="doc-header">
@@ -643,6 +757,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
           .leave-print .doc-signatures { display: flex; justify-content: space-between; margin-top: 64px; gap: 40px; }
           .leave-print .doc-signatures > div { flex: 1; }
           .leave-print .doc-sign-line { border-top: 1px solid #111; padding-top: 4px; font-size: 12px; text-align: center; }
+          .leave-print .doc-amount { text-align: center; font-size: 22px; font-weight: 700; margin: 8px 0 16px; letter-spacing: 0.5px; }
         }
       `}</style>
     </>

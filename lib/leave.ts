@@ -71,7 +71,25 @@ export interface LeaveRequest {
   status: string
   signedAt: string | null
   signedDocumentPath?: string | null
+  advancePayAr?: number | null
   createdAt: string
+}
+
+// Cel mesec ali skoraj cel mesec: plača se izplača za mesec nazaj, zato
+// delavec pri tako dolgem dopustu prejme plačilo za dopust vnaprej.
+function dayKey(value: string): string {
+  const s = String(value ?? '')
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/)
+  if (iso) return iso[1]
+  const d = new Date(s)
+  if (isNaN(d.getTime())) return ''
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${month}-${day}`
+}
+
+export function isLongLeave(start: string, end: string): boolean {
+  return daysBetween(dayKey(start), dayKey(end)) >= 21
 }
 
 // Stevilo dni (vkljucno z obema datumoma)

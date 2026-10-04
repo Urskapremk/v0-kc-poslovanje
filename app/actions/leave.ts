@@ -5,7 +5,12 @@ import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { daysBetween } from '@/lib/leave'
 
+async function ensureAdvancePayColumn() {
+  await db.execute(sql`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS "advancePayAr" integer`)
+}
+
 export async function getLeaveRequests(department: string) {
+  await ensureAdvancePayColumn()
   const result = await db.execute(
     sql`SELECT * FROM leave_requests WHERE department = ${department} ORDER BY "startDate" DESC`
   )
@@ -23,8 +28,18 @@ export async function getLeaveRequests(department: string) {
     status: r.status as string,
     signedAt: r.signedAt as string | null,
     signedDocumentPath: (r.signedDocumentPath as string | null) ?? null,
+    advancePayAr: r.advancePayAr == null ? null : Number(r.advancePayAr),
     createdAt: r.createdAt as string,
   }))
+}
+
+export async function setLeaveAdvancePay(id: string, amountAr: number) {
+  await ensureAdvancePayColumn()
+  const amount = Math.max(0, Math.round(amountAr || 0))
+  await db.execute(
+    sql`UPDATE leave_requests SET "advancePayAr" = ${amount > 0 ? amount : null} WHERE id = ${id}`
+  )
+  revalidatePath('/statistika')
 }
 
 export async function createLeaveRequest(data: {
