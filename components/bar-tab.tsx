@@ -22,6 +22,8 @@ import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor, PILL, type SchedulePill } from '@/lib/schedule-theme'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
+import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { PrintFromDialog } from '@/components/print-from-dialog'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
@@ -86,6 +88,9 @@ export default function BarTab({
   const toolsVisible = showTools && !readOnly
   // Per-person collapse for the hours breakdown (see razpored-tab for the same pattern).
   const [hiddenHours, setHiddenHours] = useState<Record<string, boolean>>({})
+  const [printFrom, setPrintFrom] = useState(() => defaultPrintFrom(year, month))
+  const [printAsk, setPrintAsk] = useState<null | 'bar' | 'bar-screen'>(null)
+  const printStart = printStartDay(printFrom, year, month)
   const toggleHours = (name: string) => setHiddenHours((prev) => ({ ...prev, [name]: !prev[name] }))
 
   const activeStaff = useMemo<string[]>(() => getActiveBarStaff(year, month), [year, month])
@@ -105,6 +110,10 @@ export default function BarTab({
   const roster = useMemo(() => keptInMonth(activeStaff, endByName, year, month), [activeStaff, endByName, year, month])
   const schedule = useMemo(() => generateBarSchedule(year, month), [year, month])
   const stats = useMemo(() => computeBarStats(schedule), [schedule])
+  const printStats = useMemo(
+    () => computeBarStats(schedule.filter((day) => day.date >= printFrom)),
+    [schedule, printFrom],
+  )
   const lastDay = schedule.length
 
   // Dopust bara se v LeaveDocument shranjuje pod oddelkom "barman" (glej app/statistika/page.tsx),
@@ -151,6 +160,18 @@ export default function BarTab({
     document.body.classList.add(`printing-${target}`)
     window.print()
     setTimeout(() => document.body.classList.remove(`printing-${target}`), 500)
+  }
+
+  function askPrint(target: 'bar' | 'bar-screen') {
+    setPrintFrom(defaultPrintFrom(year, month))
+    setPrintAsk(target)
+  }
+
+  function confirmPrint() {
+    const target = printAsk
+    if (!target) return
+    setPrintAsk(null)
+    window.setTimeout(() => printDoc(target), 80)
   }
 
   return (
@@ -274,14 +295,14 @@ export default function BarTab({
         {toolsVisible && (
         <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] px-4 py-3">
           <button
-            onClick={() => printDoc('bar-screen')}
+            onClick={() => askPrint('bar-screen')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#c59b5b]/20 text-[#c59b5b] border border-[#c59b5b]/30 hover:bg-[#c59b5b]/30 transition-colors text-sm font-medium"
           >
             <Printer className="h-4 w-4" />
             Natisni razpored (barvno)
           </button>
           <button
-            onClick={() => printDoc('bar')}
+            onClick={() => askPrint('bar')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/30 transition-colors text-sm font-medium"
           >
             <Printer className="h-4 w-4" />
@@ -297,6 +318,17 @@ export default function BarTab({
         </div>
         )}
       </div>
+
+      <PrintFromDialog
+        open={printAsk !== null}
+        year={year}
+        month={month}
+        value={printFrom}
+        person={selected ? displayName(selected) : null}
+        onChange={setPrintFrom}
+        onCancel={() => setPrintAsk(null)}
+        onPrint={confirmPrint}
+      />
 
       {/* Notice */}
       {toolsVisible && (
@@ -580,7 +612,7 @@ export default function BarTab({
         </div>
         <div className="doc-title-block">
           <h2 className="doc-title">RAZPORED BARA</h2>
-          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{selected ? ` · ${displayName(selected)}` : ''}</p>
+          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{printStart ? ` · od ${printStart}. ${MONTHS[month - 1].toLowerCase()}` : ''}{selected ? ` · ${displayName(selected)}` : ''}</p>
         </div>
         <table>
           <thead>
@@ -594,6 +626,7 @@ export default function BarTab({
           </thead>
           <tbody>
             {schedule.map((day, i) => {
+              if (day.date < printFrom) return null
               const dayNum = i + 1
               const weekday = new Date(year, month - 1, dayNum).getDay()
               const holiday = getHolidayName(year, month, dayNum)
@@ -638,7 +671,7 @@ export default function BarTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Skupaj ur</td>
               {visibleStaff.map((p) => (
-                <td key={p}>{stats[p]?.hours ?? 0} h</td>
+                <td key={p}>{printStats[p]?.hours ?? 0} h</td>
               ))}
             </tr>
           </tbody>
@@ -666,6 +699,7 @@ export default function BarTab({
         <div className="doc-fields">
           {selected && <p><strong>Nom:</strong> {displayName(selected)}</p>}
           <p><strong>Mois:</strong> {MONTHS_FR[month - 1]} {year}</p>
+          {printStart && <p><strong>À partir du:</strong> {printStart} {MONTHS_FR[month - 1].toLowerCase()}</p>}
         </div>
         <table>
           <thead>
@@ -679,6 +713,7 @@ export default function BarTab({
           </thead>
           <tbody>
             {schedule.map((day, i) => {
+              if (day.date < printFrom) return null
               const dayNum = i + 1
               const weekday = new Date(year, month - 1, dayNum).getDay()
               return (
@@ -704,7 +739,7 @@ export default function BarTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Total heures</td>
               {visibleStaff.map((p) => (
-                <td key={p}>{stats[p].hours} h</td>
+                <td key={p}>{printStats[p]?.hours ?? 0} h</td>
               ))}
             </tr>
           </tbody>

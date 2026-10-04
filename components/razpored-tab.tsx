@@ -18,6 +18,8 @@ import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor } from '@/lib/schedule-theme'
 import { GuestArrivalsLinen } from '@/components/guest-arrivals-linen'
+import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { PrintFromDialog } from '@/components/print-from-dialog'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
@@ -83,6 +85,9 @@ export default function RazporedTab({
   // needed while building the schedule on a desktop. Closed by default so the
   // read-only phone view shows just the title and the table.
   const [showTools, setShowTools] = useState(false)
+  const [printFrom, setPrintFrom] = useState(() => defaultPrintFrom(year, month))
+  const [printAsk, setPrintAsk] = useState<null | 'schedule' | 'schedule-color'>(null)
+  const printStart = printStartDay(printFrom, year, month)
   // Never open the tools block in view-only mode.
   const toolsVisible = showTools && !readOnly
 
@@ -143,6 +148,15 @@ export default function RazporedTab({
       stats[e.staffName].hours += HOURS_PER_SHIFT
     }
   }
+  const printHours: Record<string, number> = {}
+  for (const name of HOUSEKEEPERS) printHours[name] = 0
+  for (const e of schedule || []) {
+    if (e.date < printFrom) continue
+    if (!employedOn(endByName[e.staffName], e.date)) continue
+    if (e.shift === 'MORNING' || e.shift === 'AFTERNOON') {
+      printHours[e.staffName] = (printHours[e.staffName] || 0) + HOURS_PER_SHIFT
+    }
+  }
 
   // Per-housekeeper monthly breakdown: regular / Sunday / holiday work + leave.
   const breakdowns: Record<string, HoursBreakdown> = {}
@@ -175,6 +189,18 @@ export default function RazporedTab({
     document.body.classList.add(`printing-${target}`)
     window.print()
     setTimeout(() => document.body.classList.remove(`printing-${target}`), 100)
+  }
+
+  const askPrint = (target: 'schedule' | 'schedule-color') => {
+    setPrintFrom(defaultPrintFrom(year, month))
+    setPrintAsk(target)
+  }
+
+  const confirmPrint = () => {
+    const target = printAsk
+    if (!target) return
+    setPrintAsk(null)
+    window.setTimeout(() => printDoc(target), 80)
   }
 
   const dateStr = (d: number) =>
@@ -219,7 +245,7 @@ export default function RazporedTab({
           </button>
           {hasSchedule && (
             <button
-              onClick={() => printDoc('schedule-color')}
+              onClick={() => askPrint('schedule-color')}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#8fae92]/20 text-[#8fae92] border border-[#8fae92]/30 hover:bg-[#8fae92]/30 transition-colors text-sm font-medium"
             >
               <Printer className="h-4 w-4" />
@@ -228,7 +254,7 @@ export default function RazporedTab({
           )}
           {hasSchedule && (
             <button
-              onClick={() => printDoc('schedule')}
+              onClick={() => askPrint('schedule')}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/30 transition-colors text-sm font-medium"
             >
               <Printer className="h-4 w-4" />
@@ -245,6 +271,17 @@ export default function RazporedTab({
         </div>
         )}
       </div>
+
+      <PrintFromDialog
+        open={printAsk !== null}
+        year={year}
+        month={month}
+        value={printFrom}
+        person={selectedStaff}
+        onChange={setPrintFrom}
+        onCancel={() => setPrintAsk(null)}
+        onPrint={confirmPrint}
+      />
 
       {/* Legend (click a name to show only that housekeeper) — always visible,
           it is how you pick a single person's schedule while viewing. */}
@@ -434,7 +471,7 @@ export default function RazporedTab({
         </div>
         <div className="doc-title-block">
           <h2 className="doc-title">RAZPORED SOBARIC</h2>
-          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{selectedStaff ? ` · ${selectedStaff}` : ''}</p>
+          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{printStart ? ` · od ${printStart}. ${MONTHS[month - 1].toLowerCase()}` : ''}{selectedStaff ? ` · ${selectedStaff}` : ''}</p>
         </div>
         <table>
           <thead>
@@ -450,6 +487,7 @@ export default function RazporedTab({
             {Array.from({ length: lastDay }).map((_, i) => {
               const day = i + 1
               const ds = dateStr(day)
+              if (ds < printFrom) return null
               const shifts = byDate[ds] || {}
               const weekday = new Date(year, month - 1, day).getDay()
               const holiday = getHolidayName(year, month, day)
@@ -487,7 +525,7 @@ export default function RazporedTab({
             <tr className="sc-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Skupaj ur</td>
               {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
-                <td key={name}>{stats[name]?.hours ?? 0} h</td>
+                <td key={name}>{printHours[name] ?? 0} h</td>
               ))}
             </tr>
           </tbody>
@@ -517,6 +555,7 @@ export default function RazporedTab({
               <p><span className="doc-label">Nom:</span> <strong>{selectedStaff}</strong></p>
             )}
             <p><span className="doc-label">Mois:</span> <strong>{MONTHS_FR[month - 1]} {year}</strong></p>
+            {printStart && <p><span className="doc-label">À partir du:</span> <strong>{printStart} {MONTHS_FR[month - 1].toLowerCase()}</strong></p>}
           </div>
           <table className="doc-table sched-table">
             <thead>
@@ -532,6 +571,7 @@ export default function RazporedTab({
               {Array.from({ length: lastDay }).map((_, i) => {
                 const day = i + 1
                 const ds = dateStr(day)
+                if (ds < printFrom) return null
                 const shifts = byDate[ds] || {}
                 const weekday = new Date(year, month - 1, day).getDay()
                 return (
@@ -555,7 +595,7 @@ export default function RazporedTab({
               <tr className="sched-total-row">
                 <td colSpan={2} className="sched-total-label">Total heures</td>
                 {roster.filter((name) => !selectedStaff || name === selectedStaff).map((name) => (
-                  <td key={name} className="sched-total-val">{(stats[name]?.hours ?? 0)} h</td>
+                  <td key={name} className="sched-total-val">{(printHours[name] ?? 0)} h</td>
                 ))}
               </tr>
             </tfoot>

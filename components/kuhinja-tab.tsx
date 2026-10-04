@@ -25,6 +25,8 @@ import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor, PILL, SWATCH, type SchedulePill } from '@/lib/schedule-theme'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
+import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { PrintFromDialog } from '@/components/print-from-dialog'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
@@ -98,6 +100,9 @@ export default function KuhinjaTab({
   const toolsVisible = showTools && !readOnly
   // Per-person collapse for the hours breakdown (see razpored-tab for the same pattern).
   const [hiddenHours, setHiddenHours] = useState<Record<string, boolean>>({})
+  const [printFrom, setPrintFrom] = useState(() => defaultPrintFrom(year, month))
+  const [printAsk, setPrintAsk] = useState<null | 'kitchen' | 'kitchen-screen'>(null)
+  const printStart = printStartDay(printFrom, year, month)
   const toggleHours = (name: string) => setHiddenHours((prev) => ({ ...prev, [name]: !prev[name] }))
 
   const activeStaff = useMemo<string[]>(() => getActiveKitchenStaff(year, month), [year, month])
@@ -170,6 +175,30 @@ export default function KuhinjaTab({
     document.body.classList.add(`printing-${target}`)
     window.print()
     setTimeout(() => document.body.classList.remove(`printing-${target}`), 500)
+  }
+
+  function askPrint(target: 'kitchen' | 'kitchen-screen') {
+    setPrintFrom(defaultPrintFrom(year, month))
+    setPrintAsk(target)
+  }
+
+  function confirmPrint() {
+    const target = printAsk
+    if (!target) return
+    setPrintAsk(null)
+    window.setTimeout(() => printDoc(target), 80)
+  }
+
+  function printedHours(person: string) {
+    let hours = 0
+    schedule.forEach((day, i) => {
+      if (day.date < printFrom) return
+      if (!employedOn(endByName[person], day.date)) return
+      const shift = (day.assignments[person] || 'OFF') as KitchenShift
+      if (shift === 'OFF' || leaveByStaff[person]?.[i + 1]) return
+      hours += SHIFT_HOURS[shift] ?? 0
+    })
+    return hours
   }
 
   return (
@@ -291,14 +320,14 @@ export default function KuhinjaTab({
         {toolsVisible && (
         <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] px-4 py-3">
           <button
-            onClick={() => printDoc('kitchen-screen')}
+            onClick={() => askPrint('kitchen-screen')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#c59b5b]/20 text-[#c59b5b] border border-[#c59b5b]/30 hover:bg-[#c59b5b]/30 transition-colors text-sm font-medium"
           >
             <Printer className="h-4 w-4" />
             Natisni razpored (barvno)
           </button>
           <button
-            onClick={() => printDoc('kitchen')}
+            onClick={() => askPrint('kitchen')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/30 transition-colors text-sm font-medium"
           >
             <Printer className="h-4 w-4" />
@@ -314,6 +343,17 @@ export default function KuhinjaTab({
         </div>
         )}
       </div>
+
+      <PrintFromDialog
+        open={printAsk !== null}
+        year={year}
+        month={month}
+        value={printFrom}
+        person={selected ? displayName(selected) : null}
+        onChange={setPrintFrom}
+        onCancel={() => setPrintAsk(null)}
+        onPrint={confirmPrint}
+      />
 
       {/* Notice */}
       {toolsVisible && (
@@ -588,7 +628,7 @@ export default function KuhinjaTab({
         </div>
         <div className="doc-title-block">
           <h2 className="doc-title">RAZPORED KUHINJE</h2>
-          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{selected ? ` · ${displayName(selected)}` : ''}</p>
+          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{printStart ? ` · od ${printStart}. ${MONTHS[month - 1].toLowerCase()}` : ''}{selected ? ` · ${displayName(selected)}` : ''}</p>
         </div>
         <table>
           <thead>
@@ -602,6 +642,7 @@ export default function KuhinjaTab({
           </thead>
           <tbody>
             {schedule.map((day, i) => {
+              if (day.date < printFrom) return null
               const dayNum = i + 1
               const weekday = new Date(year, month - 1, dayNum).getDay()
               const holiday = getHolidayName(year, month, dayNum)
@@ -633,7 +674,7 @@ export default function KuhinjaTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Skupaj ur</td>
               {visibleStaff.map((p) => (
-                <td key={p}>{breakdowns[p]?.totalHours ?? stats[p]?.hours ?? 0} h</td>
+                <td key={p}>{printedHours(p)} h</td>
               ))}
             </tr>
           </tbody>
@@ -661,6 +702,7 @@ export default function KuhinjaTab({
         <div className="doc-fields">
           {selected && <p><strong>Nom:</strong> {displayName(selected)} ({ROLE_LABELS_FR[getStaffRole(selected, year, month)]})</p>}
           <p><strong>Mois:</strong> {MONTHS_FR[month - 1]} {year}</p>
+          {printStart && <p><strong>À partir du:</strong> {printStart} {MONTHS_FR[month - 1].toLowerCase()}</p>}
         </div>
         <table>
           <thead>
@@ -674,6 +716,7 @@ export default function KuhinjaTab({
           </thead>
           <tbody>
             {schedule.map((day, i) => {
+              if (day.date < printFrom) return null
               const dayNum = i + 1
               const weekday = new Date(year, month - 1, dayNum).getDay()
               return (
@@ -692,7 +735,7 @@ export default function KuhinjaTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Total heures</td>
               {visibleStaff.map((p) => (
-                <td key={p}>{breakdowns[p]?.totalHours ?? stats[p]?.hours ?? 0} h</td>
+                <td key={p}>{printedHours(p)} h</td>
               ))}
             </tr>
           </tbody>

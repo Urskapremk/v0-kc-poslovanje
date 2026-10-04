@@ -16,6 +16,8 @@ import {
 import { getLeaveRequests } from '@/app/actions/leave'
 import { getAllStaffMembers } from '@/app/actions/statistics'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
+import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { PrintFromDialog } from '@/components/print-from-dialog'
 import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
@@ -50,6 +52,9 @@ export default function VrtnarjiTab({
   const toolsVisible = showTools && !readOnly
   // Per-person collapse for the hours breakdown (see razpored-tab for the same pattern).
   const [hiddenHours, setHiddenHours] = useState<Record<string, boolean>>({})
+  const [printFrom, setPrintFrom] = useState(() => defaultPrintFrom(year, month))
+  const [printAsk, setPrintAsk] = useState<null | 'gardeners' | 'gardeners-screen'>(null)
+  const printStart = printStartDay(printFrom, year, month)
   const toggleHours = (name: string) => setHiddenHours((prev) => ({ ...prev, [name]: !prev[name] }))
 
   const { data: staffMembers } = useSWR('all-staff-members', getAllStaffMembers)
@@ -57,6 +62,10 @@ export default function VrtnarjiTab({
   const roster = useMemo(() => keptInMonth(GARDENERS, endByName, year, month), [endByName, year, month])
   const schedule = useMemo(() => generateGardenerSchedule(year, month), [year, month])
   const stats = useMemo(() => computeGardenerStats(schedule), [schedule])
+  const printStats = useMemo(
+    () => computeGardenerStats(schedule.filter((day) => day.date >= printFrom)),
+    [schedule, printFrom],
+  )
   const lastDay = schedule.length
 
   const { data: leaves } = useSWR(['leave', 'gardener'], () => getLeaveRequests('gardener'))
@@ -104,6 +113,18 @@ export default function VrtnarjiTab({
     document.body.classList.add(`printing-${target}`)
     window.print()
     setTimeout(() => document.body.classList.remove(`printing-${target}`), 500)
+  }
+
+  function askPrint(target: 'gardeners' | 'gardeners-screen') {
+    setPrintFrom(defaultPrintFrom(year, month))
+    setPrintAsk(target)
+  }
+
+  function confirmPrint() {
+    const target = printAsk
+    if (!target) return
+    setPrintAsk(null)
+    window.setTimeout(() => printDoc(target), 80)
   }
 
   return (
@@ -228,14 +249,14 @@ export default function VrtnarjiTab({
         {toolsVisible && (
         <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.08] px-4 py-3">
           <button
-            onClick={() => printDoc('gardeners-screen')}
+            onClick={() => askPrint('gardeners-screen')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#8fae92]/20 text-[#8fae92] border border-[#8fae92]/30 hover:bg-[#8fae92]/30 transition-colors text-sm font-medium"
           >
             <Printer className="h-4 w-4" />
             Natisni razpored (barvno)
           </button>
           <button
-            onClick={() => printDoc('gardeners')}
+            onClick={() => askPrint('gardeners')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/30 transition-colors text-sm font-medium"
           >
             <Printer className="h-4 w-4" />
@@ -251,6 +272,17 @@ export default function VrtnarjiTab({
         </div>
         )}
       </div>
+
+      <PrintFromDialog
+        open={printAsk !== null}
+        year={year}
+        month={month}
+        value={printFrom}
+        person={selected}
+        onChange={setPrintFrom}
+        onCancel={() => setPrintAsk(null)}
+        onPrint={confirmPrint}
+      />
 
       {/* Draft notice */}
       {toolsVisible && (
@@ -533,7 +565,7 @@ export default function VrtnarjiTab({
         </div>
         <div className="doc-title-block">
           <h2 className="doc-title">RAZPORED VRTNARJEV</h2>
-          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{selected ? ` · ${selected}` : ''}</p>
+          <p className="doc-subtitle">{MONTHS[month - 1]} {year}{printStart ? ` · od ${printStart}. ${MONTHS[month - 1].toLowerCase()}` : ''}{selected ? ` · ${selected}` : ''}</p>
         </div>
         <table>
           <thead>
@@ -547,6 +579,7 @@ export default function VrtnarjiTab({
           </thead>
           <tbody>
             {schedule.map((day, i) => {
+              if (day.date < printFrom) return null
               const dayNum = i + 1
               const weekday = new Date(year, month - 1, dayNum).getDay()
               const holiday = getHolidayName(year, month, dayNum)
@@ -590,7 +623,7 @@ export default function VrtnarjiTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Skupaj ur</td>
               {visibleGardeners.map((g) => (
-                <td key={g}>{stats[g]?.hours ?? 0} h</td>
+                <td key={g}>{printStats[g]?.hours ?? 0} h</td>
               ))}
             </tr>
           </tbody>
@@ -618,6 +651,7 @@ export default function VrtnarjiTab({
         <div className="doc-fields">
           {selected && <p><strong>Nom:</strong> {selected}</p>}
           <p><strong>Mois:</strong> {MONTHS_FR[month - 1]} {year}</p>
+          {printStart && <p><strong>À partir du:</strong> {printStart} {MONTHS_FR[month - 1].toLowerCase()}</p>}
         </div>
         <table>
           <thead>
@@ -631,6 +665,7 @@ export default function VrtnarjiTab({
           </thead>
           <tbody>
             {schedule.map((day, i) => {
+              if (day.date < printFrom) return null
               const dayNum = i + 1
               const weekday = new Date(year, month - 1, dayNum).getDay()
               return (
@@ -648,7 +683,7 @@ export default function VrtnarjiTab({
             <tr className="g-total">
               <td colSpan={2} style={{ textAlign: 'right' }}>Total heures</td>
               {visibleGardeners.map((g) => (
-                <td key={g}>{stats[g].hours} h</td>
+                <td key={g}>{printStats[g]?.hours ?? 0} h</td>
               ))}
             </tr>
           </tbody>
