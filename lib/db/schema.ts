@@ -251,6 +251,9 @@ export const transfers = pgTable('transfers', {
   taxiBoatId: text('taxiBoatId'), // kateri taksist vozi avto krak (taxi-herman | taxi-amad); null = Herman
   dilipOrderedAt: timestamp('dilipOrderedAt'),
   hermanOrderedAt: timestamp('hermanOrderedAt'),
+  // The boat is already paid on another leg (it left with departing guests and
+  // comes back with arriving ones). Dilip is not paid again for this transfer.
+  skipBoatPay: boolean('skipBoatPay').notNull().default(false),
   guestPrice: decimal('guestPrice', { precision: 10, scale: 2 }).default('0'),
   paymentStatus: text('paymentStatus').default('UNPAID'), // 'PAID', 'UNPAID', 'PREPAID'
   paidMethod: text('paidMethod'), // 'card' | 'cash' | 'transfer' — how the guest paid (for invoice)

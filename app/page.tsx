@@ -156,6 +156,8 @@ interface TransferData {
   taxiBoatId?: string | null; // kateri taksist vozi avto krak (taxi-herman | taxi-amad); prazno = Herman
   dilipOrderedAt?: string | null;
   hermanOrderedAt?: string | null;
+  // Čoln je že plačan z drugim prevozom (isti čoln), zato Dilipu tega ne plačamo.
+  skipBoatPay?: boolean;
   guestPrice: number;
   paymentStatus: string; // 'PREPAID', 'UNPAID', 'PAID'
   executed?: boolean; // Whether the transfer was actually executed
@@ -8956,11 +8958,28 @@ function GuestCard() {
             <div className="mt-1.5 rounded-lg border border-[#8f6d3a]/40 bg-[#8f6d3a]/10 px-2 py-1">
               <p className="text-[10px] font-semibold text-[#8f6d3a]">Za plačilo prevoznikoma:</p>
               <div className="flex flex-wrap gap-x-3 text-[10px] text-[#8f6d3a]/90">
-                {dilipCostAr > 0 && <span>Dilip (čoln): {ar(dilipCostAr)}</span>}
+                {dilipCostAr > 0 && (t.skipBoatPay
+                  ? <span>Dilip (čoln): ni za plačilo — isti čoln</span>
+                  : <span>Dilip (čoln): {ar(dilipCostAr)}</span>)}
                 {hermanCostAr > 0 && <span>{taxiName}: {ar(hermanCostAr)}</span>}
               </div>
+              {t.skipBoatPay && <p className="mt-1 text-[10px] text-[#3d4650]">Gostu se prevoz še vedno zaračuna.</p>}
               {hermanCostAr > 0 && (<p className="mt-1 text-[10px] font-semibold text-[#4f7a54]">Pokliči tudi {taxiName} ({dbRoutes.find((rt: { id: string; name: string }) => rt.id === t.hermanRouteId)?.name || 'avto'})</p>)}
             </div>
+          )}
+          {dilipCostAr > 0 && (
+            <button
+              type="button"
+              onClick={async () => { await updateTransfer(r.id, item.type, { skipBoatPay: !t.skipBoatPay }); refresh(); }}
+              className={`mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+                t.skipBoatPay
+                  ? 'border-[#5b6470] bg-[#5b6470]/15 text-[#3d4650]'
+                  : 'border-dashed border-[#8f6d3a]/50 bg-transparent text-[#8f6d3a] hover:bg-[#8f6d3a]/10'
+              }`}
+            >
+              <Ship className="h-3.5 w-3.5" />
+              {t.skipBoatPay ? 'Čoln ni za plačilo · isti čoln' : 'Isti čoln — Dilipu ne plačaj'}
+            </button>
           )}
           <div className="mt-2 flex flex-wrap gap-2">
             {!isOrdered ? (
@@ -8982,7 +9001,7 @@ function GuestCard() {
               </button>
             ))}
           </div>
-          {dilipCostAr > 0 && renderSupplierPay(`transfer:${r.id}:${item.type}:dilip`, 'dilip', dilipCostAr, 'Dilip (čoln)', `Prevoz Dilip (čoln) — ${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`.slice(0, 200))}
+          {dilipCostAr > 0 && !t.skipBoatPay && renderSupplierPay(`transfer:${r.id}:${item.type}:dilip`, 'dilip', dilipCostAr, 'Dilip (čoln)', `Prevoz Dilip (čoln) — ${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`.slice(0, 200))}
           {hermanCostAr > 0 && renderSupplierPay(`transfer:${r.id}:${item.type}:${taxiKey(taxiId)}`, taxiKey(taxiId), hermanCostAr, `${taxiName} (avto)`, `Prevoz ${taxiName} (avto) — ${shortBungalow} / ${r.guestName}${routeName ? ` · ${routeName}` : ''}`.slice(0, 200))}
           <div className="mt-2 border-t border-dashed border-[#8f6d3a]/25 pt-2">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[#8f6d3a]/70">Dodatna gotovinska plačila</p>

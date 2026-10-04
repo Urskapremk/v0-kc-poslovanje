@@ -553,6 +553,10 @@ export async function getGroupReservations(groupId: string) {
   return db.select().from(reservations).where(eq(reservations.groupId, groupId))
 }
 
+async function ensureSkipBoatPayColumn() {
+  await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
+}
+
 // ============ TRANSFERS ============
 
 export async function updateTransfer(reservationId: string, type: 'arrival' | 'departure', data: {
@@ -570,6 +574,7 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
   taxiBoatId?: string
   dilipOrderedAt?: Date | null
   hermanOrderedAt?: Date | null
+  skipBoatPay?: boolean
   guestPrice?: number
   paymentStatus?: string
   paidMethod?: string | null
@@ -577,6 +582,7 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
   executed?: boolean
   executedAt?: string | null
 }) {
+  await ensureSkipBoatPayColumn()
   const existing = await db.select().from(transfers)
     .where(and(eq(transfers.reservationId, reservationId), eq(transfers.type, type)))
     .limit(1)
@@ -598,6 +604,7 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
   taxiBoatId: data.taxiBoatId !== undefined ? (data.taxiBoatId || null) : existing[0].taxiBoatId,
   dilipOrderedAt: data.dilipOrderedAt !== undefined ? data.dilipOrderedAt : existing[0].dilipOrderedAt,
         hermanOrderedAt: data.hermanOrderedAt !== undefined ? data.hermanOrderedAt : existing[0].hermanOrderedAt,
+        skipBoatPay: data.skipBoatPay !== undefined ? data.skipBoatPay : existing[0].skipBoatPay,
         guestPrice: data.guestPrice !== undefined ? String(data.guestPrice) : existing[0].guestPrice,
         paymentStatus: data.paymentStatus ?? existing[0].paymentStatus,
         paidMethod: data.paidMethod !== undefined ? data.paidMethod : existing[0].paidMethod,
@@ -625,6 +632,7 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
       taxiBoatId: data.taxiBoatId || null,
       dilipOrderedAt: data.dilipOrderedAt,
       hermanOrderedAt: data.hermanOrderedAt,
+      skipBoatPay: data.skipBoatPay || false,
       guestPrice: String(data.guestPrice || 0),
       paymentStatus: data.paymentStatus || 'UNPAID',
       paidMethod: data.paidMethod ?? null,
@@ -632,6 +640,10 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
       executed: data.executed || false,
       executedAt: data.executedAt ? new Date(data.executedAt) : null
     })
+  }
+  // The boat was already paid on the other leg. Drop a payment if one was recorded.
+  if (data.skipBoatPay) {
+    await unpaySupplier({ refKey: `transfer:${reservationId}:${type}:dilip` })
   }
   // Keep the delivery-note / invoice order item in sync for checked-in guests.
   try {
@@ -783,6 +795,7 @@ export async function setOrderItemTransferOrdered(id: string, which: 'dilip' | '
 // ============ DASHBOARD DATA ============
 
 export async function getDashboardData(includeReservationId?: string) {
+  await ensureSkipBoatPayColumn()
   // Only fetch ACTIVE reservations (not checked out) for dashboard performance.
   // `includeReservationId` additionally pulls in ONE already checked-out guest, so a
   // past guest opened from search gets a full card (emails, dobavnica, payments).
@@ -864,13 +877,14 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           taxiBoatId: arrivalTransfer.taxiBoatId || '',
           dilipOrderedAt: arrivalTransfer.dilipOrderedAt?.toISOString() || null,
           hermanOrderedAt: arrivalTransfer.hermanOrderedAt?.toISOString() || null,
+          skipBoatPay: arrivalTransfer.skipBoatPay ?? false,
           guestPrice: Number(arrivalTransfer.guestPrice) || 0,
           paymentStatus: arrivalTransfer.paymentStatus || 'UNPAID',
           paidMethod: arrivalTransfer.paidMethod || '',
           paidDate: arrivalTransfer.paidDate || '',
           executed: arrivalTransfer.executed || false,
           executedAt: arrivalTransfer.executedAt?.toISOString() || null
-        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '', executed: false, executedAt: null },
+        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, skipBoatPay: false, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '', executed: false, executedAt: null },
         departure: departureTransfer ? {
           route: departureTransfer.route || '',
           time: departureTransfer.time || '',
@@ -886,13 +900,14 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           taxiBoatId: departureTransfer.taxiBoatId || '',
           dilipOrderedAt: departureTransfer.dilipOrderedAt?.toISOString() || null,
           hermanOrderedAt: departureTransfer.hermanOrderedAt?.toISOString() || null,
+          skipBoatPay: departureTransfer.skipBoatPay ?? false,
           guestPrice: Number(departureTransfer.guestPrice) || 0,
           paymentStatus: departureTransfer.paymentStatus || 'UNPAID',
           paidMethod: departureTransfer.paidMethod || '',
           paidDate: departureTransfer.paidDate || '',
           executed: departureTransfer.executed || false,
           executedAt: departureTransfer.executedAt?.toISOString() || null
-        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '' }
+        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, skipBoatPay: false, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '' }
       },
       orderItems: resOrders.map(o => ({
         id: o.id,

@@ -768,6 +768,7 @@ export async function deleteStaffSalary(id: string) {
 
 // Get statistics for a month
 export async function getMonthlyStatistics(year: number, month: number) {
+  await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
   const startDate = new Date(year, month - 1, 1)
   const endDate = new Date(year, month, 0) // Last day of month
   
@@ -983,7 +984,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   
   // Transfer costs - calculate from supplier_pricing based on boatId and route
   const transferCost = allTransfers.reduce((sum, t) => {
-    if (!t.boatId) return sum
+    if (!t.boatId || t.skipBoatPay) return sum
     
     // Find the route ID - route can be an ID or a name
     let routeId = t.route
@@ -1420,7 +1421,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const r = resById.get(t.reservationId)
     const g = getGuest(t.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure)
     g.transfers += Number(t.guestPrice || 0)
-    if (t.boatId) {
+    if (t.boatId && !t.skipBoatPay) {
       let routeId = t.route
       if (t.route && !t.route.startsWith('route-')) {
         const fr = allRoutes.find(rr => rr.name === t.route)
@@ -1604,6 +1605,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
 // Get carrier (boat operator) statistics for a month - how much business we gave
 // each transporter, number of trips, and how much we paid them.
 export async function getCarrierStatistics(year: number, month: number) {
+  await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
   const startDate = new Date(year, month - 1, 1)
   const endDate = new Date(year, month, 0)
   const startStr = startDate.toISOString().split('T')[0]
@@ -1665,8 +1667,8 @@ export async function getCarrierStatistics(year: number, month: number) {
 
   // Transfers -> supplier_pricing
   for (const t of allTransfers) {
-    // Boat leg (Dilip)
-    if (t.boatId) {
+    // Boat leg (Dilip). A return on a boat already paid with the departing guests is not paid again.
+    if (t.boatId && !t.skipBoatPay) {
       let routeId = t.route
       if (t.route && !t.route.startsWith('route-')) {
         const fr = allRoutes.find(r => r.name === t.route)
