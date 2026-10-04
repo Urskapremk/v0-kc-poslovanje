@@ -21,12 +21,14 @@ const ASSET_CAT = "osnovno_sredstvo"
 const LOAN_CAT = "posojilo_gostu"
 const WIP_CAT = "sredstvo_v_izdelavi"
 const RENT_CAT = "najemnina"
+const IZLET_CAT = "izlet"
 const RENT_NAME = "Najemnina hiša"
-type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT
+type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT | typeof IZLET_CAT
 const ASSET_COLOR = "#c9a86a"
 const LOAN_COLOR = "#3f6b7d"
 const WIP_COLOR = "#a0662f"
 const RENT_COLOR = "#8a4f72"
+const IZLET_COLOR = "#c59b5b"
 
 const CAT_COLORS: Record<StrosekCategory, string> = {
   bar: "#3f6b7d",
@@ -38,7 +40,7 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   ostalo: "#6b6b6b",
 }
 const catColor = (c: NabavaCategory) =>
-  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : CAT_COLORS[c]
+  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : c === IZLET_CAT ? IZLET_COLOR : CAT_COLORS[c]
 const catLabel = (c: NabavaCategory) =>
   c === ASSET_CAT
     ? "Osnovno sredstvo"
@@ -48,7 +50,9 @@ const catLabel = (c: NabavaCategory) =>
         ? "Sredstvo v izdelavi"
         : c === RENT_CAT
           ? RENT_NAME
-          : CATEGORY_LABELS[c]
+          : c === IZLET_CAT
+            ? "Izlet"
+            : CATEGORY_LABELS[c]
 
 function RentButton({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (

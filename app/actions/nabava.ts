@@ -66,7 +66,8 @@ async function ensureTable() {
 const LOAN_CAT = "posojilo_gostu"
 const WIP_CAT = "sredstvo_v_izdelavi"
 const RENT_CAT = "najemnina"
-type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina"
+const IZLET_CAT = "izlet"
+type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina" | "izlet"
 
 async function syncWipCost(purchaseId: string, category: NabavaCat, assetId: string, date: string, name: string, amountAr: number) {
   const { upsertNabavaAssetCost, removeNabavaAssetCost } = await import("./statistics")
@@ -86,6 +87,7 @@ function normCategory(c: string): NabavaCat {
   if (c === WIP_CAT) return WIP_CAT
   if (c === LOAN_CAT) return LOAN_CAT
   if (c === RENT_CAT) return RENT_CAT
+  if (c === IZLET_CAT) return IZLET_CAT
   return STROSEK_CATEGORIES.includes(c as StrosekCategory) ? (c as StrosekCategory) : "kuhinja"
 }
 

@@ -683,8 +683,14 @@ function StatistikaContent() {
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
                     <div className="flex justify-between text-sm">
                       <span className="text-white/50">Najem čolnov + vodič + vstop + kosilo</span>
-                      <span className="text-white">{formatEur((stats.costs as { excursions?: number }).excursions || 0)}</span>
+                      <span className="text-white">{formatEur(((stats.costs as { excursions?: number }).excursions || 0) - ((stats.costs as { izletGotovina?: number }).izletGotovina || 0))}</span>
                     </div>
+                    {((stats.costs as { izletGotovina?: number }).izletGotovina || 0) > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-white/50">Plačilo dobavitelju (gotovina)</span>
+                        <span className="text-white">{formatEur((stats.costs as { izletGotovina?: number }).izletGotovina || 0)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 {(() => {
@@ -746,9 +752,15 @@ function StatistikaContent() {
                   </div>
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-white/50">Maserke ({stats.costSettings?.find(c => c.category === 'wellness')?.value || 0} EUR/kos)</span>
-                      <span className="text-white">{formatEur(stats.costs.wellness)}</span>
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-white/50">Maserke ({stats.costSettings?.find(c => c.category === 'wellness')?.value || 0} EUR/kos)</span>
+                        <span className="text-white">{formatEur(stats.costs.wellness)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-white/50">Plačilo maserki (gotovina)</span>
+                        <span className="text-white">{formatEur((stats.costs as { receiptsWellness?: number }).receiptsWellness || 0)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -800,7 +812,7 @@ function StatistikaContent() {
                 })()}
                 <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:justify-between gap-1">
                   <span className="text-white/70 font-medium">Dobiček wellness</span>
-                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.wellness - stats.costs.wellness)}</span>
+                  <span className="text-[#8fae92] font-bold">{formatEur(stats.revenue.wellness - stats.costs.wellness - ((stats.costs as { receiptsWellness?: number }).receiptsWellness || 0))}</span>
                 </div>
               </div>
 

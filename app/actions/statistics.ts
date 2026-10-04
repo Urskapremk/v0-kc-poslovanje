@@ -1235,9 +1235,15 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const nabavaPurchases = await getNabavaPurchasesForMonth(year, month)
   // Najemnina hiše (Borut plača gotovino v Nabavi Komba) = samostojen strošek, ločen od ostalih kategorij.
   let najemninaHisaAr = 0
+  let izletNabavaAr = 0
   for (const p of nabavaPurchases) {
   if (p.category === "najemnina") {
     najemninaHisaAr += p.amountAr
+    continue
+  }
+  // Gotovinsko plačilo dobavitelju za izlet (npr. gosta na vrh Kombe) gre v strošek izletov.
+  if (p.category === "izlet") {
+    izletNabavaAr += p.amountAr
     continue
   }
   // Osnovno sredstvo se NE knjiži kot takojšen strošek oddelka — amortizira se prek fixed_assets.
@@ -1257,6 +1263,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Tekoče vzdrževanje nepremičnin = samostojen strošek; NE bremeni oddelkov, znižuje skupni dobiček.
   const receiptsVzdrzevanjeCost = receiptsByCategory.vzdrzevanje || 0
   const najemninaHisaCost = najemninaHisaAr / rate
+  const izletGotovinaCost = izletNabavaAr / rate
 
   // Nosači in Tuc tuc = vsak SVOJ samostojen strošek (npr. Borutove nabave HV/Komba). Vir so gotovinski odlivi
   // (bank_cash_expenses) IN Orange Money odlivi, prepoznani po besedilu opisa. NE bremenita nobenega oddelka —
@@ -1289,7 +1296,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const depreciationCost = depreciation.total
 
   const totalSalaryCost = accommodationSalaryCost + barSalaryCost + kuhinjaSalaryCost + managementSalaryCost
-  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + portersCost + tuctucCost + depreciationCost
+  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + portersCost + tuctucCost + depreciationCost
 
   // ===== PER-GUEST BREAKDOWN (analytics) =====
   // Attribute revenue and costs to each reservation/guest. Salaries are allocated
@@ -1533,7 +1540,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
       barPrehrana: Math.round(barPrehranaCost * 100) / 100,
       wellness: Math.round(wellnessCost * 100) / 100,
       ostalo: Math.round(ostaloCost * 100) / 100,
-      excursions: Math.round(excursionCost * 100) / 100,
+      excursions: Math.round((excursionCost + izletGotovinaCost) * 100) / 100,
+      izletGotovina: Math.round(izletGotovinaCost * 100) / 100,
       transfers: Math.round(transferCostTotal * 100) / 100,
       mealPlan: Math.round(mealPlanCost * 100) / 100,
       receiptsKuhinja: Math.round(receiptsKuhinjaCost * 100) / 100,
