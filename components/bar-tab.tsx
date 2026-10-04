@@ -22,7 +22,7 @@ import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor, PILL, type SchedulePill } from '@/lib/schedule-theme'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
-import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { defaultPrintFrom, printAfterDialog, printStartDay, printWithClass } from '@/lib/print-from'
 import { PrintFromDialog } from '@/components/print-from-dialog'
 
 const MONTHS = [
@@ -157,9 +157,8 @@ export default function BarTab({
   }, [schedule, selected, todayDay])
 
   function printDoc(target: 'bar' | 'bar-attendance' | 'bar-screen') {
-    document.body.classList.add(`printing-${target}`)
-    window.print()
-    setTimeout(() => document.body.classList.remove(`printing-${target}`), 500)
+    const sheet = target === 'bar' ? '.bar-print' : target === 'bar-screen' ? '.bar-color-print' : '.bar-att-print'
+    printWithClass(`printing-${target}`, sheet)
   }
 
   function askPrint(target: 'bar' | 'bar-screen') {
@@ -171,7 +170,7 @@ export default function BarTab({
     const target = printAsk
     if (!target) return
     setPrintAsk(null)
-    window.setTimeout(() => printDoc(target), 80)
+    printAfterDialog(() => printDoc(target))
   }
 
   return (

@@ -33,3 +33,81 @@ export function printStartDay(iso: string, year: number, month: number): number 
   if (y !== year || m !== month || !d || d <= 1) return null
   return d
 }
+
+// The date question is a modal. Printing while it is still fading out pauses
+// that animation, and the page is left with pointer-events: none — it looks
+// frozen and nothing can be clicked. Wait until the dialog is gone.
+export function printAfterDialog(run: () => void) {
+  const started = Date.now()
+  const tick = () => {
+    const dialog = document.querySelector('[role="dialog"], [data-slot="dialog-content"]')
+    if (dialog && Date.now() - started < 1200) {
+      window.setTimeout(tick, 40)
+      return
+    }
+    document.body.style.pointerEvents = ''
+    window.requestAnimationFrame(() => run())
+  }
+  window.setTimeout(tick, 40)
+}
+
+// The on-screen page (shift menus, linen grid, the rest of Kadri) stays in the
+// print layout even when it is invisible, and Chrome can freeze while paginating
+// it. Hide every branch that is not the paper itself, and drop min-height so a
+// blank second page is not added.
+function hideOtherBranches(sheet: HTMLElement): () => void {
+  const hidden: Array<[HTMLElement, string]> = []
+  const mins: Array<[HTMLElement, string]> = []
+  const prevPosition = sheet.style.position
+  sheet.style.position = 'static'
+  let node: HTMLElement | null = sheet
+  while (node) {
+    mins.push([node, node.style.minHeight])
+    node.style.minHeight = '0'
+    const parent = node.parentElement
+    if (!parent) break
+    for (const sib of Array.from(parent.children)) {
+      if (sib === node) continue
+      const tag = sib.tagName
+      if (tag === 'SCRIPT' || tag === 'STYLE') continue
+      const el = sib as HTMLElement
+      hidden.push([el, el.style.display])
+      el.style.display = 'none'
+    }
+    if (parent === document.body) break
+    node = parent
+  }
+  return () => {
+    sheet.style.position = prevPosition
+    for (const [el, prev] of mins) el.style.minHeight = prev
+    for (const [el, prev] of hidden) el.style.display = prev
+  }
+}
+
+// Keep the print class until the paper dialog closes. A short timer strips it
+// while Chrome is still building the preview, and the preview then restarts.
+export function printWithClass(className: string, sheetSelector?: string) {
+  const classes = Array.from(document.body.classList)
+  for (const name of classes) {
+    if (name.startsWith('printing-')) document.body.classList.remove(name)
+  }
+  const sheet = sheetSelector ? document.querySelector(sheetSelector) : null
+  const restore = sheet instanceof HTMLElement ? hideOtherBranches(sheet) : () => {}
+  document.body.classList.add(className)
+  let done = false
+  const media = window.matchMedia('print')
+  const cleanup = () => {
+    if (done) return
+    done = true
+    document.body.classList.remove(className)
+    restore()
+    window.removeEventListener('afterprint', cleanup)
+    media.removeEventListener('change', onMedia)
+  }
+  const onMedia = () => {
+    if (!media.matches) cleanup()
+  }
+  window.addEventListener('afterprint', cleanup)
+  media.addEventListener('change', onMedia)
+  window.print()
+}

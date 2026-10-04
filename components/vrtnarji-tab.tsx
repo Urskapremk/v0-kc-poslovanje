@@ -16,7 +16,7 @@ import {
 import { getLeaveRequests } from '@/app/actions/leave'
 import { getAllStaffMembers } from '@/app/actions/statistics'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
-import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { defaultPrintFrom, printAfterDialog, printStartDay, printWithClass } from '@/lib/print-from'
 import { PrintFromDialog } from '@/components/print-from-dialog'
 import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
@@ -110,9 +110,8 @@ export default function VrtnarjiTab({
   }, [schedule, selected, todayDay])
 
   function printDoc(target: 'gardeners' | 'gardeners-attendance' | 'gardeners-screen') {
-    document.body.classList.add(`printing-${target}`)
-    window.print()
-    setTimeout(() => document.body.classList.remove(`printing-${target}`), 500)
+    const sheet = target === 'gardeners' ? '.gardeners-print' : target === 'gardeners-screen' ? '.gardeners-color-print' : '.gardeners-att-print'
+    printWithClass(`printing-${target}`, sheet)
   }
 
   function askPrint(target: 'gardeners' | 'gardeners-screen') {
@@ -124,7 +123,7 @@ export default function VrtnarjiTab({
     const target = printAsk
     if (!target) return
     setPrintAsk(null)
-    window.setTimeout(() => printDoc(target), 80)
+    printAfterDialog(() => printDoc(target))
   }
 
   return (

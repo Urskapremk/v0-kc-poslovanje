@@ -18,7 +18,7 @@ import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor } from '@/lib/schedule-theme'
 import { GuestArrivalsLinen } from '@/components/guest-arrivals-linen'
-import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { defaultPrintFrom, printAfterDialog, printStartDay, printWithClass } from '@/lib/print-from'
 import { PrintFromDialog } from '@/components/print-from-dialog'
 
 const MONTHS = [
@@ -178,9 +178,8 @@ export default function RazporedTab({
 
   // Print either the schedule calendar or the attendance sheets.
   const printDoc = (target: 'schedule' | 'attendance' | 'schedule-color') => {
-    document.body.classList.add(`printing-${target}`)
-    window.print()
-    setTimeout(() => document.body.classList.remove(`printing-${target}`), 100)
+    const sheet = target === 'schedule' ? '.schedule-print' : target === 'schedule-color' ? '.schedule-color-print' : '.attendance-print'
+    printWithClass(`printing-${target}`, sheet)
   }
 
   const askPrint = (target: 'schedule' | 'schedule-color') => {
@@ -192,7 +191,7 @@ export default function RazporedTab({
     const target = printAsk
     if (!target) return
     setPrintAsk(null)
-    window.setTimeout(() => printDoc(target), 80)
+    printAfterDialog(() => printDoc(target))
   }
 
   const dateStr = (d: number) =>
@@ -704,18 +703,30 @@ export default function RazporedTab({
           .doc-legend { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 16px; font-size: 12px; margin-top: 12px; }
           .doc-note { font-size: 11px; color: #333; margin: 2px 0 0; }
 
-          /* ===== Printing the schedule ===== */
+          /* ===== Printing the schedule =====
+             The sheet used to be forced into one 248mm flex box with the table
+             at height 100%. Chrome's print layout then never finished, and the
+             tab froze. Rows size themselves and may continue on the next page. */
           body.printing-schedule * { visibility: hidden; }
           body.printing-schedule .schedule-print,
           body.printing-schedule .schedule-print * { visibility: visible; }
+          body.printing-schedule .no-print,
+          body.printing-schedule .linen-print-root,
+          body.printing-schedule .schedule-color-print,
+          body.printing-schedule .attendance-print,
+          body.printing-schedule select,
+          body.printing-schedule [role="dialog"],
+          body.printing-schedule [data-slot="dialog-overlay"] { display: none !important; }
           body.printing-schedule .schedule-print {
-            display: flex !important; flex-direction: column;
-            position: absolute; left: 0; top: 0; width: 100%;
-            height: 248mm; box-sizing: border-box; overflow: hidden;
+            display: block !important;
+            position: static; width: 100%;
+            height: auto; overflow: visible;
           }
-          .schedule-print .doc-page { display: flex; flex-direction: column; flex: 1 1 auto; height: 100%; min-height: 0; }
-          .sched-table th, .sched-table td { text-align: center; vertical-align: middle; }
-          .sched-table { font-size: 11px; flex: 1 1 auto; height: 100%; }
+          .schedule-print .doc-page { display: block; height: auto; }
+          .sched-table th, .sched-table td { text-align: center; vertical-align: middle; height: auto; }
+          .sched-table { font-size: 11px; height: auto; }
+          .sched-table thead { display: table-header-group; }
+          .sched-table tr { break-inside: avoid; page-break-inside: avoid; }
           .sched-table th { font-size: 10px; }
           .sched-table td, .sched-table th { padding: 2px 5px; line-height: 1.2; }
           .schedule-print .doc-header { padding-bottom: 6px; margin-bottom: 4px; flex: 0 0 auto; }
@@ -735,11 +746,20 @@ export default function RazporedTab({
           body.printing-schedule-color * { visibility: hidden; }
           body.printing-schedule-color .schedule-color-print,
           body.printing-schedule-color .schedule-color-print * { visibility: visible; }
+          body.printing-schedule-color .no-print,
+          body.printing-schedule-color .linen-print-root,
+          body.printing-schedule-color .schedule-print,
+          body.printing-schedule-color .attendance-print,
+          body.printing-schedule-color select,
+          body.printing-schedule-color [role="dialog"],
+          body.printing-schedule-color [data-slot="dialog-overlay"] { display: none !important; }
           body.printing-schedule-color .schedule-color-print {
-            display: flex !important; flex-direction: column;
-            position: absolute; left: 0; top: 0; width: 100%;
+            display: block !important;
+            position: static; width: 100%;
             box-sizing: border-box;
+            color: #111;
           }
+          .schedule-color-print tr { break-inside: avoid; page-break-inside: avoid; }
           .schedule-color-print .doc-header { text-align: center; border-bottom: 2px solid #111; padding-bottom: 6px; margin-bottom: 4px; }
           .schedule-color-print .doc-logo { display: block; margin: 0 auto; height: 48px; width: auto; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .schedule-color-print .doc-location { font-size: 12px; font-style: italic; color: #333; margin: 2px 0 0; }
@@ -757,7 +777,8 @@ export default function RazporedTab({
           .schedule-color-print .sc-leave { background: #f0e0da !important; color: #975b45 !important; }
           .schedule-color-print .sc-leave small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
           .schedule-color-print .sc-total td { font-weight: 700; background: #f8f5ef !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .schedule-color-print .sc-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; margin-top: 10px; }
+          .schedule-color-print .sc-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; margin-top: 10px; color: #111; }
+          .schedule-color-print .sc-legend .lg { color: #111; }
           .schedule-color-print .sc-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
           .schedule-color-print .sc-legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 2px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 
@@ -765,9 +786,14 @@ export default function RazporedTab({
           body.printing-attendance * { visibility: hidden; }
           body.printing-attendance .attendance-print,
           body.printing-attendance .attendance-print * { visibility: visible; }
+          body.printing-attendance .no-print,
+          body.printing-attendance .linen-print-root,
+          body.printing-attendance .schedule-print,
+          body.printing-attendance .schedule-color-print,
+          body.printing-attendance select { display: none !important; }
           body.printing-attendance .attendance-print {
             display: block !important;
-            position: absolute; left: 0; top: 0; width: 100%;
+            position: static !important; left: auto; top: auto; width: 100%;
           }
           .attendance-page {
             page-break-after: always;

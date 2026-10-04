@@ -25,7 +25,7 @@ import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
 import { themeFor, PILL, SWATCH, type SchedulePill } from '@/lib/schedule-theme'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
-import { defaultPrintFrom, printStartDay } from '@/lib/print-from'
+import { defaultPrintFrom, printAfterDialog, printStartDay, printWithClass } from '@/lib/print-from'
 import { PrintFromDialog } from '@/components/print-from-dialog'
 
 const MONTHS = [
@@ -172,9 +172,8 @@ export default function KuhinjaTab({
   }, [schedule, selected, todayDay])
 
   function printDoc(target: 'kitchen' | 'kitchen-attendance' | 'kitchen-screen') {
-    document.body.classList.add(`printing-${target}`)
-    window.print()
-    setTimeout(() => document.body.classList.remove(`printing-${target}`), 500)
+    const sheet = target === 'kitchen' ? '.kitchen-print' : target === 'kitchen-screen' ? '.kitchen-color-print' : '.kitchen-att-print'
+    printWithClass(`printing-${target}`, sheet)
   }
 
   function askPrint(target: 'kitchen' | 'kitchen-screen') {
@@ -186,7 +185,7 @@ export default function KuhinjaTab({
     const target = printAsk
     if (!target) return
     setPrintAsk(null)
-    window.setTimeout(() => printDoc(target), 80)
+    printAfterDialog(() => printDoc(target))
   }
 
   function printedHours(person: string) {
