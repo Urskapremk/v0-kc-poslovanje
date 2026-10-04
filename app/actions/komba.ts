@@ -1899,6 +1899,97 @@ export async function addGroupExcursionBooking(data: {
   return groupId
 }
 
+function bookingDay(value: unknown): string | null {
+  if (!value) return null
+  if (typeof value === 'string') return value.split('T')[0]
+  if (value instanceof Date) return value.toISOString().split('T')[0]
+  return String(value).split('T')[0]
+}
+
+// Changing pax or price on an excursion used to update only the booking.
+// The guest invoice is a separate order line, so it kept the old headcount.
+// Rewrite that one line to match the booking (name, date, unpaid amount).
+async function syncExcursionInvoiceLine(
+  bookingId: string,
+  previous: { excursionName: string; date: string | null; pax: number },
+) {
+  const [booking] = await db
+    .select()
+    .from(excursionBookings)
+    .where(eq(excursionBookings.id, bookingId))
+    .limit(1)
+  if (!booking || booking.status === 'CANCELLED') return
+
+  const [excursion] = await db
+    .select({ name: excursions.name })
+    .from(excursions)
+    .where(eq(excursions.id, booking.excursionId))
+    .limit(1)
+  const excursionName = (excursion?.name || 'Izlet').trim()
+  const oldName = (previous.excursionName || excursionName).trim().toLowerCase()
+
+  const items = await db
+    .select()
+    .from(orderItems)
+    .where(and(
+      eq(orderItems.reservationId, booking.reservationId),
+      eq(orderItems.category, 'Izlet'),
+    ))
+
+  const oldDate = previous.date
+  let candidates = items.filter((it) => {
+    const name = (it.name || '').toLowerCase()
+    if (!oldName || !name.includes(oldName)) return false
+    if (oldDate && it.eventDate && it.eventDate !== oldDate) return false
+    return true
+  })
+  if (candidates.length > 1) {
+    const paxRe = new RegExp(`-\\s*${previous.pax}\\s*pax\\b`, 'i')
+    const withPax = candidates.filter((it) => paxRe.test(it.name || ''))
+    if (withPax.length === 1) candidates = withPax
+    else return
+  }
+  if (candidates.length !== 1) return
+  const item = candidates[0]
+
+  const boatName = booking.boatId
+    ? ((await db.select({ name: boats.name }).from(boats).where(eq(boats.id, booking.boatId)).limit(1))[0]?.name || '')
+    : ''
+  const lunchProvider = booking.lunchProviderId
+    ? (await db.select({ name: lunchProviders.name }).from(lunchProviders).where(eq(lunchProviders.id, booking.lunchProviderId)).limit(1))[0]
+    : null
+
+  const slovenian = /^Izlet:/i.test(item.name) || /\bVklj:/i.test(item.name)
+  const included: string[] = []
+  if (boatName) included.push(boatName)
+  if (Number(booking.entranceFee) > 0) included.push(slovenian ? 'vstopnina' : 'entrance fee')
+  if (!slovenian && lunchProvider?.name) included.push(`lunch: ${lunchProvider.name}`)
+  const includedText = included.length > 0 ? ` | ${slovenian ? 'Vklj' : 'Incl'}: ${included.join(', ')}` : ''
+  const pax = booking.pax || 1
+  const name = slovenian
+    ? `Izlet: ${excursionName} - ${pax} pax${includedText}`
+    : `Excursion: ${excursionName} - ${pax} pax${includedText}`
+
+  const exchangeRate = await getExchangeRate()
+  const totalEur = Number(booking.guestPrice || 0) + Number(booking.entranceFee || 0) + Number(booking.lunchPrice || 0)
+  const totalAr = Math.round(totalEur * exchangeRate)
+  const isPaid = booking.paymentStatus === 'PAID'
+  const eventDate = bookingDay(booking.date)
+  // Only PAID zeroes the line (the real amount stays in refPriceAr). PREPAID stays
+  // on the bill the way it was, so a status label never drops the charge by accident.
+  const paymentStatus = isPaid ? 'PAID' : (booking.paymentStatus === 'UNPAID' ? 'UNPAID' : item.paymentStatus)
+
+  await db.update(orderItems).set({
+    name,
+    eventDate,
+    refPriceAr: totalAr,
+    priceAr: item.isFree ? item.priceAr : (isPaid ? 0 : totalAr),
+    paymentStatus,
+  }).where(eq(orderItems.id, item.id))
+
+  revalidatePath(`/racun/${booking.reservationId}`)
+}
+
 export async function updateExcursionBooking(id: string, data: Partial<{
   excursionId: string
   boatId: string
@@ -1913,6 +2004,29 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   notes: string
   dilipOrderedAt: string
 }>) {
+  const touchesInvoice = data.excursionId !== undefined
+    || data.boatId !== undefined
+    || data.date !== undefined
+    || data.pax !== undefined
+    || data.guestPrice !== undefined
+    || data.entranceFee !== undefined
+    || data.lunchPrice !== undefined
+    || data.lunchProviderId !== undefined
+    || data.paymentStatus !== undefined
+
+  let previous: { excursionName: string; date: string | null; pax: number } | null = null
+  if (touchesInvoice) {
+    const [before] = await db.select().from(excursionBookings).where(eq(excursionBookings.id, id)).limit(1)
+    if (before) {
+      const [exc] = await db.select({ name: excursions.name }).from(excursions).where(eq(excursions.id, before.excursionId)).limit(1)
+      previous = {
+        excursionName: exc?.name || 'Izlet',
+        date: bookingDay(before.date),
+        pax: before.pax || 1,
+      }
+    }
+  }
+
   const updateData: Record<string, unknown> = {}
   if (data.excursionId !== undefined) updateData.excursionId = data.excursionId
   if (data.boatId !== undefined) updateData.boatId = data.boatId || null
@@ -1928,6 +2042,7 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   if (data.dilipOrderedAt !== undefined) updateData.dilipOrderedAt = new Date(data.dilipOrderedAt)
   
   await db.update(excursionBookings).set(updateData).where(eq(excursionBookings.id, id))
+  if (previous) await syncExcursionInvoiceLine(id, previous)
   revalidatePath('/')
 }
 
