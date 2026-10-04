@@ -2735,19 +2735,19 @@ async function handleCreateReservation() {
             if (!indicators) return null;
             if (indicators.arrivalSoon && (indicators.guidePhone || indicators.pickup)) {
               return (
-                <div className="mt-1.5 pl-[1.25rem]">
+                <div className="mt-1 pl-[1.25rem]">
                   {indicators.guidePhone && (
                     <p
-                      className="animate-arriving text-[15px] font-semibold tabular-nums tracking-[0.04em] text-[#1565c0]"
+                      className="animate-arriving text-[10px] tabular-nums tracking-[0.06em] text-[#2b2622]/60"
                       title="Številka vodiča"
                     >
                       {indicators.guidePhone}
                     </p>
                   )}
                   {indicators.pickup && (
-                    <p className="animate-arriving mt-0.5 text-[13px] font-medium tracking-[0.03em] text-[#1565c0]">
+                    <p className="animate-arriving text-[10px] tracking-[0.06em] text-[#2b2622]/60">
                       {indicators.pickup}
-                      {indicators.pickupTime ? <span className="ml-1.5 tabular-nums">{indicators.pickupTime}</span> : null}
+                      {indicators.pickupTime ? <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{indicators.pickupTime}</span> : null}
                     </p>
                   )}
                 </div>
