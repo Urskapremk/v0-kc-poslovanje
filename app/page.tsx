@@ -278,6 +278,8 @@ interface Reservation {
   };
   excursions: ExcursionBooking[];
   orderItems: OrderItem[];
+  // Popusti in dobropisi na računu (invoice_discounts). Kartica bungalova jih odšteje od zneska za plačilo.
+  invoiceDiscounts?: { id: string; kind: string; label: string; amountAr: number }[];
 }
 
 // ============ LUXURY UI COMPONENTS ============
@@ -3028,12 +3030,11 @@ async function handleCreateReservation() {
                     const accommodationEur = Number(now.totalAmount || 0);
                     const amountPaidEur = Number(now.amountPaid || 0);
                     const extrasEur = (unpaidServicesAr + barAr) / exchangeRate;
-                    const accommodationOwedEur = Math.max(0, accommodationEur - amountPaidEur);
-                    // Any payment beyond the accommodation price credits the extras (services + bar),
-                    // so a guest who paid the full bill upfront shows 0 to pay.
-                    const surplusCreditEur = Math.max(0, amountPaidEur - accommodationEur);
-                    const extrasOwedEur = Math.max(0, extrasEur - surplusCreditEur);
-                    const totalUnpaidEur = accommodationOwedEur + extrasOwedEur;
+                    // Popust in dobropis (invoice_discounts, tudi dobroimetje od preklicanega izleta)
+                    // znižata račun enako kot na strani računa. Plačilo nad ceno bivanja že krije dodatke.
+                    const discountEur = (now.invoiceDiscounts || []).reduce((sum, d) => sum + Number(d.amountAr || 0), 0) / exchangeRate;
+                    // Zaokroženo na cent: drobiž pod pol centa zaradi tečaja ne sme ostati kot "za plačilo".
+                    const totalUnpaidEur = Math.round(Math.max(0, accommodationEur + extrasEur - discountEur - amountPaidEur) * 100) / 100;
                     return totalUnpaidEur > 0 ? (
                       <span className="block text-right">
                         <span className="block text-[9px] uppercase tracking-[0.2em] text-[#8f6d3a]">Za placilo</span>
@@ -6961,6 +6962,7 @@ function GuestCard() {
       setDiscountLabel('');
       setDiscountAmount('');
       await loadDiscounts();
+      refresh();
       setAddingDiscount(false);
     }
 
@@ -6968,6 +6970,7 @@ function GuestCard() {
       const { deleteInvoiceDiscount } = await import("@/app/actions/komba");
       await deleteInvoiceDiscount(id, reservationId);
       await loadDiscounts();
+      refresh();
     }
 
     if (!reservation) return <GlassCard><p className="text-white/40">Ni izbranega gosta.</p></GlassCard>;

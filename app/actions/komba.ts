@@ -799,6 +799,7 @@ export async function getDashboardData(includeReservationId?: string) {
   const allPayments = await db.select().from(payments)
   const allDeliveryNotes = await db.select().from(deliveryNotes)
   const allDeliveryNoteItems = await db.select().from(deliveryNoteItems)
+  const allInvoiceDiscounts = await db.select().from(invoiceDiscounts)
   const rate = await getExchangeRate()
   
   // Fetch additional data needed by frontend
@@ -840,6 +841,7 @@ const allSupplierPayments = await db.select().from(supplierPayments)
     const resDeliveryNoteItems = allDeliveryNoteItems.filter(dni => 
       resDeliveryNotes.some(dn => dn.id === dni.deliveryNoteId)
     )
+    const resDiscounts = allInvoiceDiscounts.filter(d => d.reservationId === res.id)
     
     const arrivalTransfer = resTransfers.find(t => t.type === 'arrival')
     const departureTransfer = resTransfers.find(t => t.type === 'departure')
@@ -919,6 +921,12 @@ const allSupplierPayments = await db.select().from(supplierPayments)
         notes: p.notes
       })),
       deliveryNotesTotal: resDeliveryNotes.reduce((sum, dn) => sum + (dn.totalAr || 0), 0),
+      invoiceDiscounts: resDiscounts.map(d => ({
+        id: d.id,
+        kind: d.kind,
+        label: d.label,
+        amountAr: d.amountAr || 0,
+      })),
       barItems: resDeliveryNoteItems.map(dni => {
         const note = resDeliveryNotes.find(dn => dn.id === dni.deliveryNoteId)
         return {
