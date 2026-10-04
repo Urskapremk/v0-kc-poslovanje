@@ -2,12 +2,13 @@
 
 import { useState } from 'react'
 import useSWR, { mutate } from 'swr'
-import { CalendarPlus, Printer, Trash2, X, Check, Upload, FileText, ChevronDown } from 'lucide-react'
+import { CalendarPlus, Printer, Trash2, X, Check, Upload, FileText, ChevronDown, Pencil } from 'lucide-react'
 import { getAllStaffMembers, setPriorLeaveYear } from '@/app/actions/statistics'
 import { getCompany } from '@/lib/payroll'
 import {
   getLeaveRequests,
   createLeaveRequest,
+  updateLeaveRequest,
   deleteLeaveRequest,
   setLeaveSigned,
   setLeaveSignedDocument,
@@ -69,6 +70,8 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     }
   }
 
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [daysInput, setDaysInput] = useState('1')
   const [form, setForm] = useState({
     staffId: '',
     leaveType: 'annual' as LeaveType,
@@ -83,7 +86,37 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   )
 
   const selectedStaff = deptStaff.find(s => s.id === form.staffId)
-  const days = daysBetween(form.startDate, form.endDate)
+  const calendarDays = daysBetween(form.startDate, form.endDate)
+  const days = Number(daysInput)
+
+  function openNew() {
+    setEditingId(null)
+    const today = todayStr()
+    setForm({ staffId: '', leaveType: 'annual', startDate: today, endDate: today, reason: '' })
+    setDaysInput('1')
+    setShowForm(true)
+  }
+
+  function openEdit(leave: LeaveRequest) {
+    setEditingId(leave.id)
+    setForm({
+      staffId: leave.staffId,
+      leaveType: (leave.leaveType as LeaveType) || 'annual',
+      startDate: String(leave.startDate).slice(0, 10),
+      endDate: String(leave.endDate).slice(0, 10),
+      reason: leave.reason || '',
+    })
+    setDaysInput(String(leave.days ?? daysBetween(leave.startDate, leave.endDate)))
+    setShowForm(true)
+  }
+
+  function changeDates(patch: { startDate?: string; endDate?: string }) {
+    setForm(prev => {
+      const next = { ...prev, ...patch }
+      setDaysInput(String(daysBetween(next.startDate, next.endDate)))
+      return next
+    })
+  }
 
   // Pregled po delavcu
   const viewedStaff = deptStaff.find(s => s.id === selectedStaffId)
@@ -124,10 +157,10 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   if (!availableYears.includes(new Date().getFullYear())) availableYears.unshift(new Date().getFullYear())
 
   async function handleSave() {
-    if (!selectedStaff || days <= 0) return
+    if (!selectedStaff || !(days > 0)) return
     setSaving(true)
     try {
-      await createLeaveRequest({
+      const payload = {
         staffId: selectedStaff.id,
         staffName: selectedStaff.staffName,
         department,
@@ -135,10 +168,15 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
         leaveType: form.leaveType,
         startDate: form.startDate,
         endDate: form.endDate,
+        days,
         reason: form.reason,
-      })
+      }
+      if (editingId) await updateLeaveRequest(editingId, payload)
+      else await createLeaveRequest(payload)
       await mutate(`leaves-${department}`)
+      setEditingId(null)
       setForm({ staffId: '', leaveType: 'annual', startDate: todayStr(), endDate: todayStr(), reason: '' })
+      setDaysInput('1')
       setShowForm(false)
     } catch (e) {
       console.error('[v0] leave save error', e)
@@ -185,7 +223,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
 
       <div className="mt-4 flex justify-end">
         <button
-          onClick={() => setShowForm(v => !v)}
+          onClick={() => (showForm && !editingId ? setShowForm(false) : openNew())}
           className="flex items-center gap-2 rounded-xl bg-[#7fa8b8]/20 px-4 py-2 text-sm font-medium text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/30 transition-colors"
         >
           <CalendarPlus className="h-4 w-4" />
@@ -196,6 +234,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       {/* Obrazec */}
       {showForm && (
         <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
+          <p className="mb-3 text-sm font-medium text-white">{editingId ? 'Popravi dopust' : 'Nov dopust'}</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/40">Delavec</label>
@@ -229,7 +268,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
               <input
                 type="date"
                 value={form.startDate}
-                onChange={e => setForm(p => ({ ...p, startDate: e.target.value }))}
+                onChange={e => changeDates({ startDate: e.target.value })}
                 className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-white focus:border-[#7fa8b8]/40 focus:outline-none"
               />
             </div>
@@ -239,7 +278,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
               <input
                 type="date"
                 value={form.endDate}
-                onChange={e => setForm(p => ({ ...p, endDate: e.target.value }))}
+                onChange={e => changeDates({ endDate: e.target.value })}
                 className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-white focus:border-[#7fa8b8]/40 focus:outline-none"
               />
             </div>
@@ -256,33 +295,42 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between">
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <p className="text-sm text-white/60">
-                Št. dni: <span className="font-medium text-white">{days > 0 ? days : '—'}</span>
-              </p>
+              <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/40">Št. dni</label>
+              <input
+                type="number"
+                min={0.5}
+                step={0.5}
+                value={daysInput}
+                onChange={e => setDaysInput(e.target.value)}
+                className="w-28 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-2 text-sm text-white focus:border-[#7fa8b8]/40 focus:outline-none"
+              />
+              {calendarDays > 0 && calendarDays !== days && (
+                <p className="mt-1 text-[11px] text-white/40">Od datuma do datuma je {calendarDays} dni. Tukaj lahko vpišeš manj, če prosti dnevi ne štejejo.</p>
+              )}
               {!form.staffId && (
                 <p className="mt-1 text-xs text-amber-400/80">Izberi delavca za shranjevanje.</p>
               )}
-              {form.staffId && days <= 0 && (
+              {form.staffId && !(days > 0) && (
                 <p className="mt-1 text-xs text-amber-400/80">
-                  Vnesi veljaven datum &quot;Od&quot; in &quot;Do&quot; (preveri, da datum obstaja).
+                  Vnesi veljaven datum &quot;Od&quot; in &quot;Do&quot; in število dni.
                 </p>
               )}
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setShowForm(false)}
+                onClick={() => { setShowForm(false); setEditingId(null) }}
                 className="flex items-center gap-1 rounded-xl bg-white/5 px-4 py-2 text-sm text-white/60 hover:bg-white/10"
               >
                 <X className="h-4 w-4" /> Prekliči
               </button>
               <button
                 onClick={handleSave}
-                disabled={saving || !form.staffId || days <= 0}
+                disabled={saving || !form.staffId || !(days > 0)}
                 className="flex items-center gap-1 rounded-xl bg-[#7fa8b8] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                <Check className="h-4 w-4" /> {saving ? 'Shranjujem…' : 'Shrani dopust'}
+                <Check className="h-4 w-4" /> {saving ? 'Shranjujem…' : editingId ? 'Shrani popravek' : 'Shrani dopust'}
               </button>
             </div>
           </div>
@@ -433,8 +481,15 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                   {l.signedAt ? ' · izdano' : ''}
                   {l.signedDocumentPath ? ' · podpisano ✓' : ''}
                 </p>
+                {l.reason ? <p className="mt-0.5 text-xs text-white/70">{l.reason}</p> : null}
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <button
+                  onClick={() => openEdit(l)}
+                  className="flex items-center gap-1 rounded-lg bg-[#c59b5b]/15 px-3 py-2 text-xs text-[#c59b5b] hover:bg-[#c59b5b]/25"
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Popravi
+                </button>
                 {l.signedDocumentPath ? (
                   <a
                     href={`/api/image?pathname=${encodeURIComponent(l.signedDocumentPath)}`}

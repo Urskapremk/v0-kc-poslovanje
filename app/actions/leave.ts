@@ -35,16 +35,47 @@ export async function createLeaveRequest(data: {
   leaveType: string
   startDate: string
   endDate: string
+  days?: number
   reason?: string
 }) {
   const id = `leave-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  const days = daysBetween(data.startDate, data.endDate)
+  const counted = daysBetween(data.startDate, data.endDate)
+  const days = data.days && data.days > 0 ? Math.round(data.days * 2) / 2 : counted
   await db.execute(
     sql`INSERT INTO leave_requests (id, "staffId", "staffName", department, company, "leaveType", "startDate", "endDate", days, reason)
         VALUES (${id}, ${data.staffId}, ${data.staffName}, ${data.department}, ${data.company}, ${data.leaveType}, ${data.startDate}, ${data.endDate}, ${days}, ${data.reason ?? ''})`
   )
   revalidatePath('/statistika')
   return { id }
+}
+
+export async function updateLeaveRequest(id: string, data: {
+  staffId: string
+  staffName: string
+  department: string
+  company: string
+  leaveType: string
+  startDate: string
+  endDate: string
+  days: number
+  reason?: string
+}) {
+  const counted = daysBetween(data.startDate, data.endDate)
+  const days = data.days > 0 ? Math.round(data.days * 2) / 2 : counted
+  await db.execute(
+    sql`UPDATE leave_requests SET
+      "staffId" = ${data.staffId},
+      "staffName" = ${data.staffName},
+      department = ${data.department},
+      company = ${data.company},
+      "leaveType" = ${data.leaveType},
+      "startDate" = ${data.startDate},
+      "endDate" = ${data.endDate},
+      days = ${days},
+      reason = ${data.reason ?? ''}
+    WHERE id = ${id}`
+  )
+  revalidatePath('/statistika')
 }
 
 export async function setLeaveSigned(id: string) {
