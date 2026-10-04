@@ -8300,13 +8300,19 @@ function GuestCard() {
   // Same UTC+3 "today" boundary the purchase archive uses, so the current day's
   // trips stay on the Nabava tiles and only move to the archive once the day ends.
   const nabavaToday = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  // Back-dated trips entered today stay on the tile so purchases can still be added to them.
+  // Back-dated Hell-Ville trips entered today stay on the tile so purchases can still be added to them.
   const nabavaCreatedDay = (createdAt: string) =>
     createdAt ? new Date(new Date(createdAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10) : "";
   const nabavaOnTile = (t: { date: string; createdAt: string }) =>
     !t.date || t.date >= nabavaToday || nabavaCreatedDay(t.createdAt) === nabavaToday;
   const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && nabavaOnTile(t));
-  const nabavaKombaList = nabavaList.filter((t) => t.site === "komba" && nabavaOnTile(t));
+  // Komba: a past date does not stay among today's trips. It only shows while that
+  // past day is selected in the form, so the current list does not mix with back-dating.
+  const nabavaKombaCurrent = nabavaList.filter((t) => t.site === "komba" && (!t.date || t.date >= nabavaToday));
+  const nabavaKombaPast = !!nabavaKombaDate && nabavaKombaDate < nabavaToday;
+  const nabavaKombaList = nabavaKombaPast
+    ? nabavaList.filter((t) => t.site === "komba" && t.date === nabavaKombaDate)
+    : nabavaKombaCurrent;
   const reminderDateLabel = (() => {
     const d = new Date(reminderDate + "T00:00:00");
     if (isNaN(d.getTime())) return reminderDate;
@@ -9275,7 +9281,7 @@ function GuestCard() {
             >
               <ShoppingCart className="h-4 w-4" />
               <span className="text-[10px] font-semibold uppercase tracking-[0.2em]">Nabava Komba</span>
-              {nabavaKombaList.length > 0 && <span className="text-sm font-medium">· {nabavaKombaList.length}</span>}
+              {nabavaKombaCurrent.length > 0 && <span className="text-sm font-medium">· {nabavaKombaCurrent.length}</span>}
               <ChevronDown className={`h-4 w-4 transition-transform ${showNabavaKomba ? 'rotate-180' : ''}`} />
             </button>
 
@@ -9459,7 +9465,9 @@ function GuestCard() {
               </div>
 
               {nabavaKombaList.length === 0 ? (
-                <p className="text-white/30 text-xs">Ni vnosov nabave. Dodaj prvo nabavo zgoraj.</p>
+                <p className="text-white/30 text-xs">
+                  {nabavaKombaPast ? "Za ta dan še ni nabave." : "Ni vnosov nabave. Dodaj prvo nabavo zgoraj."}
+                </p>
               ) : (
                 <div className="space-y-3">
                   {nabavaKombaList.map((trip) => (
