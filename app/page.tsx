@@ -2721,6 +2721,11 @@ async function handleCreateReservation() {
             const pickup = pickupPointField || arrivalRouteName.split(' - ')[0]?.trim() || '';
             // Arrival time ("Ura prihoda" = flightTime), shown next to the pickup place.
             const pickupTime = showArrival && hasArrivalTransfer ? (src.transfers?.arrival?.flightTime || '') : '';
+            // "Odhod iz Kombe" — the hour the boat leaves the lodge. Same quiet line as
+            // pickup, sitting under the ship. Once the guest is in house the departure
+            // ship is on the right, so the hour follows it there.
+            const departureTime = hasDepartureTransfer ? (src.transfers?.departure?.time || '').trim() : '';
+            const departureOnRight = !!(showDeparture && departureTime);
             // Day before arrival and the arrival day: the guide's phone and the
             // pickup place/time blink blue, so reception sees who to call and where
             // the boat is without opening the note.
@@ -2728,8 +2733,8 @@ async function handleCreateReservation() {
             const arrivalSoon = showArrival && isDayBeforeOrArrival(arrivalDay, today());
             const guidePhone = arrivalSoon ? guidePhoneFromNotes(src.notes) : null;
 
-            if (!left && !right && !guidePhone && !pickup) return null;
-            return { left, right, pickup, pickupTime, guidePhone, arrivalSoon };
+            if (!left && !right && !guidePhone && !pickup && !departureTime) return null;
+            return { left, right, pickup, pickupTime, guidePhone, arrivalSoon, departureTime, departureOnRight };
           };
           const renderArrivalCallout = (
             indicators: { pickup?: string; pickupTime?: string; guidePhone?: string | null; arrivalSoon?: boolean } | null,
@@ -2760,6 +2765,25 @@ async function handleCreateReservation() {
               <p className="mt-1 pl-[1.25rem] text-[10px] tracking-[0.06em] text-[#2b2622]/60">
                 <span className="text-[#2b2622]/45">Pick up:</span> {indicators.pickup}
                 {indicators.pickupTime && <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{indicators.pickupTime}</span>}
+              </p>
+            );
+          };
+          // Departure hour from the lodge ("Odhod iz Kombe"), same small colour as Pick up.
+          const renderDepartureTime = (
+            indicators: { departureTime?: string } | null,
+            align: 'left' | 'right',
+          ) => {
+            const time = indicators?.departureTime?.trim();
+            if (!time) return null;
+            return (
+              <p
+                className={`mt-1 whitespace-nowrap text-[10px] tracking-[0.06em] text-[#2b2622]/60 ${
+                  align === 'right' ? 'text-right' : 'pl-[1.25rem]'
+                }`}
+                title="Odhod iz Kombe"
+              >
+                <span className="text-[#2b2622]/45">Odhod:</span>
+                <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{time}</span>
               </p>
             );
           };
@@ -2838,13 +2862,17 @@ async function handleCreateReservation() {
                   </div>
                   {indicators && (
                     <>
-                      <div className="mt-2 flex items-center gap-2.5" aria-label="Oznake prevozov in izletov naslednjega gosta">
+                      <div className="mt-2 flex items-start gap-2.5" aria-label="Oznake prevozov in izletov naslednjega gosta">
                         {indicators.left}
                         {indicators.right && (
-                          <div className="ml-auto flex items-center gap-2.5">{indicators.right}</div>
+                          <div className="ml-auto flex flex-col items-end">
+                            <div className="flex items-center justify-end gap-2.5">{indicators.right}</div>
+                            {indicators.departureOnRight ? renderDepartureTime(indicators, 'right') : null}
+                          </div>
                         )}
                       </div>
                       {renderArrivalCallout(indicators)}
+                      {!indicators.departureOnRight ? renderDepartureTime(indicators, 'left') : null}
                     </>
                   )}
                   {/* Reservation notes — same rules as the collapsed NOW row, so notes typed on
@@ -3145,13 +3173,17 @@ async function handleCreateReservation() {
                     When expanded they move down to the action row instead. */}
                 {!isExpanded && transportIndicators && (
                   <>
-                    <div className="mt-2 flex items-center gap-2.5" aria-label="Oznake prevozov in izletov">
+                    <div className="mt-2 flex items-start gap-2.5" aria-label="Oznake prevozov in izletov">
                       {transportIndicators.left}
                       {transportIndicators.right && (
-                        <div className="ml-auto flex items-center gap-2.5">{transportIndicators.right}</div>
+                        <div className="ml-auto flex flex-col items-end">
+                          <div className="flex items-center justify-end gap-2.5">{transportIndicators.right}</div>
+                          {transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'right') : null}
+                        </div>
                       )}
                     </div>
                     {renderArrivalCallout(transportIndicators)}
+                    {!transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'left') : null}
                   </>
                 )}
               </button>
@@ -3176,10 +3208,14 @@ async function handleCreateReservation() {
                       <>
                         {transportIndicators.left}
                         {transportIndicators.right && (
-                          <div className="ml-auto flex items-center gap-2.5" aria-label="Oznake prevozov in izletov">
-                            {transportIndicators.right}
+                          <div className="ml-auto flex flex-col items-end" aria-label="Oznake prevozov in izletov">
+                            <div className="flex items-center justify-end gap-2.5">{transportIndicators.right}</div>
+                            {transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'right') : null}
                           </div>
                         )}
+                        {!transportIndicators.right && !transportIndicators.departureOnRight
+                          ? renderDepartureTime(transportIndicators, 'left')
+                          : null}
                       </>
                     )}
                   </div>
