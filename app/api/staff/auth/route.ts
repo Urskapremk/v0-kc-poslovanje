@@ -3,6 +3,28 @@ import { db } from '@/lib/db'
 import { staff } from '@/lib/db/schema'
 import { eq, and, sql } from 'drizzle-orm'
 
+// Shranjena prijava v baru velja le, dokler je delavec še aktiven.
+export async function GET(request: NextRequest) {
+  const id = request.nextUrl.searchParams.get('id') || ''
+  if (!id) {
+    return NextResponse.json({ error: 'Missing staff' }, { status: 400 })
+  }
+
+  const staffMember = await db.query.staff.findFirst({
+    where: and(eq(staff.id, id), eq(staff.active, true)),
+  })
+
+  if (!staffMember) {
+    return NextResponse.json({ error: 'Inactive' }, { status: 401 })
+  }
+
+  return NextResponse.json({
+    id: staffMember.id,
+    name: staffMember.name,
+    role: staffMember.role,
+  })
+}
+
 export async function POST(request: NextRequest) {
   const { pin } = await request.json()
   

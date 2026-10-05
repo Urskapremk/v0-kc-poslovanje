@@ -739,13 +739,35 @@ export default function StaffPage() {
   const [products, setProducts] = useState<Record<string, Product[]>>({})
   const [loading, setLoading] = useState(true)
 
-  // Check for existing session
+  // Shranjena prijava velja le, dokler je delavec še v baru.
   useEffect(() => {
+    let cancelled = false
     const stored = localStorage.getItem('staffUser')
-    if (stored) {
-      setUser(JSON.parse(stored))
+    if (!stored) {
+      setLoading(false)
+      return
     }
-    setLoading(false)
+    const parsed = JSON.parse(stored) as StaffUser
+    fetch(`/api/staff/auth?id=${encodeURIComponent(parsed.id)}`)
+      .then((res) => {
+        if (cancelled) return
+        if (!res.ok) {
+          localStorage.removeItem('staffUser')
+          setUser(null)
+          return
+        }
+        setUser(parsed)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setUser(parsed)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   // Load bungalows when logged in
