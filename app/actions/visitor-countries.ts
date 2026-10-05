@@ -40,18 +40,39 @@ export type VisitorYear = { year: number; nationalities: VisitorNationality[] }
  */
 export async function getVisitorNationalities(): Promise<VisitorYear[]> {
   const result = await db.execute(sql`
-    WITH slots AS (
-      SELECT arrival,
-             unnest(ARRAY[nationality, "secondNationality", "thirdNationality", "fourthNationality"]) AS nationality
-      FROM reservations
-      WHERE status <> 'CANCELLED' AND "checkedInAt" IS NOT NULL
+    WITH res AS (
+      SELECT r.id,
+             r.arrival,
+             ARRAY_REMOVE(ARRAY[
+               NULLIF(btrim(r.nationality), ''),
+               NULLIF(btrim(r."secondNationality"), ''),
+               NULLIF(btrim(r."thirdNationality"), ''),
+               NULLIF(btrim(r."fourthNationality"), '')
+             ], NULL) AS nats,
+             GREATEST(COALESCE(r.pax, 0), COALESCE(r.adults, 0) + COALESCE(r.children, 0), 1) AS heads,
+             (SELECT NULLIF(btrim(MIN(b.country)), '') FROM bentral_reservations b
+               WHERE lower(btrim(b."guestName")) = lower(btrim(r."guestName"))) AS bentral_country
+      FROM reservations r
+      WHERE r.status <> 'CANCELLED' AND r."checkedInAt" IS NOT NULL
+    ),
+    -- The police form often lists only the lead guest's nationality; the rest of the
+    -- party (pax) are counted under that first nationality so guests match nočitve.
+    -- Without any nationality, the Bentral booking country stands in.
+    slots AS (
+      SELECT arrival, n.nationality,
+             CASE WHEN n.ord = 1 THEN GREATEST(heads - cardinality(nats), 0) + 1 ELSE 1 END AS guests
+      FROM res, unnest(nats) WITH ORDINALITY AS n(nationality, ord)
+      WHERE cardinality(nats) > 0
+      UNION ALL
+      SELECT arrival, bentral_country, heads
+      FROM res
+      WHERE cardinality(nats) = 0 AND bentral_country IS NOT NULL
     ),
     entered AS (
       SELECT EXTRACT(YEAR FROM arrival)::int AS year,
-             btrim(nationality) AS nationality,
-             COUNT(*)::int AS guests
+             nationality,
+             SUM(guests)::int AS guests
       FROM slots
-      WHERE nationality IS NOT NULL AND btrim(nationality) <> ''
       GROUP BY 1, 2
     ),
     bentral_rows AS (
