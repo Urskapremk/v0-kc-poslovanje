@@ -134,10 +134,10 @@ function excursionColor(name: string): string {
   if (/lokobe/.test(n)) return "#7a4a28";
   if (/mangrove/.test(n)) return "#5c6824";
   if (/fahily/.test(n)) return "#8a3d78";
-  if (/komba|boabab|baobab/.test(n)) return "#8a5a18";
+  if (/komba|boabab|baobab/.test(n)) return "#e23b2a";
   let hash = 0;
   for (let i = 0; i < n.length; i++) hash = (hash * 31 + n.charCodeAt(i)) >>> 0;
-  return ["#6d4c86", "#2a6494", "#0f7a72", "#9a3f5c", "#8a5a18", "#3d4f9a"][hash % 6];
+  return ["#6d4c86", "#2a6494", "#0f7a72", "#9a3f5c", "#e23b2a", "#3d4f9a"][hash % 6];
 }
 const num = (value: unknown) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 const eur = (value: unknown) => `${num(value).toFixed(2)} EUR`;
