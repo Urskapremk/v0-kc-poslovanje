@@ -958,6 +958,18 @@ function StatistikaContent() {
             </div>
           )}
 
+          {/* HRANA ZA ŠTUDENTE — samostojen strošek, ne kuhinja */}
+          {((stats.costs as { hranaStudenti?: number }).hranaStudenti || 0) > 0 && (
+            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+              <h2 className="text-base sm:text-lg font-bold text-[#c46a3a] mb-4">HRANA ZA ŠTUDENTE</h2>
+              <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni kuhinje ali drugih oddelkov, znižuje skupni poslovni rezultat.</p>
+              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
+                <span className="text-white/50">Hrana za študente (gotovina)</span>
+                <span className="text-[#c46a3a] font-bold">{formatEur((stats.costs as { hranaStudenti?: number }).hranaStudenti || 0)}</span>
+              </div>
+            </div>
+          )}
+
           {/* NOSAČI IN TUC TUC — vsak svoj samostojen strošek */}
           {(((stats.costs as { porters?: number }).porters || 0) > 0 || ((stats.costs as { tuctuc?: number }).tuctuc || 0) > 0) && (
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">

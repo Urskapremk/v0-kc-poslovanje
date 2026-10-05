@@ -68,7 +68,8 @@ const WIP_CAT = "sredstvo_v_izdelavi"
 const RENT_CAT = "najemnina"
 const IZLET_CAT = "izlet"
 const STIPEND_CAT = "stipendija"
-type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina" | "izlet" | "stipendija"
+const STUDENT_FOOD_CAT = "hrana_studenti"
+type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina" | "izlet" | "stipendija" | "hrana_studenti"
 
 async function syncWipCost(purchaseId: string, category: NabavaCat, assetId: string, date: string, name: string, amountAr: number) {
   const { upsertNabavaAssetCost, removeNabavaAssetCost } = await import("./statistics")
@@ -90,6 +91,7 @@ function normCategory(c: string): NabavaCat {
   if (c === RENT_CAT) return RENT_CAT
   if (c === IZLET_CAT) return IZLET_CAT
   if (c === STIPEND_CAT) return STIPEND_CAT
+  if (c === STUDENT_FOOD_CAT) return STUDENT_FOOD_CAT
   return STROSEK_CATEGORIES.includes(c as StrosekCategory) ? (c as StrosekCategory) : "kuhinja"
 }
 
