@@ -2695,53 +2695,59 @@ async function handleCreateReservation() {
               )
             ) : null;
 
+            const excursionMarks = hasExcursion ? (
+              <span className="flex flex-col items-end gap-0.5">
+                {shownExcursions.map(ex => {
+                  const day = String(ex.date || "").slice(0, 10);
+                  const isToday = day === todayStr;
+                  const name = excursionNameOf(ex.excursionId);
+                  const dateLabel = excursionDayLabel(ex.date);
+                  return (
+                    <span
+                      key={ex.id}
+                      className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em] text-[#14567a]"
+                      title={isToday ? `${name} je danes` : name}
+                    >
+                      <span className="max-w-[9rem] truncate">{name}</span>
+                      {dateLabel && (
+                        <span className="font-normal tabular-nums text-[#14567a]/70">{dateLabel}</span>
+                      )}
+                      <Palmtree className={`h-3.5 w-3.5 shrink-0${isToday ? " animate-palm-sway" : ""}`} />
+                    </span>
+                  );
+                })}
+              </span>
+            ) : null;
+
+            // Excursion sits above the departure. The boat and the "Odhod" hour stay
+            // underneath the palm, on the right.
             const right =
               settledLabel || noTransferNeeded || departure || hasHerman || hasExcursion ? (
-                <>
-                  {settledLabel && (
-                    <span
-                      className="whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.16em] text-[#4f7a54]"
-                      title="Prevoz je poravnan"
-                    >
-                      {settledLabel}
+                <span className="flex flex-col items-end gap-0.5">
+                  {excursionMarks}
+                  {(settledLabel || noTransferNeeded || departure || hasHerman) && (
+                    <span className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
+                      {settledLabel && (
+                        <span
+                          className="whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.16em] text-[#4f7a54]"
+                          title="Prevoz je poravnan"
+                        >
+                          {settledLabel}
+                        </span>
+                      )}
+                      {noTransferNeeded && (
+                        <div className="relative" title="Ne potrebuje prevoza">
+                          <Ship className="h-4 w-4 text-[#2b2622]/55" />
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-5 h-0.5 bg-[#2b2622]/70 rotate-[-45deg]" />
+                          </div>
+                        </div>
+                      )}
+                      {departure}
+                      {hasHerman && <Car className="h-3.5 w-3.5 text-[#2b2622]/40" title="Prevoz s Hermanom (avto do Porta)" />}
                     </span>
                   )}
-                  {noTransferNeeded && (
-                    <div className="relative" title="Ne potrebuje prevoza">
-                      <Ship className="h-4 w-4 text-[#2b2622]/55" />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-5 h-0.5 bg-[#2b2622]/70 rotate-[-45deg]" />
-                      </div>
-                    </div>
-                  )}
-                  {departure}
-                  {hasHerman && <Car className="h-3.5 w-3.5 text-[#2b2622]/40" title="Prevoz s Hermanom (avto do Porta)" />}
-                  {/* Name and date sit beside the palm, same small size as Odhod / Prihod,
-                      and the palm keeps the right edge the way the ship does. */}
-                  {hasExcursion && (
-                    <span className="flex flex-col items-end gap-0.5">
-                      {shownExcursions.map(ex => {
-                        const day = String(ex.date || "").slice(0, 10);
-                        const isToday = day === todayStr;
-                        const name = excursionNameOf(ex.excursionId);
-                        const dateLabel = excursionDayLabel(ex.date);
-                        return (
-                          <span
-                            key={ex.id}
-                            className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em] text-[#14567a]"
-                            title={isToday ? `${name} je danes` : name}
-                          >
-                            <span className="max-w-[9rem] truncate">{name}</span>
-                            {dateLabel && (
-                              <span className="font-normal tabular-nums text-[#14567a]/70">{dateLabel}</span>
-                            )}
-                            <Palmtree className={`h-3.5 w-3.5 shrink-0${isToday ? " animate-palm-sway" : ""}`} />
-                          </span>
-                        );
-                      })}
-                    </span>
-                  )}
-                </>
+                </span>
               ) : null;
 
             // Pickup location for the arrival leg — origin of the route name (before " - "),
