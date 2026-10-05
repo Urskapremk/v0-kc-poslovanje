@@ -2723,10 +2723,10 @@ async function handleCreateReservation() {
             // underneath the palm, on the right.
             const right =
               settledLabel || noTransferNeeded || departure || hasHerman || hasExcursion ? (
-                <span className="flex flex-col items-end gap-0.5">
+                <span className="flex flex-col items-end">
                   {excursionMarks}
                   {(settledLabel || noTransferNeeded || departure || hasHerman) && (
-                    <span className="flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1">
+                    <span className={`flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1${hasExcursion ? " mt-2.5" : ""}`}>
                       {settledLabel && (
                         <span
                           className="whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.16em] text-[#4f7a54]"
