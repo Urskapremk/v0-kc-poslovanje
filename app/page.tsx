@@ -2705,12 +2705,12 @@ async function handleCreateReservation() {
                   return (
                     <span
                       key={ex.id}
-                      className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em] text-[#14567a]"
+                      className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em] text-[#6d4c86]"
                       title={isToday ? `${name} je danes` : name}
                     >
                       <span className="max-w-[9rem] truncate">{name}</span>
                       {dateLabel && (
-                        <span className="font-normal tabular-nums text-[#14567a]/70">{dateLabel}</span>
+                        <span className="font-normal tabular-nums text-[#6d4c86]/75">{dateLabel}</span>
                       )}
                       <Palmtree className={`h-3.5 w-3.5 shrink-0${isToday ? " animate-palm-sway" : ""}`} />
                     </span>
