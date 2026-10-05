@@ -68,6 +68,14 @@ function formatEur(value: number) {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value)
 }
 
+type StaffKind = 'all' | 'regular' | 'contract' | 'stagiaire'
+
+function staffKindOf(staff: { isRegularEmployee: boolean; employmentType: string }): Exclude<StaffKind, 'all'> {
+  if (staff.isRegularEmployee) return 'regular'
+  if (staff.employmentType === 'stagiaire') return 'stagiaire'
+  return 'contract'
+}
+
 type Tab = 'kalkulacije' | 'kadri'
 type KalkulacijeView = 'pregled' | 'nastavitve' | 'prevozniki' | 'marketing' | 'finance'
 type FinanceView = 'banka' | 'orange' | 'dnevnik'
@@ -98,6 +106,7 @@ function StatistikaContent() {
   // Quarter to open the payroll module on, set when coming from a deadline alert.
   const [placeQuarter, setPlaceQuarter] = useState<number | null>(null)
   const [staffSearch, setStaffSearch] = useState('')
+  const [staffKind, setStaffKind] = useState<StaffKind>('all')
   const [editingStaff, setEditingStaff] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({
     staffType: 'other',
@@ -1422,8 +1431,8 @@ function StatistikaContent() {
                 Definirajte osebje in njihove mesečne plače. Plače se bodo avtomatsko upoštevale v statistiki glede na razporeditev (nočitve, bar, management).
               </p>
 
-              {/* Search by name */}
-              <div className="relative mb-6">
+              {/* Search by name, then by employment kind. */}
+              <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/30" />
                 <input
                   type="text"
@@ -1442,11 +1451,47 @@ function StatistikaContent() {
                   </button>
                 )}
               </div>
+
+              <div className="mb-6 flex flex-wrap gap-2">
+                {([
+                  { id: 'all', label: 'Vsi' },
+                  { id: 'regular', label: 'Redno zaposleni' },
+                  { id: 'contract', label: 'Pogodbeni' },
+                  { id: 'stagiaire', label: 'Študenti' },
+                ] as const).map((kind) => {
+                  const count = (allStaff || []).filter((s) => kind.id === 'all' || staffKindOf(s) === kind.id).length
+                  const on = staffKind === kind.id
+                  const tone =
+                    kind.id === 'regular'
+                      ? on
+                        ? 'bg-[#7fa8b8]/25 text-[#7fa8b8] border-[#7fa8b8]/50'
+                        : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+                      : kind.id === 'stagiaire'
+                        ? on
+                          ? 'bg-[#c59b5b]/25 text-[#c59b5b] border-[#c59b5b]/50'
+                          : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+                        : on
+                          ? 'bg-[#8fae92]/25 text-[#8fae92] border-[#8fae92]/50'
+                          : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+                  return (
+                    <button
+                      key={kind.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setStaffKind(kind.id)}
+                      className={`rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${tone}`}
+                    >
+                      {kind.label} <span className="opacity-70">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
               
               {/* Staff List */}
               <div className="space-y-3 mb-6">
                 {allStaff?.slice().filter(staff =>
-                  staff.staffName.toLowerCase().includes(staffSearch.trim().toLowerCase())
+                  staff.staffName.toLowerCase().includes(staffSearch.trim().toLowerCase()) &&
+                  (staffKind === 'all' || staffKindOf(staff) === staffKind)
                 ).sort((a, b) => {
                   // Sort inactive to bottom, then by category, then by name
                   if ((a.active !== false) !== (b.active !== false)) return (a.active !== false) ? -1 : 1
@@ -1817,10 +1862,15 @@ function StatistikaContent() {
                   </div>
                 )}
 
-                {allStaff && allStaff.length > 0 && staffSearch.trim() &&
-                  allStaff.filter(s => s.staffName.toLowerCase().includes(staffSearch.trim().toLowerCase())).length === 0 && (
+                {allStaff && allStaff.length > 0 &&
+                  allStaff.filter(s =>
+                    s.staffName.toLowerCase().includes(staffSearch.trim().toLowerCase()) &&
+                    (staffKind === 'all' || staffKindOf(s) === staffKind)
+                  ).length === 0 && (
                   <div className="text-center py-8 text-white/40">
-                    Ni zadetkov za &quot;{staffSearch}&quot;.
+                    {staffSearch.trim()
+                      ? `Ni zadetkov za "${staffSearch}".`
+                      : 'V tej skupini ni nikogar.'}
                   </div>
                 )}
               </div>
