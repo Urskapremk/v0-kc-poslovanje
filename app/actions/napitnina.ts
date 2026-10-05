@@ -1,8 +1,56 @@
 'use server'
 
 import { db } from '@/lib/db'
-import { sql } from 'drizzle-orm'
+import { settings } from '@/lib/db/schema'
+import { sql, eq } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
+
+export type NapitninaDraft = {
+  amounts: Record<string, string>
+  removed: string[]
+  present: string[]
+  upToDate: string
+}
+
+function draftKey(year: number, month: number) {
+  return `napitnina-list-${year}-${month}`
+}
+
+// Shranjena razdelitev za mesec: zneski, kdo je odstranjen, kdo je bil pri štetju.
+export async function getNapitninaDraft(year: number, month: number): Promise<NapitninaDraft | null> {
+  const rows = await db.select().from(settings).where(eq(settings.key, draftKey(year, month))).limit(1)
+  if (!rows[0]?.value) return null
+  try {
+    const parsed = JSON.parse(rows[0].value) as Partial<NapitninaDraft>
+    return {
+      amounts: parsed.amounts && typeof parsed.amounts === 'object' ? parsed.amounts : {},
+      removed: Array.isArray(parsed.removed) ? parsed.removed.filter((id) => typeof id === 'string') : [],
+      present: Array.isArray(parsed.present) ? parsed.present.filter((id) => typeof id === 'string') : [],
+      upToDate: typeof parsed.upToDate === 'string' ? parsed.upToDate : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function saveNapitninaDraft(year: number, month: number, draft: NapitninaDraft) {
+  const key = draftKey(year, month)
+  const value = JSON.stringify({
+    amounts: draft.amounts || {},
+    removed: draft.removed || [],
+    present: draft.present || [],
+    upToDate: draft.upToDate || '',
+  })
+  await db
+    .insert(settings)
+    .values({ id: `set-${key}`, key, value })
+    .onConflictDoUpdate({
+      target: settings.key,
+      set: { value, updatedAt: new Date() },
+    })
+  revalidatePath('/statistika')
+  return { ok: true }
+}
 
 export type NapitninaDocument = {
   id: string

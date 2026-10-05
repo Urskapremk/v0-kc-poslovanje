@@ -1,8 +1,8 @@
 'use client'
 
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
-import { Coins, Printer, X, RotateCcw, Users, Upload, FileText, Trash2, Paperclip } from 'lucide-react'
+import { Coins, Printer, X, RotateCcw, Users, Upload, FileText, Trash2, Paperclip, Save } from 'lucide-react'
 import { getAllStaffMembers } from '@/app/actions/statistics'
 import { getMgCompany } from '@/lib/payroll-mg'
 import { buildNapitninaHtml, type NapitninaRow } from '@/lib/napitnina-doc'
@@ -10,6 +10,8 @@ import {
   getNapitninaDocuments,
   addNapitninaDocument,
   deleteNapitninaDocument,
+  getNapitninaDraft,
+  saveNapitninaDraft,
 } from '@/app/actions/napitnina'
 
 const MONTHS_SL = [
@@ -42,6 +44,13 @@ function fmtAr(v: number): string {
   return Math.round(v).toLocaleString('sl-SI') + ' Ar'
 }
 
+function peopleLabel(n: number): string {
+  if (n === 1) return '1 oseba'
+  if (n === 2) return '2 osebi'
+  if (n === 3 || n === 4) return `${n} osebe`
+  return `${n} oseb`
+}
+
 export default function NapitninaTab({ year, month }: { year: number; month: number }) {
   const { data: staff } = useSWR('all-staff-members', getAllStaffMembers)
 
@@ -61,6 +70,29 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
   const [bulkAmount, setBulkAmount] = useState('180.000')
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [savedFlash, setSavedFlash] = useState(false)
+  const loadedDraft = useRef<string | null>(null)
+  const dirty = useRef(false)
+
+  const draftKey = `napitnina-draft-${year}-${month}`
+  const { data: draft, mutate: mutateDraft } = useSWR(draftKey, () => getNapitninaDraft(year, month))
+
+  useEffect(() => {
+    loadedDraft.current = null
+    dirty.current = false
+  }, [year, month])
+
+  useEffect(() => {
+    const key = `${year}-${month}`
+    if (draft === undefined || loadedDraft.current === key) return
+    loadedDraft.current = key
+    if (!draft || dirty.current) return
+    setAmounts(draft.amounts || {})
+    setRemoved(new Set(draft.removed || []))
+    setPresent(new Set(draft.present || []))
+    setUpToDate(draft.upToDate || '')
+  }, [draft, year, month])
 
   async function handleUploadDocument(file: File) {
     setUploadingDoc(true)
@@ -116,6 +148,8 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
   )
 
   function toggleRemoved(id: string) {
+    dirty.current = true
+    setSavedFlash(false)
     setRemoved((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
@@ -123,6 +157,8 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
     })
   }
   function togglePresent(id: string) {
+    dirty.current = true
+    setSavedFlash(false)
     setPresent((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
@@ -131,6 +167,7 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
   }
   // Izpolni znesek pri vseh zaposlenih na seznamu z isto vrednostjo.
   function fillAll(amountAr: number) {
+    dirty.current = true
     setAmounts((prev) => {
       const next = { ...prev }
       listStaff.forEach((s) => {
@@ -143,6 +180,29 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
     const digits = bulkAmount.replace(/[^\d]/g, '')
     if (!digits) return
     fillAll(Number(digits))
+    setSavedFlash(false)
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    setSavedFlash(false)
+    try {
+      const saved = {
+        amounts,
+        removed: [...removed],
+        present: [...present],
+        upToDate,
+      }
+      await saveNapitninaDraft(year, month, saved)
+      await mutateDraft(saved, false)
+      dirty.current = false
+      setSavedFlash(true)
+    } catch (e) {
+      console.error('[v0] napitnina save error:', e)
+      alert('Shranjevanje ni uspelo. Poskusi znova.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function handlePrint() {
@@ -211,7 +271,7 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
           <div>
             <h2 className="text-lg font-semibold text-white">Napitnina – razdelitev</h2>
             <p className="text-xs text-white/40">
-              Obdobje: {MONTHS_SL[(month - 1) % 12]} {year} · vpiši znesek pri vsakem zaposlenem
+              Obdobje: {MONTHS_SL[(month - 1) % 12]} {year} · na seznamu {peopleLabel(listStaff.length)}
             </p>
           </div>
         </div>
@@ -221,10 +281,23 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
             <input
               type="date"
               value={upToDate}
-              onChange={(e) => setUpToDate(e.target.value)}
+              onChange={(e) => {
+                dirty.current = true
+                setSavedFlash(false)
+                setUpToDate(e.target.value)
+              }}
               className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm text-white [color-scheme:dark] focus:border-[#c59b5b]/50 focus:outline-none"
             />
           </label>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || listStaff.length === 0}
+            className="flex items-center gap-2 rounded-xl bg-[#c59b5b] px-4 py-2 text-sm font-medium text-[#0a2029] transition-colors hover:bg-[#d4b074] disabled:opacity-40"
+          >
+            <Save className="h-4 w-4" />
+            {saving ? 'Shranjujem…' : savedFlash ? 'Shranjeno' : 'Shrani'}
+          </button>
           <button
             onClick={handlePrint}
             disabled={printing || listStaff.length === 0}
@@ -239,7 +312,9 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
       {/* Seznam zaposlenih z zneski */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
-          <span className="text-[11px] uppercase tracking-wide text-white/40">Zaposleni</span>
+          <span className="text-[11px] uppercase tracking-wide text-white/40">
+            Zaposleni · {peopleLabel(listStaff.length)}
+          </span>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1.5">
               <span className="text-[11px] uppercase tracking-wide text-white/40">Vsem</span>
@@ -294,7 +369,11 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
                 placeholder="0"
                 className={inputCls}
                 value={amounts[s.id] ?? ''}
-                onChange={(e) => setAmounts((prev) => ({ ...prev, [s.id]: e.target.value }))}
+                onChange={(e) => {
+                  dirty.current = true
+                  setSavedFlash(false)
+                  setAmounts((prev) => ({ ...prev, [s.id]: e.target.value }))
+                }}
               />
             </div>
           ))}
@@ -304,8 +383,10 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
         </div>
 
         {/* Skupaj */}
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-[#c59b5b]/10 px-4 py-3">
-          <span className="text-sm font-medium uppercase tracking-wide text-[#c59b5b]">Skupaj razdeljeno</span>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[#c59b5b]/10 px-4 py-3">
+          <span className="text-sm font-medium uppercase tracking-wide text-[#c59b5b]">
+            Skupaj razdeljeno · {peopleLabel(listStaff.length)}
+          </span>
           <span className="text-base font-semibold tabular-nums text-white">{fmtAr(total)}</span>
         </div>
       </div>
