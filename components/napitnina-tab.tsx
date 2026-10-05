@@ -57,6 +57,8 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
   const [present, setPresent] = useState<Set<string>>(new Set())
   const [upToDate, setUpToDate] = useState('')
   const [printing, setPrinting] = useState(false)
+  // Znesek, ki ga vpiše vsem na seznamu. Privzeto 180.000 Ar, lahko pa ga spremeni.
+  const [bulkAmount, setBulkAmount] = useState('180.000')
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null)
 
@@ -136,6 +138,11 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
       })
       return next
     })
+  }
+  function applyBulk() {
+    const digits = bulkAmount.replace(/[^\d]/g, '')
+    if (!digits) return
+    fillAll(Number(digits))
   }
 
   async function handlePrint() {
@@ -231,16 +238,34 @@ export default function NapitninaTab({ year, month }: { year: number; month: num
 
       {/* Seznam zaposlenih z zneski */}
       <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4">
-        <div className="mb-2 flex items-center justify-between px-1">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
           <span className="text-[11px] uppercase tracking-wide text-white/40">Zaposleni</span>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5">
+              <span className="text-[11px] uppercase tracking-wide text-white/40">Vsem</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={bulkAmount}
+                onChange={(e) => setBulkAmount(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    applyBulk()
+                  }
+                }}
+                aria-label="Znesek napitnine za vse, v ariarijih"
+                className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-right text-xs tabular-nums text-white placeholder:text-white/25 focus:border-[#c59b5b]/50 focus:outline-none"
+              />
+              <span className="text-[11px] text-white/40">Ar</span>
+            </label>
             <button
               type="button"
-              onClick={() => fillAll(180000)}
-              disabled={listStaff.length === 0}
+              onClick={applyBulk}
+              disabled={listStaff.length === 0 || !bulkAmount.replace(/[^\d]/g, '')}
               className="rounded-lg border border-[#c59b5b]/25 bg-[#c59b5b]/10 px-2.5 py-1 text-[11px] font-medium text-[#c59b5b] transition-colors hover:bg-[#c59b5b]/20 disabled:opacity-40"
             >
-              Vsem 180.000 Ar
+              Vpiši vsem
             </button>
             <span className="text-[11px] uppercase tracking-wide text-white/40">Znesek napitnine (Ar)</span>
           </div>
