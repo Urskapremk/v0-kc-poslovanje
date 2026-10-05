@@ -121,6 +121,24 @@ const CHECKIN_EXTRA_FIELDS: { key: CheckinGuestField; label: string; type: "text
 ];
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+// Same trip keeps the same colour on every card, so two bookings on one
+// bungalow never share a hue. The palm inherits the colour of its line.
+function excursionColor(name: string): string {
+  const n = name.toLowerCase();
+  if (/iranja/.test(n)) return "#6d4c86";
+  if (/tanikely/.test(n) && /sakatia/.test(n)) return "#9a3f5c";
+  if (/sakatia/.test(n)) return "#2a6494";
+  if (/tanikely/.test(n)) return "#0f7a72";
+  if (/maki/.test(n)) return "#3d4f9a";
+  if (/lokobe/.test(n)) return "#7a4a28";
+  if (/mangrove/.test(n)) return "#5c6824";
+  if (/fahily/.test(n)) return "#8a3d78";
+  if (/komba|boabab|baobab/.test(n)) return "#8a5a18";
+  let hash = 0;
+  for (let i = 0; i < n.length; i++) hash = (hash * 31 + n.charCodeAt(i)) >>> 0;
+  return ["#6d4c86", "#2a6494", "#0f7a72", "#9a3f5c", "#8a5a18", "#3d4f9a"][hash % 6];
+}
 const num = (value: unknown) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 const eur = (value: unknown) => `${num(value).toFixed(2)} EUR`;
 const ar = (value: unknown) => `${Math.round(num(value)).toLocaleString("de-DE")} Ar`;
@@ -2702,15 +2720,17 @@ async function handleCreateReservation() {
                   const isToday = day === todayStr;
                   const name = excursionNameOf(ex.excursionId);
                   const dateLabel = excursionDayLabel(ex.date);
+                  const color = excursionColor(name);
                   return (
                     <span
                       key={ex.id}
-                      className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em] text-[#6d4c86]"
+                      className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em]"
+                      style={{ color }}
                       title={isToday ? `${name} je danes` : name}
                     >
                       <span className="max-w-[9rem] truncate">{name}</span>
                       {dateLabel && (
-                        <span className="font-normal tabular-nums text-[#6d4c86]/75">{dateLabel}</span>
+                        <span className="font-normal tabular-nums opacity-75">{dateLabel}</span>
                       )}
                       <Palmtree className={`h-3.5 w-3.5 shrink-0${isToday ? " animate-palm-sway" : ""}`} />
                     </span>
