@@ -2580,14 +2580,34 @@ async function handleCreateReservation() {
             const noTransferNeeded = (src as { noTransferNeeded?: boolean }).noTransferNeeded;
             const arrivalHasCar = !!src.transfers?.arrival?.hermanRouteId;
             const hasHerman = src.transfers?.departure?.hermanRouteId || (arrivalHasCar && !src.transfers?.arrival?.route);
-            const hasExcursion = (src.excursions?.length || 0) > 0;
-            // Same rule as the boat and the arrival hour: a booked excursion is quiet
-            // reference, today's excursion is the job in front of reception. The column
-            // is a plain `date`, so the day is compared as text — never via new Date(),
-            // which would shift the day in our timezone.
-            const excursionToday = (src.excursions || []).some(
-              e => String(e.date || "").slice(0, 10) === today()
-            );
+            // Booked excursions for this guest. Cancelled ones are gone. Upcoming and
+            // today's trips are what reception still has to run; if every trip is already
+            // past, the latest one still labels the palm so the marker is never nameless.
+            // The date column is plain text — compared as text, never via new Date().
+            const excursionNameOf = (id: string) =>
+              (dbExcursions as { id: string; name: string }[]).find(e => e.id === id)?.name?.trim() || "Izlet";
+            const excursionDayLabel = (iso?: string | null) => {
+              const day = String(iso || "").slice(0, 10);
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "";
+              return new Date(`${day}T00:00:00Z`).toLocaleDateString("sl-SI", {
+                day: "numeric",
+                month: "short",
+                timeZone: "UTC",
+              });
+            };
+            const todayStr = today();
+            const activeExcursions = (src.excursions || []).filter(e => e.status !== "CANCELLED");
+            const upcomingExcursions = activeExcursions
+              .filter(e => {
+                const day = String(e.date || "").slice(0, 10);
+                return !day || day >= todayStr;
+              })
+              .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+            const shownExcursions = (upcomingExcursions.length > 0
+              ? upcomingExcursions
+              : [...activeExcursions].sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))).slice(0, 1)
+            ).slice(0, 3);
+            const hasExcursion = shownExcursions.length > 0;
             // Nothing left to collect for the transfer? Say so in words before the boat,
             // so it reads at a glance without opening the card.
             const bookedTransfers = [src.transfers?.arrival, src.transfers?.departure].filter(
@@ -2696,13 +2716,30 @@ async function handleCreateReservation() {
                   )}
                   {departure}
                   {hasHerman && <Car className="h-3.5 w-3.5 text-[#2b2622]/40" title="Prevoz s Hermanom (avto do Porta)" />}
-                  {/* Darker blue on request. Deepened but kept saturated: the muted
-                      navy tint reads grey-teal next to the sage ship at this size. */}
+                  {/* Name and date sit beside the palm, same small size as Odhod / Prihod,
+                      and the palm keeps the right edge the way the ship does. */}
                   {hasExcursion && (
-                    <Palmtree
-                      className={`h-3.5 w-3.5 text-[#14567a]${excursionToday ? " animate-palm-sway" : ""}`}
-                      title={excursionToday ? "Izlet je danes" : "Naročen izlet"}
-                    />
+                    <span className="flex flex-col items-end gap-0.5">
+                      {shownExcursions.map(ex => {
+                        const day = String(ex.date || "").slice(0, 10);
+                        const isToday = day === todayStr;
+                        const name = excursionNameOf(ex.excursionId);
+                        const dateLabel = excursionDayLabel(ex.date);
+                        return (
+                          <span
+                            key={ex.id}
+                            className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em] text-[#14567a]"
+                            title={isToday ? `${name} je danes` : name}
+                          >
+                            <span className="max-w-[9rem] truncate">{name}</span>
+                            {dateLabel && (
+                              <span className="font-normal tabular-nums text-[#14567a]/70">{dateLabel}</span>
+                            )}
+                            <Palmtree className={`h-3.5 w-3.5 shrink-0${isToday ? " animate-palm-sway" : ""}`} />
+                          </span>
+                        );
+                      })}
+                    </span>
                   )}
                 </>
               ) : null;
@@ -2866,7 +2903,7 @@ async function handleCreateReservation() {
                         {indicators.left}
                         {indicators.right && (
                           <div className="ml-auto flex flex-col items-end">
-                            <div className="flex items-center justify-end gap-2.5">{indicators.right}</div>
+                            <div className="flex flex-wrap items-start justify-end gap-x-2.5 gap-y-1">{indicators.right}</div>
                             {indicators.departureOnRight ? renderDepartureTime(indicators, 'right') : null}
                           </div>
                         )}
@@ -3177,7 +3214,7 @@ async function handleCreateReservation() {
                       {transportIndicators.left}
                       {transportIndicators.right && (
                         <div className="ml-auto flex flex-col items-end">
-                          <div className="flex items-center justify-end gap-2.5">{transportIndicators.right}</div>
+                          <div className="flex flex-wrap items-start justify-end gap-x-2.5 gap-y-1">{transportIndicators.right}</div>
                           {transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'right') : null}
                         </div>
                       )}
@@ -3209,7 +3246,7 @@ async function handleCreateReservation() {
                         {transportIndicators.left}
                         {transportIndicators.right && (
                           <div className="ml-auto flex flex-col items-end" aria-label="Oznake prevozov in izletov">
-                            <div className="flex items-center justify-end gap-2.5">{transportIndicators.right}</div>
+                            <div className="flex flex-wrap items-start justify-end gap-x-2.5 gap-y-1">{transportIndicators.right}</div>
                             {transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'right') : null}
                           </div>
                         )}
