@@ -2243,6 +2243,7 @@ async function handleCreateReservation() {
   await addOrderItem(reservation.id, orderDraft);
   setOrderDraft(prev => ({ name: "", category: prev.category, qty: 1, priceAr: 0, eventDate: prev.eventDate }));
     refresh();
+    await mutate((key) => key === "nabava-trips" || (Array.isArray(key) && key[0] === "nabava-purchases"));
     setSaving(false);
   }
 
@@ -2258,6 +2259,7 @@ async function handleCreateReservation() {
         }
       } else {
         await deleteOrderItem(item.id);
+        await mutate((key) => key === "nabava-trips" || (Array.isArray(key) && key[0] === "nabava-purchases"));
       }
       refresh();
     } catch {
@@ -2335,6 +2337,7 @@ async function handleCreateReservation() {
     setSaving(true);
     try {
       await updateOrderItemDate(itemId, dateEditVal);
+      await mutate((key) => key === "nabava-trips" || (Array.isArray(key) && key[0] === "nabava-purchases"));
       setDateEditItem(null);
       setDateEditVal("");
       refresh();
@@ -9589,7 +9592,7 @@ function GuestCard() {
               ) : (
                 <div className="space-y-3">
                   {nabavaKombaList.map((trip) => (
-                    <div key={trip.id} className="rounded-xl border border-[#8fae92]/15 bg-[#f7f2e7] p-3">
+                    <div key={trip.id} className={`rounded-xl border p-3 ${trip.note === "Masaže" ? "border-[#7a4ea3]/50 bg-[#f4eef8]" : "border-[#8fae92]/15 bg-[#f7f2e7]"}`}>
                       {nabavaEditId === trip.id ? (
                         <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center">
                           <input type="date" value={nabavaEditDate} onChange={e => setNabavaEditDate(e.target.value)}
@@ -9609,7 +9612,14 @@ function GuestCard() {
                             <p className="text-[11px] font-semibold text-[#4f7a54]">
                               {trip.date ? new Date(trip.date + 'T00:00:00').toLocaleDateString('sl-SI', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : ''}
                             </p>
-                            {trip.note && <p className="text-[11px] text-[#2b2622]/70">{trip.note}</p>}
+                            {trip.note && (
+                              <p className={`text-[11px] ${trip.note === "Masaže" ? "font-semibold text-[#7a4ea3]" : "text-[#2b2622]/70"}`}>
+                                {trip.note}
+                                {trip.note === "Masaže" && (
+                                  <span className="ml-1.5 rounded-full bg-[#7a4ea3]/15 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#7a4ea3]">Samodejno</span>
+                                )}
+                              </p>
+                            )}
                           </div>
                           <div className="flex shrink-0 gap-1.5">
                             <button onClick={() => { setNabavaEditId(trip.id); setNabavaEditDate(trip.date); setNabavaEditNote(trip.note); }}

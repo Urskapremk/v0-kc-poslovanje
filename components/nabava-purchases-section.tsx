@@ -510,7 +510,7 @@ export function NabavaPurchasesSection({
                 </div>
               </div>
             ) : (
-              <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#0f2e3a]/10 bg-white/50 px-2.5 py-1.5">
+              <div key={p.id} className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${p.autoMassage ? "border-[#7a4ea3]/55 bg-[#f6f0fa]" : "border-[#0f2e3a]/10 bg-white/50"}`}>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-[11px] font-semibold text-[#0f2e3a]">{p.name}</span>
@@ -520,6 +520,11 @@ export function NabavaPurchasesSection({
                     >
                       {catLabel(p.category)}
                     </span>
+                    {p.autoMassage && (
+                      <span className="shrink-0 rounded-full bg-[#7a4ea3]/15 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#7a4ea3]">
+                        Samodejno
+                      </span>
+                    )}
                   </div>
                   {p.category === LOAN_CAT && (
                     <p className="flex items-center gap-1 text-[10px] font-medium" style={{ color: LOAN_COLOR }}>

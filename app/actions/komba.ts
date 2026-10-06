@@ -492,7 +492,9 @@ async function syncTransferItem(reservationId: string, type: 'arrival' | 'depart
 }
 
 export async function deleteReservation(id: string) {
+  const items = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.reservationId, id))
   await db.delete(reservations).where(eq(reservations.id, id))
+  for (const item of items) await syncMassageCash(item.id)
   revalidatePath('/')
 }
 
@@ -668,6 +670,15 @@ export async function deleteTransfer(reservationId: string, type: 'arrival' | 'd
 
 // ============ ORDER ITEMS ============
 
+async function syncMassageCash(orderItemId: string) {
+  try {
+    const { syncMassageWorkerCash } = await import('./nabava')
+    await syncMassageWorkerCash(orderItemId)
+  } catch (e) {
+    console.log('[v0] syncMassageWorkerCash failed:', (e as Error).message)
+  }
+}
+
 export async function addOrderItem(reservationId: string, data: {
   name: string
   category: string
@@ -680,8 +691,9 @@ export async function addOrderItem(reservationId: string, data: {
   eventDate?: string // Date when the item/service occurs (for excursions, transfers)
   addedBy?: string // who added this item at reception (defaults to Urska)
 }) {
+  const id = uid('ord')
   await db.insert(orderItems).values({
-    id: uid('ord'),
+    id,
     reservationId,
     name: data.name,
     category: data.category,
@@ -694,7 +706,9 @@ export async function addOrderItem(reservationId: string, data: {
     eventDate: data.eventDate || null,
     addedBy: data.addedBy || 'Urska'
   })
+  await syncMassageCash(id)
   revalidatePath('/')
+  return { id }
 }
 
 // Reverse every recorded payment tied to an excursion booking (supplier: Dilip/lunch/
@@ -734,6 +748,7 @@ export async function deleteOrderItem(id: string) {
   }
 
   await db.delete(orderItems).where(eq(orderItems.id, id))
+  await syncMassageCash(id)
   revalidatePath('/')
   revalidatePath('/statistika')
 }
@@ -773,6 +788,7 @@ export async function updateOrderItemDate(id: string, eventDate: string) {
     }
   }
 
+  await syncMassageCash(id)
   revalidatePath('/')
 }
 
@@ -1673,8 +1689,10 @@ export async function deleteReservationAndGuest(reservationId: string, deleteGue
     }).where(eq(bentralReservations.id, res.bentralReservationId))
   }
   
+  const reservationOrders = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.reservationId, reservationId))
   // Delete reservation
   await db.delete(reservations).where(eq(reservations.id, reservationId))
+  for (const item of reservationOrders) await syncMassageCash(item.id)
   
   // Delete guest if requested and no other reservations exist for this guest
   if (deleteGuest && res.guestId) {

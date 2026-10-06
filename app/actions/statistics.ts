@@ -24,7 +24,7 @@ import {
 import { eq, and, gte, lte, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
-import { getNabavaPurchasesForMonth } from './nabava'
+import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
 
 // Get exchange rate from settings
@@ -1114,6 +1114,10 @@ export async function getMonthlyStatistics(year: number, month: number) {
   
   const wellnessRevenue = wellnessDeliveryRevenue + wellnessOrderRevenue
   const wellnessCount = wellnessDeliveryCount + wellnessOrderCount
+  // Od 7. 10. 2026 je strošek maserke prava gotovina v nabavi. Teh masaž ne štej
+  // še enkrat po oceni 13 €. Prihodek od gosta ostane cel.
+  const autoMassageIds = new Set(await getAutoMassageOrderItemIds())
+  const formulaWellnessOrders = wellnessOrderItems.filter(o => !autoMassageIds.has(o.id))
   
   const ostaloItems = allDeliveryItems.filter(i => (i as { costCategory?: string }).costCategory === 'ostalo')
   const ostaloDeliveryRevenue = ostaloItems.reduce((sum, i) => sum + (i.totalAr || 0), 0) / rate
@@ -1144,8 +1148,10 @@ export async function getMonthlyStatistics(year: number, month: number) {
     ? (costMap.bar_prehrana.type === 'percentage' ? barPrehranaRevenue * costMap.bar_prehrana.value / 100 : costMap.bar_prehrana.value)
     : 0
   
+  const wellnessCountForCost = wellnessDeliveryCount + formulaWellnessOrders.length
+  const wellnessRevenueForCost = wellnessDeliveryRevenue + formulaWellnessOrders.reduce((sum, o) => sum + (o.priceAr || 0), 0) / rate
   const wellnessCost = costMap.wellness
-    ? (costMap.wellness.type === 'fixed' ? wellnessCount * costMap.wellness.value : wellnessRevenue * costMap.wellness.value / 100)
+    ? (costMap.wellness.type === 'fixed' ? wellnessCountForCost * costMap.wellness.value : wellnessRevenueForCost * costMap.wellness.value / 100)
     : 0
   
   // Ostalo cost: use exact per-product purchase cost (costAr) where the product defines one
@@ -1333,6 +1339,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
     mealPlan: number
     wellness: number
     wellnessCount: number
+    wellnessFormulaCount: number
+    wellnessFormulaRevenue: number
     ostalo: number
     excursions: number
     transfers: number
@@ -1355,7 +1363,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
         reservationId: id, guestName: name || 'Neznano', bungalow: bungalow || '',
         arrival: arrival ?? null, departure: departure ?? null,
         nightsInMonth: 0, accommodation: 0, pijaca: 0, prehrana: 0, mealPlan: 0,
-        wellness: 0, wellnessCount: 0, ostalo: 0, excursions: 0, transfers: 0,
+        wellness: 0, wellnessCount: 0, wellnessFormulaCount: 0, wellnessFormulaRevenue: 0, ostalo: 0, excursions: 0, transfers: 0,
         agencyCommission: 0, optimaplusCommission: 0, excursionCost: 0, transferCost: 0,
         ostaloProductCost: 0, ostaloFallbackRevenue: 0,
       }
@@ -1401,12 +1409,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Bar / wellness / ostalo from delivery note items
   pijacaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.pijaca += (i.totalAr || 0) / rate })
   barPrehranaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.prehrana += (i.totalAr || 0) / rate })
-  wellnessDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { g.wellness += (i.totalAr || 0) / rate; g.wellnessCount += (i.quantity || 0) } })
+  wellnessDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { const eur = (i.totalAr || 0) / rate; g.wellness += eur; g.wellnessCount += (i.quantity || 0); g.wellnessFormulaCount += (i.quantity || 0); g.wellnessFormulaRevenue += eur } })
   ostaloItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { g.ostalo += (i.totalAr || 0) / rate; const c = i.productId ? productCostArById.get(i.productId) : undefined; if (c != null && !i.isFree && !(i as { coveredByMealPlan?: boolean }).coveredByMealPlan) { g.ostaloProductCost += (c * (i.quantity || 0)) / rate } else { g.ostaloFallbackRevenue += (i.totalAr || 0) / rate } } })
 
   // Bar / wellness / meal plan / excursions from order items (have reservationId directly)
   pijacaOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.pijaca += (o.priceAr || 0) / rate })
-  wellnessOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.wellness += (o.priceAr || 0) / rate; g.wellnessCount += 1 })
+  wellnessOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); const eur = (o.priceAr || 0) / rate; g.wellness += eur; g.wellnessCount += 1; if (!autoMassageIds.has(o.id)) { g.wellnessFormulaCount += 1; g.wellnessFormulaRevenue += eur } })
   mealPlanItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.mealPlan += (o.priceAr || 0) / rate })
   excursionItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.excursions += excItemRevenueAr(o) / rate; g.excursionCost += ((o as { costAr?: number | null }).costAr || 0) / rate })
   ostaloOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); const revAr = orderItemRevenueAr(o); g.ostalo += revAr / rate; const p = ostaloProductByName.get(o.name!)!; const manual = (o as { costAr?: number | null }).costAr; if (manual != null) { g.ostaloProductCost += Number(manual) / rate } else if (p.priceAr > 0 && p.costAr > 0) { g.ostaloProductCost += (revAr * p.costAr / p.priceAr) / rate } else { g.ostaloFallbackRevenue += revAr / rate } })
@@ -1464,7 +1472,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const barPijacaC = costMap.bar_pijaca?.type === 'percentage' ? g.pijaca * costMap.bar_pijaca.value / 100 : 0
     const barPrehranaC = costMap.bar_prehrana?.type === 'percentage' ? g.prehrana * costMap.bar_prehrana.value / 100 : 0
     const mealPlanC = costMap.bar_prehrana?.type === 'percentage' ? g.mealPlan * costMap.bar_prehrana.value / 100 : 0
-    const wellnessC = costMap.wellness?.type === 'fixed' ? g.wellnessCount * wellnessUnitCost : (costMap.wellness ? g.wellness * costMap.wellness.value / 100 : 0)
+    const wellnessC = costMap.wellness?.type === 'fixed' ? g.wellnessFormulaCount * wellnessUnitCost : (costMap.wellness ? g.wellnessFormulaRevenue * costMap.wellness.value / 100 : 0)
     const ostaloC = g.ostaloProductCost + (costMap.ostalo?.type === 'percentage' ? g.ostaloFallbackRevenue * costMap.ostalo.value / 100 : 0)
     const directCost = barPijacaC + barPrehranaC + mealPlanC + wellnessC + ostaloC + g.excursionCost + g.transferCost
     // Allocated overhead

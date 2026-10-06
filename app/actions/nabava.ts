@@ -61,6 +61,9 @@ async function ensureTable() {
   await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "loanRate" numeric`)
   // Strošek sredstva v izdelavi (pogodba): povezava na fixed_assets (status in_progress).
   await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "assetId" text`)
+  // Samodejno gotovinsko plačilo maserki, vezano na postavko masaže pri gostu.
+  // Ločeno od orderItemId (ta je posojilo gostu).
+  await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "massageOrderItemId" text`)
 }
 
 const LOAN_CAT = "posojilo_gostu"
@@ -267,6 +270,7 @@ export type NabavaPurchase = {
   guestName: string
   bungalow: string
   createdAt: string
+  autoMassage: boolean
 }
 
 function mapPurchase(r: Record<string, unknown>): NabavaPurchase {
@@ -288,6 +292,7 @@ function mapPurchase(r: Record<string, unknown>): NabavaPurchase {
     guestName: r.guestName ? String(r.guestName) : "",
     bungalow: r.bungalow ? String(r.bungalow) : "",
     createdAt: r.createdAt ? String(r.createdAt) : "",
+    autoMassage: !!r.massageOrderItemId,
   }
 }
 
@@ -501,7 +506,7 @@ export async function getArchivedNabavaTrips(
 
 export async function deleteNabavaPurchase(id: string) {
   await ensureTable()
-  const existing = await db.execute(sql`SELECT "cashExpenseId", "fixedAssetId", "orderItemId" FROM nabava_purchases WHERE id = ${id}`)
+  const existing = await db.execute(sql`SELECT "cashExpenseId", "fixedAssetId", "orderItemId", "tripId" FROM nabava_purchases WHERE id = ${id}`)
   const row = existing.rows[0] as Record<string, unknown> | undefined
   if (row?.cashExpenseId) await deleteCashExpense(String(row.cashExpenseId))
   if (row?.orderItemId) await deleteLoanOrderItem(String(row.orderItemId))
@@ -512,5 +517,131 @@ export async function deleteNabavaPurchase(id: string) {
   const { removeNabavaAssetCost } = await import("./statistics")
   await removeNabavaAssetCost(id)
   await db.execute(sql`DELETE FROM nabava_purchases WHERE id = ${id}`)
+  if (row?.tripId) await removeEmptyMassageTrip(String(row.tripId))
   return { ok: true }
+}
+
+// Borut maserki izroči 40.000 Ar na masažo, takoj, v gotovini (Tourism).
+// Ocena 13 € v kalkulacijah se za te vrstice ne prišteje še enkrat.
+const MASSAGE_AUTO_FROM = "2026-10-07"
+const MASSAGE_PAY_AR = 40000
+const MASSAGE_TRIP_NOTE = "Masaže"
+
+function foldSi(s: string) {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+function isGuestMassage(category: string, name: string) {
+  const cat = foldSi(category || "")
+  if (cat === "masaza") return true
+  if (cat === "wellness" && /massage|masaz/.test(foldSi(name || ""))) return true
+  return false
+}
+
+async function ensureMassageTrip(date: string) {
+  const existing = await db.execute(sql`
+    SELECT id FROM nabava_trips
+    WHERE site = 'komba' AND date = ${date} AND note = ${MASSAGE_TRIP_NOTE}
+    ORDER BY "createdAt" ASC
+    LIMIT 1
+  `)
+  const found = existing.rows[0] as Record<string, unknown> | undefined
+  if (found?.id) return String(found.id)
+  const id = `nab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await db.execute(sql`
+    INSERT INTO nabava_trips (id, date, note, site, "noBoat")
+    VALUES (${id}, ${date}, ${MASSAGE_TRIP_NOTE}, 'komba', true)
+  `)
+  return id
+}
+
+async function removeEmptyMassageTrip(tripId: string) {
+  if (!tripId) return
+  const trip = await db.execute(sql`SELECT id, note, site FROM nabava_trips WHERE id = ${tripId}`)
+  const t = trip.rows[0] as Record<string, unknown> | undefined
+  if (!t || String(t.note || "") !== MASSAGE_TRIP_NOTE || String(t.site || "") !== "komba") return
+  const cnt = await db.execute(sql`SELECT COUNT(*)::int AS n FROM nabava_purchases WHERE "tripId" = ${tripId}`)
+  const n = Number((cnt.rows[0] as Record<string, unknown> | undefined)?.n || 0)
+  if (n > 0) return
+  const pays = await db.execute(sql`SELECT 1 FROM supplier_payments WHERE "refKey" LIKE ${"nabava:" + tripId + ":%"} LIMIT 1`)
+  if (pays.rows.length > 0) return
+  await db.execute(sql`DELETE FROM nabava_trips WHERE id = ${tripId}`)
+}
+
+export async function getAutoMassageOrderItemIds(): Promise<string[]> {
+  await ensureTable()
+  const res = await db.execute(sql`
+    SELECT "massageOrderItemId" FROM nabava_purchases
+    WHERE "massageOrderItemId" IS NOT NULL AND "massageOrderItemId" <> ''
+  `)
+  return (res.rows as Record<string, unknown>[]).map((r) => String(r.massageOrderItemId))
+}
+
+// Ustvari, premakne ali odstrani gotovinsko plačilo maserki za eno postavko na računu gosta.
+// Kliče se ob vpisu, spremembi datuma in brisanju. Če Urška vrstico v nabavi zbriše ročno,
+// se ne ustvari znova, dokler postavke znova ne shrani.
+export async function syncMassageWorkerCash(orderItemId: string) {
+  if (!orderItemId) return
+  await ensureTable()
+  const existing = await db.execute(sql`
+    SELECT id, "tripId" FROM nabava_purchases WHERE "massageOrderItemId" = ${orderItemId} LIMIT 1
+  `)
+  const linked = existing.rows[0] as Record<string, unknown> | undefined
+
+  const itemRes = await db.execute(sql`
+    SELECT oi.name, oi.category, oi.qty, oi."eventDate", r."guestName"
+    FROM order_items oi
+    LEFT JOIN reservations r ON r.id = oi."reservationId"
+    WHERE oi.id = ${orderItemId}
+    LIMIT 1
+  `)
+  const item = itemRes.rows[0] as Record<string, unknown> | undefined
+  const eventDate = item?.eventDate ? String(item.eventDate).slice(0, 10) : ""
+  const book = !!item
+    && isGuestMassage(String(item.category || ""), String(item.name || ""))
+    && /^\d{4}-\d{2}-\d{2}$/.test(eventDate)
+    && eventDate >= MASSAGE_AUTO_FROM
+
+  if (!item || !book) {
+    if (linked?.id) {
+      const tripId = linked.tripId ? String(linked.tripId) : ""
+      await deleteNabavaPurchase(String(linked.id))
+      await removeEmptyMassageTrip(tripId)
+    }
+    return
+  }
+
+  const qty = Math.max(1, Math.round(Number(item.qty) || 1))
+  const amountAr = MASSAGE_PAY_AR * qty
+  const guest = String(item.guestName || "").trim() || "gost"
+  const name = qty > 1 ? `Masaža × ${qty} — ${guest}` : `Masaža — ${guest}`
+  const tripId = await ensureMassageTrip(eventDate)
+
+  if (linked?.id) {
+    const purchaseId = String(linked.id)
+    const oldTripId = linked.tripId ? String(linked.tripId) : ""
+    await updateNabavaPurchase({
+      id: purchaseId,
+      name,
+      category: "wellness",
+      amountAr,
+      company: "tourism",
+      date: eventDate,
+    })
+    if (oldTripId !== tripId) {
+      await db.execute(sql`UPDATE nabava_purchases SET "tripId" = ${tripId} WHERE id = ${purchaseId}`)
+      await removeEmptyMassageTrip(oldTripId)
+    }
+    return
+  }
+
+  const created = await addNabavaPurchase({
+    tripId,
+    name,
+    category: "wellness",
+    amountAr,
+    company: "tourism",
+    date: eventDate,
+  })
+  await db.execute(sql`UPDATE nabava_purchases SET "massageOrderItemId" = ${orderItemId} WHERE id = ${created.id}`)
 }
