@@ -12,7 +12,7 @@ import { HOUSEKEEPERS, HOUSEKEEPING_NEW_FROM, housekeepingHours, housekeepingLab
 import { getLeaveRequests } from '@/app/actions/leave'
 import { getAllStaffMembers } from '@/app/actions/statistics'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
-import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
+import { leaveDaysForStaff, LEAVE_TYPES, scheduleLeaveLabel, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
@@ -158,7 +158,8 @@ export default function RazporedTab({
       const ds = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
       const shift = employedOn(endByName[name], ds) ? byDate[ds]?.[name] : undefined
       const worked = shift === 'MORNING' || shift === 'AFTERNOON'
-      entries.push({ day: d, hours: worked ? housekeepingHours(ds) : 0, onLeave: !!leaveByStaff[name]?.[d] })
+      const info = leaveByStaff[name]?.[d]
+      entries.push({ day: d, hours: worked ? housekeepingHours(ds) : 0, onLeave: !!info, leaveType: info?.type })
     }
     breakdowns[name] = summarizeMonthHours(year, month, entries)
   }
@@ -425,16 +426,16 @@ export default function RazporedTab({
                           <div className="flex flex-col gap-1">
                             {leave && (
                               <span
-                                className={`inline-flex w-fit items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${t.leaveBadge}`}
+                                className={`inline-flex w-fit items-center rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${leave.type === 'sick' ? t.sickBadge : t.leaveBadge}`}
                                 title={LEAVE_TYPES[leave.type as LeaveType]?.sl}
                               >
-                                Dopust
+                                {scheduleLeaveLabel(leave.type)}
                               </span>
                             )}
                             {readOnly ? (
                               <span
                                 className={`inline-flex w-full items-center rounded-md border px-1.5 py-1 text-[11px] ${
-                                  leave ? t.leaveCell : `${c.bg} ${c.text} ${c.border}`
+                                  leave ? (leave.type === 'sick' ? t.sickCell : t.leaveCell) : `${c.bg} ${c.text} ${c.border}`
                                 } ${shift === 'OFF' && !leave ? t.offDim : ''}`}
                               >
                                 {shift === 'MORNING' ? housekeepingLabels(ds).morningShort : shift === 'AFTERNOON' ? housekeepingLabels(ds).afternoonShort : 'Prosto'}
@@ -444,7 +445,7 @@ export default function RazporedTab({
                               value={shift}
                               onChange={(e) => handleCellChange(ds, name, e.target.value as Shift)}
                               className={`shift-select w-full text-[11px] rounded-md px-1.5 py-1 border cursor-pointer ${
-                                leave ? t.leaveCell : `${c.bg} ${c.text} ${c.border}`
+                                leave ? (leave.type === 'sick' ? t.sickCell : t.leaveCell) : `${c.bg} ${c.text} ${c.border}`
                               } ${shift === 'OFF' && !leave ? t.offDim : ''}`}
                             >
               <option value="MORNING" className="bg-[#0b2731] text-white">{housekeepingLabels(ds).morningShort}</option>
@@ -510,8 +511,8 @@ export default function RazporedTab({
                     const leave = leaveByStaff[name]?.[day]
                     if (leave) {
                       return (
-                        <td key={name} className="sc-cell sc-leave">
-                          DOPUST
+                        <td key={name} className={`sc-cell ${leave.type === 'sick' ? 'sc-sick' : 'sc-leave'}`}>
+                          {scheduleLeaveLabel(leave.type)}
                           <small>{shift === 'MORNING' ? 'Dop' : shift === 'AFTERNOON' ? 'Pop' : '—'}</small>
                         </td>
                       )
@@ -776,6 +777,8 @@ export default function RazporedTab({
           .schedule-color-print .sc-off { color: #aaa !important; }
           .schedule-color-print .sc-leave { background: #f0e0da !important; color: #975b45 !important; }
           .schedule-color-print .sc-leave small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
+          .schedule-color-print .sc-sick { background: #ebe4f4 !important; color: #5c3d78 !important; }
+          .schedule-color-print .sc-sick small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
           .schedule-color-print .sc-total td { font-weight: 700; background: #f8f5ef !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .schedule-color-print .sc-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; margin-top: 10px; color: #111; }
           .schedule-color-print .sc-legend .lg { color: #111; }

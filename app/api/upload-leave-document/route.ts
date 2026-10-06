@@ -10,8 +10,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 })
     }
 
-    // Naloži v zasebno blob shrambo (podpisane odločbe o dopustu so občutljive)
-    const blob = await put(`leave-documents/${Date.now()}-${file.name}`, file, {
+    // Naloži v zasebno blob shrambo (podpisane odločbe in potrdila zdravnika so občutljiva)
+    const kind = String(formData.get('kind') || '')
+    const prefix = kind === 'doctor' ? 'doctor-' : ''
+    const blob = await put(`leave-documents/${prefix}${Date.now()}-${file.name}`, file, {
       access: 'private',
     })
 

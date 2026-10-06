@@ -8,7 +8,8 @@ import { getHolidayName, isSunday } from './holidays'
 export interface DayWork {
   day: number // 1..31
   hours: number // shift hours worked that day (0 if off)
-  onLeave: boolean // true if the worker is on leave that day
+  onLeave: boolean // true if the worker is on leave or sick that day
+  leaveType?: string // 'sick' = bolniška (100 % plačan dan), sicer dopust
 }
 
 export interface HoursBreakdown {
@@ -20,6 +21,7 @@ export interface HoursBreakdown {
   sundayDays: number
   holidayDays: number
   leaveDays: number
+  sickDays: number // bolniška: plačan dan (100 %), ni redni dopust
 }
 
 /**
@@ -34,10 +36,12 @@ export function summarizeMonthHours(year: number, month: number, entries: DayWor
   let sundayDays = 0
   let holidayDays = 0
   let leaveDays = 0
+  let sickDays = 0
 
   for (const e of entries) {
     if (e.onLeave) {
-      leaveDays += 1
+      if (e.leaveType === 'sick') sickDays += 1
+      else leaveDays += 1
       continue
     }
     if (e.hours <= 0) continue
@@ -62,5 +66,6 @@ export function summarizeMonthHours(year: number, month: number, entries: DayWor
     sundayDays,
     holidayDays,
     leaveDays,
+    sickDays,
   }
 }

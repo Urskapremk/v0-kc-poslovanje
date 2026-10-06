@@ -24,6 +24,13 @@ export function HoursBreakdownLines({ b }: { b: HoursBreakdown }) {
         value={`${b.leaveDays} dni`}
         accent={b.leaveDays > 0 ? 'text-[#cc8e77]' : undefined}
       />
+      {(b.sickDays ?? 0) > 0 && (
+        <Row
+          label="Bolniška (100%)"
+          value={`${b.sickDays} dni`}
+          accent="text-[#d4c4ea]"
+        />
+      )}
     </div>
   )
 }

@@ -5,12 +5,13 @@ import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { daysBetween } from '@/lib/leave'
 
-async function ensureAdvancePayColumn() {
+async function ensureLeaveColumns() {
   await db.execute(sql`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS "advancePayAr" integer`)
+  await db.execute(sql`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS "doctorCertificatePath" text`)
 }
 
 export async function getLeaveRequests(department: string) {
-  await ensureAdvancePayColumn()
+  await ensureLeaveColumns()
   const result = await db.execute(
     sql`SELECT * FROM leave_requests WHERE department = ${department} ORDER BY "startDate" DESC`
   )
@@ -28,13 +29,14 @@ export async function getLeaveRequests(department: string) {
     status: r.status as string,
     signedAt: r.signedAt as string | null,
     signedDocumentPath: (r.signedDocumentPath as string | null) ?? null,
+    doctorCertificatePath: (r.doctorCertificatePath as string | null) ?? null,
     advancePayAr: r.advancePayAr == null ? null : Number(r.advancePayAr),
     createdAt: r.createdAt as string,
   }))
 }
 
 export async function setLeaveAdvancePay(id: string, amountAr: number) {
-  await ensureAdvancePayColumn()
+  await ensureLeaveColumns()
   const amount = Math.max(0, Math.round(amountAr || 0))
   await db.execute(
     sql`UPDATE leave_requests SET "advancePayAr" = ${amount > 0 ? amount : null} WHERE id = ${id}`
@@ -103,6 +105,15 @@ export async function setLeaveSigned(id: string) {
 export async function setLeaveSignedDocument(id: string, pathname: string) {
   await db.execute(
     sql`UPDATE leave_requests SET "signedDocumentPath" = ${pathname}, "signedAt" = COALESCE("signedAt", now()) WHERE id = ${id}`
+  )
+  revalidatePath('/statistika')
+}
+
+// Potrdilo zdravnika. Ne nastavi podpisa in ne šteje kot redni dopust.
+export async function setLeaveDoctorCertificate(id: string, pathname: string) {
+  await ensureLeaveColumns()
+  await db.execute(
+    sql`UPDATE leave_requests SET "doctorCertificatePath" = ${pathname} WHERE id = ${id}`
   )
   revalidatePath('/statistika')
 }

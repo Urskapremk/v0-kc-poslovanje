@@ -514,6 +514,14 @@ export default function ObracunPlaceMg({ year, month }: { year: number; month: n
                     <span className="text-white/50">Dopust</span>
                     <span className="font-medium tabular-nums sm:ml-1">{attendance.leaveDays} dni</span>
                   </div>
+                  {attendance.sickDays > 0 && (
+                    <div className="col-span-2 flex justify-between sm:col-span-4 sm:block">
+                      <span className="text-[#d4c4ea]">Bolniška</span>
+                      <span className="font-medium tabular-nums text-[#d4c4ea] sm:ml-1">
+                        {attendance.sickDays} {attendance.sickDays === 1 ? 'dan' : 'dni'} · 100 % plačano
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <p className="mt-2 border-t border-white/10 pt-1.5 text-[11px] text-white/40">
                   Skupaj priznano {attendance.creditedHours} h / norma {attendance.norm} h
@@ -789,6 +797,11 @@ export default function ObracunPlaceMg({ year, month }: { year: number; month: n
                   </p>
                 </div>
               )}
+              {attendance?.sickDays ? (
+                <p className="pt-1 text-[11px] text-[#d4c4ea]">
+                  Bolniška: {attendance.sickDays} {attendance.sickDays === 1 ? 'dan' : 'dni'} · 100 % nadomestilo, že vključeno v osnovno plačo. Redni dopust se ne zmanjša.
+                </p>
+              ) : null}
             </div>
           </div>
 

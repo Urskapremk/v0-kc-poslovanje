@@ -12,6 +12,7 @@ import {
   deleteLeaveRequest,
   setLeaveSigned,
   setLeaveSignedDocument,
+  setLeaveDoctorCertificate,
   setLeaveAdvancePay,
 } from '@/app/actions/leave'
 import {
@@ -109,10 +110,39 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       if (!res.ok) throw new Error('Upload failed')
       const { pathname } = await res.json()
       await setLeaveSignedDocument(leaveId, pathname)
-      mutate(`leaves-${department}`)
+      await refreshLeaves()
     } catch (e) {
       console.error('[v0] leave signed upload error:', e)
       alert('Nalaganje podpisanega dokumenta ni uspelo.')
+    } finally {
+      setUploadingId(null)
+    }
+  }
+
+  async function refreshLeaves() {
+    await mutate(`leaves-${department}`)
+    await mutate(['leave', department])
+    await mutate(
+      (key) => Array.isArray(key) && (key[0] === 'leave-summaries' || key[0] === 'mg-attendance'),
+      undefined,
+      { revalidate: true },
+    )
+  }
+
+  async function handleUploadCertificate(leaveId: string, file: File) {
+    setUploadingId(leaveId)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('kind', 'doctor')
+      const res = await fetch('/api/upload-leave-document', { method: 'POST', body: fd })
+      if (!res.ok) throw new Error('Upload failed')
+      const { pathname } = await res.json()
+      await setLeaveDoctorCertificate(leaveId, pathname)
+      await refreshLeaves()
+    } catch (e) {
+      console.error('[v0] doctor certificate upload error:', e)
+      alert('Nalaganje potrdila zdravnika ni uspelo.')
     } finally {
       setUploadingId(null)
     }
@@ -137,10 +167,10 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   const calendarDays = daysBetween(form.startDate, form.endDate)
   const days = Number(daysInput)
 
-  function openNew() {
+  function openNew(leaveType: LeaveType = 'annual') {
     setEditingId(null)
     const today = todayStr()
-    setForm({ staffId: '', leaveType: 'annual', startDate: today, endDate: today, reason: '' })
+    setForm({ staffId: '', leaveType, startDate: today, endDate: today, reason: '' })
     setDaysInput('1')
     setShowForm(true)
   }
@@ -221,7 +251,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       }
       if (editingId) await updateLeaveRequest(editingId, payload)
       else await createLeaveRequest(payload)
-      await mutate(`leaves-${department}`)
+      await refreshLeaves()
       setEditingId(null)
       setForm({ staffId: '', leaveType: 'annual', startDate: todayStr(), endDate: todayStr(), reason: '' })
       setDaysInput('1')
@@ -234,7 +264,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
 
   async function handleDelete(id: string) {
     await deleteLeaveRequest(id)
-    await mutate(`leaves-${department}`)
+    await refreshLeaves()
   }
 
   function advanceValue(leave: LeaveRequest) {
@@ -257,8 +287,8 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     setTimeout(() => {
       window.print()
       document.body.classList.remove('printing-leave')
-      if (!leave.signedAt) {
-        setLeaveSigned(leave.id).then(() => mutate(`leaves-${department}`))
+      if (!leave.signedAt && leave.leaveType !== 'sick') {
+        setLeaveSigned(leave.id).then(() => refreshLeaves())
       }
     }, 100)
   }
@@ -307,8 +337,8 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     <details className="group rounded-2xl border border-[#7fa8b8]/20 bg-[#7fa8b8]/[0.04] p-4 no-print">
       <summary className="flex cursor-pointer list-none items-center justify-between [&::-webkit-details-marker]:hidden">
         <div>
-          <h3 className="text-sm font-medium text-white">Dopust — {LEAVE_DEPARTMENTS[department].sl}</h3>
-          <p className="text-xs text-white/50">Dodeli dopust in natisni dokument za podpis</p>
+          <h3 className="text-sm font-medium text-white">Dopust in bolniška — {LEAVE_DEPARTMENTS[department].sl}</h3>
+          <p className="text-xs text-white/50">Dopust, bolniška in potrdilo zdravnika. Bolniška se zapiše v razpored in ostane plačan dan.</p>
         </div>
         <span className="flex items-center gap-2 rounded-xl bg-[#7fa8b8]/15 px-3 py-1.5 text-xs font-medium text-[#7fa8b8] border border-[#7fa8b8]/30">
           Odpri
@@ -316,20 +346,29 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
         </span>
       </summary>
 
-      <div className="mt-4 flex justify-end">
+      <div className="mt-4 flex justify-end gap-2">
         <button
-          onClick={() => (showForm && !editingId ? setShowForm(false) : openNew())}
+          onClick={() => (showForm && !editingId && form.leaveType !== 'sick' ? setShowForm(false) : openNew('annual'))}
           className="flex items-center gap-2 rounded-xl bg-[#7fa8b8]/20 px-4 py-2 text-sm font-medium text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/30 transition-colors"
         >
           <CalendarPlus className="h-4 w-4" />
           Dopust
+        </button>
+        <button
+          onClick={() => (showForm && !editingId && form.leaveType === 'sick' ? setShowForm(false) : openNew('sick'))}
+          className="flex items-center gap-2 rounded-xl bg-[#b7a0d4]/20 px-4 py-2 text-sm font-medium text-[#d4c4ea] border border-[#b7a0d4]/40 hover:bg-[#b7a0d4]/30 transition-colors"
+        >
+          <CalendarPlus className="h-4 w-4" />
+          Bolniška
         </button>
       </div>
 
       {/* Obrazec */}
       {showForm && (
         <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
-          <p className="mb-3 text-sm font-medium text-white">{editingId ? 'Popravi dopust' : 'Nov dopust'}</p>
+          <p className="mb-3 text-sm font-medium text-white">
+            {editingId ? 'Popravi' : form.leaveType === 'sick' ? 'Nova bolniška' : 'Nov dopust'}
+          </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/40">Delavec</label>
@@ -356,6 +395,12 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                   <option key={k} value={k}>{v.sl}</option>
                 ))}
               </select>
+              {form.leaveType === 'sick' && (
+                <p className="mt-2 text-[11px] leading-snug text-[#d4c4ea]">
+                  Bolniška se takoj zapiše v razpored. Dan ostane plačan v celoti (100 %) in ne zmanjša rednega dopusta.
+                  Potrdilo zdravnika dodaš po shranitvi.
+                </p>
+              )}
             </div>
 
             <div>
@@ -425,7 +470,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                 disabled={saving || !form.staffId || !(days > 0)}
                 className="flex items-center gap-1 rounded-xl bg-[#7fa8b8] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
               >
-                <Check className="h-4 w-4" /> {saving ? 'Shranjujem…' : editingId ? 'Shrani popravek' : 'Shrani dopust'}
+                <Check className="h-4 w-4" /> {saving ? 'Shranjujem…' : editingId ? 'Shrani popravek' : form.leaveType === 'sick' ? 'Shrani bolniško' : 'Shrani dopust'}
               </button>
             </div>
           </div>
@@ -540,7 +585,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
             </p>
           </div>
           <p className="mt-3 text-[11px] text-white/40">
-            Šteje vse vrste dopusta v koledarskem letu {year}.{' '}
+            V kvoto šteje redni dopust v koledarskem letu {year}. Bolniška se ne odšteje — dan je plačan v celoti (100 %).{' '}
             {hasPartialActiveMonths ? (
               <>
                 Sorazmerna kvota: {activeMonthsCount} aktivnih mesecev v službi → {annualQuota} dni
@@ -582,8 +627,10 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                 </p>
                 <p className="text-xs text-white/50">
                   {leaveDateSl(l.startDate)} – {leaveDateSl(l.endDate)} · {l.days} dni
+                  {l.leaveType === 'sick' ? ' · 100 % plačano' : ''}
                   {l.signedAt ? ' · izdano' : ''}
                   {l.signedDocumentPath ? ' · podpisano ✓' : ''}
+                  {l.doctorCertificatePath ? ' · potrdilo zdravnika ✓' : ''}
                 </p>
                 {l.reason ? <p className="mt-0.5 text-xs text-white/70">{l.reason}</p> : null}
               </div>
@@ -594,40 +641,81 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                 >
                   <Pencil className="h-3.5 w-3.5" /> Popravi
                 </button>
-                {l.signedDocumentPath ? (
-                  <a
-                    href={`/api/image?pathname=${encodeURIComponent(l.signedDocumentPath)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 rounded-lg bg-[#8fae92]/15 px-3 py-2 text-xs text-[#8fae92] hover:bg-[#8fae92]/25"
-                  >
-                    <FileText className="h-3.5 w-3.5" /> Poglej
-                  </a>
-                ) : null}
-                <label
-                  className={`flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2 text-xs ${
-                    l.signedDocumentPath
-                      ? 'bg-white/5 text-white/60 hover:bg-white/10'
-                      : 'bg-[#7fa8b8]/15 text-[#7fa8b8] hover:bg-[#7fa8b8]/25'
-                  } ${uploadingId === l.id ? 'pointer-events-none opacity-60' : ''}`}
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  {uploadingId === l.id
-                    ? 'Nalagam…'
-                    : l.signedDocumentPath
-                      ? 'Zamenjaj'
-                      : 'Dodaj podpisano'}
-                  <input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    className="hidden"
-                    onChange={e => {
-                      const f = e.target.files?.[0]
-                      if (f) handleUploadSigned(l.id, f)
-                      e.target.value = ''
-                    }}
-                  />
-                </label>
+                {l.leaveType === 'sick' ? (
+                  <>
+                    {l.doctorCertificatePath ? (
+                      <a
+                        href={`/api/image?pathname=${encodeURIComponent(l.doctorCertificatePath)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 rounded-lg bg-[#8fae92]/15 px-3 py-2 text-xs text-[#8fae92] hover:bg-[#8fae92]/25"
+                      >
+                        <FileText className="h-3.5 w-3.5" /> Poglej potrdilo
+                      </a>
+                    ) : null}
+                    <label
+                      className={`flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2 text-xs ${
+                        l.doctorCertificatePath
+                          ? 'bg-white/5 text-white/60 hover:bg-white/10'
+                          : 'bg-[#b7a0d4]/20 text-[#d4c4ea] hover:bg-[#b7a0d4]/30'
+                      } ${uploadingId === l.id ? 'pointer-events-none opacity-60' : ''}`}
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      {uploadingId === l.id
+                        ? 'Nalagam…'
+                        : l.doctorCertificatePath
+                          ? 'Zamenjaj potrdilo'
+                          : 'Potrdilo zdravnika'}
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={e => {
+                          const f = e.target.files?.[0]
+                          if (f) handleUploadCertificate(l.id, f)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    {l.signedDocumentPath ? (
+                      <a
+                        href={`/api/image?pathname=${encodeURIComponent(l.signedDocumentPath)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 rounded-lg bg-[#8fae92]/15 px-3 py-2 text-xs text-[#8fae92] hover:bg-[#8fae92]/25"
+                      >
+                        <FileText className="h-3.5 w-3.5" /> Poglej
+                      </a>
+                    ) : null}
+                    <label
+                      className={`flex cursor-pointer items-center gap-1 rounded-lg px-3 py-2 text-xs ${
+                        l.signedDocumentPath
+                          ? 'bg-white/5 text-white/60 hover:bg-white/10'
+                          : 'bg-[#7fa8b8]/15 text-[#7fa8b8] hover:bg-[#7fa8b8]/25'
+                      } ${uploadingId === l.id ? 'pointer-events-none opacity-60' : ''}`}
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      {uploadingId === l.id
+                        ? 'Nalagam…'
+                        : l.signedDocumentPath
+                          ? 'Zamenjaj'
+                          : 'Dodaj podpisano'}
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={e => {
+                          const f = e.target.files?.[0]
+                          if (f) handleUploadSigned(l.id, f)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                  </>
+                )}
                 <button
                   onClick={() => handlePrint(l)}
                   className="flex items-center gap-1 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/70 hover:bg-white/10"
