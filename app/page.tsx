@@ -47,6 +47,7 @@ import { payFanja, unpayFanja } from "./actions/fanja-payment";
 import { paySupplier, unpaySupplier } from "./actions/supplier-payment";
 import { getNabavaTrips, addNabavaTrip, updateNabavaTrip, deleteNabavaTrip, setNabavaBoat, setNabavaBoatOrdered, setNabavaNoBoat } from "./actions/nabava";
 import { NabavaPurchasesSection } from "@/components/nabava-purchases-section";
+import { NabavaRacunovodstvo } from "@/components/nabava-racunovodstvo";
 import { TaxesPanel } from "@/components/taxes-panel";
 import { GuestReplyAssistant } from "@/components/guest-reply-assistant";
   import { SentEmailsBox } from "@/components/sent-emails-box";
@@ -8438,7 +8439,7 @@ function GuestCard() {
     createdAt ? new Date(new Date(createdAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10) : "";
   const nabavaOnTile = (t: { date: string; createdAt: string }) =>
     !t.date || t.date >= nabavaToday || nabavaCreatedDay(t.createdAt) === nabavaToday;
-  const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && nabavaOnTile(t));
+  const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && t.note !== "Računovodstvo" && nabavaOnTile(t));
   // Komba: a past date does not stay among today's trips. It only shows while that
   // past day is selected in the form, so the current list does not mix with back-dating.
   const nabavaKombaCurrent = nabavaList.filter((t) => t.site === "komba" && (!t.date || t.date >= nabavaToday));
@@ -9499,6 +9500,8 @@ function GuestCard() {
                   </button>
                 </div>
               </div>
+
+              <NabavaRacunovodstvo />
 
               {nabavaHvList.length === 0 ? (
                 <p className="text-white/30 text-xs">Ni vnosov nabave. Dodaj prvo nabavo zgoraj.</p>

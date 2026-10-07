@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, Search, ShoppingCart } from 'lucide-react'
 import { getArchivedNabavaTrips } from '@/app/actions/nabava'
 import { NabavaPurchasesSection } from '@/components/nabava-purchases-section'
+import { NabavaRacunovodstvo } from '@/components/nabava-racunovodstvo'
 
 const PAY_LABELS: Record<string, string> = {
   boat: 'Dilip (čoln)',
@@ -120,7 +121,11 @@ export function NabavaArchive({ site, title }: { site: 'hv' | 'komba'; title: st
                           ))}
                         </div>
                       )}
-                      <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} showRent={site === 'komba'} />
+                      {trip.note === 'Računovodstvo' ? (
+                        <NabavaRacunovodstvo tripId={trip.id} />
+                      ) : (
+                        <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} showRent={site === 'komba'} />
+                      )}
                     </div>
                   ))}
                 </div>

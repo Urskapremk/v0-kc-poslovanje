@@ -1248,9 +1248,15 @@ export async function getMonthlyStatistics(year: number, month: number) {
   let stipendijaAr = 0
   let hranaStudentiAr = 0
   let izletNabavaAr = 0
+  let racunovodstvoAr = 0
   for (const p of nabavaPurchases) {
   if (p.category === "najemnina") {
     najemninaHisaAr += p.amountAr
+    continue
+  }
+  // Računovodstvo (gotovina ali Orange Money z Nabave HV) je samostojen strošek.
+  if (p.category === "racunovodstvo") {
+    racunovodstvoAr += p.amountAr
     continue
   }
   // Štipendija (šolnina) je samostojen strošek, ne bremeni oddelkov.
@@ -1287,6 +1293,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const najemninaHisaCost = najemninaHisaAr / rate
   const stipendijaCost = stipendijaAr / rate
   const hranaStudentiCost = hranaStudentiAr / rate
+  const racunovodstvoCost = racunovodstvoAr / rate
   const izletGotovinaCost = izletNabavaAr / rate
 
   // Nosači in Tuc tuc = vsak SVOJ samostojen strošek (npr. Borutove nabave HV/Komba). Vir so gotovinski odlivi
@@ -1320,7 +1327,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const depreciationCost = depreciation.total
 
   const totalSalaryCost = accommodationSalaryCost + barSalaryCost + kuhinjaSalaryCost + managementSalaryCost
-  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + stipendijaCost + hranaStudentiCost + portersCost + tuctucCost + depreciationCost
+  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + stipendijaCost + hranaStudentiCost + racunovodstvoCost + portersCost + tuctucCost + depreciationCost
 
   // ===== PER-GUEST BREAKDOWN (analytics) =====
   // Attribute revenue and costs to each reservation/guest. Salaries are allocated
@@ -1580,6 +1587,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
       najemninaHisa: Math.round(najemninaHisaCost * 100) / 100,
       stipendija: Math.round(stipendijaCost * 100) / 100,
       hranaStudenti: Math.round(hranaStudentiCost * 100) / 100,
+      racunovodstvo: Math.round(racunovodstvoCost * 100) / 100,
       porters: Math.round(portersCost * 100) / 100,
       tuctuc: Math.round(tuctucCost * 100) / 100,
       depreciation: Math.round(depreciationCost * 100) / 100,
@@ -1840,6 +1848,7 @@ export async function getYearlyStatistics(year: number) {
       najemninaHisa: 0,
       stipendija: 0,
       hranaStudenti: 0,
+      racunovodstvo: 0,
       porters: 0,
       tuctuc: 0,
       depreciation: 0,
@@ -1877,6 +1886,7 @@ export async function getYearlyStatistics(year: number) {
     yearly.costs.najemninaHisa += (m.costs as { najemninaHisa?: number }).najemninaHisa || 0
     yearly.costs.stipendija += (m.costs as { stipendija?: number }).stipendija || 0
     yearly.costs.hranaStudenti += (m.costs as { hranaStudenti?: number }).hranaStudenti || 0
+    yearly.costs.racunovodstvo += (m.costs as { racunovodstvo?: number }).racunovodstvo || 0
     yearly.costs.porters += (m.costs as { porters?: number }).porters || 0
     yearly.costs.tuctuc += (m.costs as { tuctuc?: number }).tuctuc || 0
     yearly.costs.depreciation += (m.costs as { depreciation?: number }).depreciation || 0
