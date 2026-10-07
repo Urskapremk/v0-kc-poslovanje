@@ -14,11 +14,15 @@ export type VisitorYear = { year: number; nationalities: VisitorNationality[] }
  *
  * Two sources feed this, because the older seasons never made it into the system:
  *
- *   `entered`  — reservations with a police form. Counts every guest slot (the form
- *                records a nationality per person, up to four), so a Brazilian husband
- *                and a German wife count as one guest each rather than one booking.
- *                Only checked-in reservations count as a visit; future bookings have
- *                not been here yet.
+ *   `entered`  — checked-in reservations. The head count is the party size (pax),
+ *                not the number of filled nationality boxes: a form often has one
+ *                country for a couple or a family. That whole party counts toward
+ *                the country that was written. When a second, third or fourth
+ *                nationality is filled, each box is one guest (a Brazilian husband
+ *                and a German wife), and any people beyond the boxes share the
+ *                first country. A party with no country at all is counted only when
+ *                Bentral does not already list that same name, so nobody is added
+ *                twice. Future bookings have not been here yet.
  *
  *   `bentral`  — confirmed Bentral bookings that were never transferred. Those guests
  *                were here, they simply never got a police form, so the booking's own
@@ -40,21 +44,7 @@ export type VisitorYear = { year: number; nationalities: VisitorNationality[] }
  */
 export async function getVisitorNationalities(): Promise<VisitorYear[]> {
   const result = await db.execute(sql`
-    WITH slots AS (
-      SELECT arrival,
-             unnest(ARRAY[nationality, "secondNationality", "thirdNationality", "fourthNationality"]) AS nationality
-      FROM reservations
-      WHERE status <> 'CANCELLED' AND "checkedInAt" IS NOT NULL
-    ),
-    entered AS (
-      SELECT EXTRACT(YEAR FROM arrival)::int AS year,
-             btrim(nationality) AS nationality,
-             COUNT(*)::int AS guests
-      FROM slots
-      WHERE nationality IS NOT NULL AND btrim(nationality) <> ''
-      GROUP BY 1, 2
-    ),
-    bentral_rows AS (
+    WITH bentral_rows AS (
       SELECT lower(btrim(b."guestName")) AS guest_key,
              btrim(b.country) AS nationality,
              b."checkIn"::date AS check_in,
@@ -67,6 +57,52 @@ export async function getVisitorNationalities(): Promise<VisitorYear[]> {
         AND b.status IN ('Potrjeno', 'Plačano (1. del)')
         AND b."checkOut" < CURRENT_DATE
         AND b.country IS NOT NULL AND btrim(b.country) <> ''
+    ),
+    party AS (
+      SELECT EXTRACT(YEAR FROM r.arrival)::int AS year,
+             lower(btrim(r."guestName")) AS guest_key,
+             GREATEST(COALESCE(r.pax, 0), 0)::int AS pax,
+             ARRAY_REMOVE(ARRAY[
+               NULLIF(btrim(COALESCE(r.nationality, '')), ''),
+               NULLIF(btrim(COALESCE(r."secondNationality", '')), ''),
+               NULLIF(btrim(COALESCE(r."thirdNationality", '')), ''),
+               NULLIF(btrim(COALESCE(r."fourthNationality", '')), '')
+             ], NULL) AS nats
+      FROM reservations r
+      WHERE r.status <> 'CANCELLED' AND r."checkedInAt" IS NOT NULL
+    ),
+    sized AS (
+      SELECT year, guest_key, pax, nats,
+             COALESCE(cardinality(nats), 0) AS slots,
+             GREATEST(pax, COALESCE(cardinality(nats), 0)) AS people
+      FROM party
+      WHERE GREATEST(pax, COALESCE(cardinality(nats), 0)) > 0
+    ),
+    entered AS (
+      -- One country on the form: the whole party belongs to it.
+      SELECT year, nats[1] AS nationality, people AS guests
+      FROM sized
+      WHERE slots = 1
+      UNION ALL
+      -- Several countries: one guest per box.
+      SELECT s.year, s.nats[i] AS nationality, 1 AS guests
+      FROM sized s
+      CROSS JOIN LATERAL generate_series(1, s.slots) AS i
+      WHERE s.slots >= 2
+      UNION ALL
+      -- More people than boxes: the rest share the first country.
+      SELECT year, nats[1] AS nationality, people - slots AS guests
+      FROM sized
+      WHERE slots >= 2 AND people > slots
+      UNION ALL
+      -- No country written, and Bentral is not already counting this name.
+      SELECT s.year, 'ni vpisano' AS nationality, s.people AS guests
+      FROM sized s
+      WHERE s.slots = 0
+        AND NOT EXISTS (
+          SELECT 1 FROM bentral_rows b
+          WHERE b.guest_key = s.guest_key AND b.year = s.year
+        )
     ),
     -- More than a week between two rows means a separate holiday, not a price period.
     marked AS (
