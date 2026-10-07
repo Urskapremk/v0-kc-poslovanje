@@ -2642,13 +2642,21 @@ async function handleCreateReservation() {
                   : "Plačano"
                 : null;
 
-            // The boat follows the stay, exactly like the calendar bar: before check-in
-            // the arrival is the open task and sits on the left, after check-in it is
-            // done and the departure takes over on the right. Never both at once.
+            // Arrival stays on the left until check-in. The departure boat stays on
+            // the right as soon as that leg is booked, so the next-guest card shows
+            // both. After check-in the arrival is done and only the departure remains.
             const inHouse = !!src.checkedInAt && !src.checkedOutAt;
             const beforeArrival = !src.checkedInAt && !src.checkedOutAt;
+            // Marked as arranged by the guest. Only shown when that leg has no booked
+            // route, so the flag can never hide a boat we actually owe.
+            const ownArrival = !!(src as { ownArrivalTransfer?: boolean }).ownArrivalTransfer && !hasArrivalTransfer;
+            const ownDeparture =
+              !!(src as { ownDepartureTransfer?: boolean }).ownDepartureTransfer && !hasDepartureTransfer;
             const showArrival = beforeArrival && !noTransferNeeded;
-            const showDeparture = inHouse && !noTransferNeeded;
+            const departureHasCar = !!src.transfers?.departure?.hermanRouteId;
+            const showDeparture =
+              !noTransferNeeded &&
+              (inHouse || (beforeArrival && (!!hasDepartureTransfer || ownDeparture)));
             // The boat only rides the swell on the day the crossing actually happens —
             // same rule as the blinking arrival hour. A boat bobbing for a guest due in
             // four days is decoration; today it is the job in front of reception.
@@ -2656,12 +2664,6 @@ async function handleCreateReservation() {
             const departingToday = inHouse && String(src.departure || "").slice(0, 10) === today();
             const sail = (moving: boolean) => (moving ? " animate-sail" : "");
             const legClass = "flex items-center gap-1.5 whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.16em]";
-
-            // Marked as arranged by the guest. Only shown when that leg has no booked
-            // route, so the flag can never hide a boat we actually owe.
-            const ownArrival = !!(src as { ownArrivalTransfer?: boolean }).ownArrivalTransfer && !hasArrivalTransfer;
-            const ownDeparture =
-              !!(src as { ownDepartureTransfer?: boolean }).ownDepartureTransfer && !hasDepartureTransfer;
 
             // Arrival on the left: boat first, then the word. No entry and no flag means
             // the guest arranges it themselves anyway, so it is not an open task — show
@@ -2698,7 +2700,19 @@ async function handleCreateReservation() {
               hasDepartureTransfer ? (
                 <span className={`${legClass} text-[#4f7a54]`} title="Prevoz ob odhodu je urejen">
                   Odhod
-                  <Ship className={`h-3.5 w-3.5${sail(departingToday)}`} />
+                  <span className="flex items-center gap-1 rounded-full bg-[#4f7a54]/10 px-1.5 py-0.5" title="Čoln">
+                    <Ship className={`h-4 w-4${sail(departingToday)}`} />
+                    Čoln
+                  </span>
+                  {departureHasCar && (
+                    <>
+                      <span aria-hidden className="text-[#2b2622]/35">→</span>
+                      <span className="flex items-center gap-1 rounded-full bg-[#2b2622]/[0.06] px-1.5 py-0.5 text-[#2b2622]/70" title="Avto (taksi) iz porta">
+                        <Car className="h-4 w-4" />
+                        Avto
+                      </span>
+                    </>
+                  )}
                 </span>
               ) : ownDeparture ? (
                 <span className={`${legClass} text-[#2b2622]/55`} title="Gost odhod organizira sam">
@@ -2767,7 +2781,7 @@ async function handleCreateReservation() {
                         </div>
                       )}
                       {departure}
-                      {hasHerman && <Car className="h-3.5 w-3.5 text-[#2b2622]/40" title="Prevoz s Hermanom (avto do Porta)" />}
+                      {hasHerman && !departureHasCar && <Car className="h-3.5 w-3.5 text-[#2b2622]/40" title="Prevoz s Hermanom (avto do Porta)" />}
                     </span>
                   )}
                 </span>
