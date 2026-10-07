@@ -354,7 +354,7 @@ function SectionHeader({ eyebrow, title, subtitle }: { eyebrow?: string; title: 
   );
 }
 
-function LuxuryBadge({ children, variant = "default", light = false }: { children: React.ReactNode; variant?: "default" | "petrol" | "ocean" | "danger" | "gold"; light?: boolean }) {
+function LuxuryBadge({ children, variant = "default", light = false, title }: { children: React.ReactNode; variant?: "default" | "petrol" | "ocean" | "danger" | "gold"; light?: boolean; title?: string }) {
   const styles = {
     default: "bg-white/5 border-white/10 text-[#c9d1cf]",
     petrol: "bg-[#8fae92]/15 border-[#8fae92]/25 text-[#8fae92]",
@@ -371,7 +371,7 @@ function LuxuryBadge({ children, variant = "default", light = false }: { childre
     gold: "bg-[#8f6d3a]/10 border-[#8f6d3a]/30 text-[#7a5c2f]",
   };
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${(light ? lightStyles : styles)[variant]}`}>
+    <span title={title} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${(light ? lightStyles : styles)[variant]}`}>
       {children}
     </span>
   );
@@ -2938,7 +2938,12 @@ async function handleCreateReservation() {
                       </LuxuryBadge>
                     )}
                     {guest.honeymoon && <LuxuryBadge light variant="gold"><Heart className="h-3 w-3" /></LuxuryBadge>}
-                    {guest.allergies && <LuxuryBadge light variant="danger"><Leaf className="h-3 w-3" /></LuxuryBadge>}
+                    {String(guest.allergies || "").trim() && (
+                      <LuxuryBadge light variant="danger" title={`Alergija: ${String(guest.allergies).trim()}`}>
+                        <Leaf className="h-3 w-3" />
+                        {String(guest.allergies).trim()}
+                      </LuxuryBadge>
+                    )}
                   </div>
                   {indicators && (
                     <>
@@ -3084,7 +3089,8 @@ async function handleCreateReservation() {
                       const mealPaid = mealBadge && String(src.mealPlanPaymentStatus || '').toUpperCase() === 'PAID';
                       // Snack is ordered on top of the board, so it gets its own badge
                       const snack = !!src.mealPlanSnack;
-                      if (!source && !mealBadge && !snack) return null;
+                      const allergy = String(src.allergies || "").trim();
+                      if (!source && !mealBadge && !snack && !allergy) return null;
                       return (
                         <span className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1">
                           {source && (
@@ -3123,6 +3129,15 @@ async function handleCreateReservation() {
                               >
                                 Plačano
                               </span>
+                            </span>
+                          )}
+                          {allergy && (
+                            <span className="flex items-center gap-2.5">
+                              {(source || mealBadge || snack || mealPaid) && <span aria-hidden className="h-2.5 w-px bg-[#0f2e3a]/15" />}
+                              <LuxuryBadge light variant="danger" title={`Alergija: ${allergy}`}>
+                                <Leaf className="h-3 w-3" />
+                                {allergy}
+                              </LuxuryBadge>
                             </span>
                           )}
                         </span>
