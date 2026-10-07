@@ -64,7 +64,7 @@ const catLabel = (c: NabavaCategory) =>
               : c === STUDENT_FOOD_CAT
                 ? STUDENT_FOOD_NAME
                 : c === ACCOUNTING_CAT
-                  ? "računovodstvo"
+                  ? "Računovodstvo"
                   : CATEGORY_LABELS[c]
 
 function RentButton({ active, onClick }: { active: boolean; onClick: () => void }) {
@@ -78,6 +78,67 @@ function RentButton({ active, onClick }: { active: boolean; onClick: () => void 
     >
       <Home className="h-3 w-3" /> Najemnina
     </button>
+  )
+}
+
+type PayPot = "tourism" | "sarl" | "orange"
+
+function PayPotButtons({ value, onChange }: { value: PayPot; onChange: (v: PayPot) => void }) {
+  const items: { id: PayPot; label: string }[] = [
+    { id: "tourism", label: "Blagajna Tourism" },
+    { id: "sarl", label: "Blagajna SARL" },
+    { id: "orange", label: "Orange Money" },
+  ]
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.map((c) => {
+        const active = value === c.id
+        const orange = c.id === "orange"
+        return (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onChange(c.id)}
+            className={`min-w-[30%] flex-1 rounded-lg px-2 py-1.5 text-[10px] font-medium border transition-colors ${
+              active
+                ? orange
+                  ? "bg-[#c4741f]/15 text-[#c4741f] border-[#c4741f]/40"
+                  : "bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40"
+                : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15"
+            }`}
+          >
+            {c.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function potWhere(pot: PayPot) {
+  return pot === "orange" ? "Orange Money" : `blagajne ${pot === "sarl" ? "SARL" : "Tourism"}`
+}
+
+function AccountingChip({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg px-2 py-1 text-[10px] font-medium border transition-colors ${
+        active ? "" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10"
+      }`}
+      style={active ? { backgroundColor: `${ACCOUNTING_COLOR}22`, borderColor: `${ACCOUNTING_COLOR}66`, color: ACCOUNTING_COLOR } : undefined}
+    >
+      Računovodstvo
+    </button>
+  )
+}
+
+function AccountingNote() {
+  return (
+    <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${ACCOUNTING_COLOR}55`, backgroundColor: `${ACCOUNTING_COLOR}10`, color: ACCOUNTING_COLOR }}>
+      Knjiži se na strošek „Računovodstvo“ — ločeno od oddelkov. Denar gre iz izbrane blagajne ali iz Orange Money.
+    </p>
   )
 }
 
@@ -205,7 +266,7 @@ export function NabavaPurchasesSection({
   const { data, mutate } = useSWR(["nabava-purchases", tripId], () => getNabavaPurchases(tripId), {
     refreshInterval: 0,
   })
-  const purchases = (data || []).filter((p) => p.category !== ACCOUNTING_CAT)
+  const purchases = data || []
   const { data: loanGuestsData } = useSWR("nabava-loan-guests", getNabavaLoanGuests)
   const loanGuests = loanGuestsData || []
   const [guestId, setGuestId] = useState("")
@@ -222,7 +283,7 @@ export function NabavaPurchasesSection({
   const [name, setName] = useState("")
   const [amount, setAmount] = useState("")
   const [category, setCategory] = useState<NabavaCategory>("kuhinja")
-  const [company, setCompany] = useState<"tourism" | "sarl">("tourism")
+  const [pot, setPot] = useState<PayPot>("tourism")
   const [date, setDate] = useState(today)
   const [rate, setRate] = useState("")
   const [saving, setSaving] = useState(false)
@@ -231,7 +292,7 @@ export function NabavaPurchasesSection({
   const [eName, setEName] = useState("")
   const [eAmount, setEAmount] = useState("")
   const [eCategory, setECategory] = useState<NabavaCategory>("kuhinja")
-  const [eCompany, setECompany] = useState<"tourism" | "sarl">("tourism")
+  const [ePot, setEPot] = useState<PayPot>("tourism")
   const [eDate, setEDate] = useState(today)
   const [eRate, setERate] = useState("")
 
@@ -242,7 +303,7 @@ export function NabavaPurchasesSection({
     setName("")
     setAmount("")
     setCategory("kuhinja")
-    setCompany("tourism")
+    setPot("tourism")
     setDate(today)
     setRate("")
     setGuestId("")
@@ -261,34 +322,39 @@ export function NabavaPurchasesSection({
     const amt = parseAmt(amount)
     const isLoan = category === LOAN_CAT
     const isRent = category === RENT_CAT
-    if ((!isLoan && !isRent && !name.trim()) || amt <= 0) return
+    const isAccounting = category === ACCOUNTING_CAT
+    if ((!isLoan && !isRent && !isAccounting && !name.trim()) || amt <= 0) return
     const rt = parseRate(rate)
     if (category === ASSET_CAT && rt <= 0) return
     if (isLoan && !guestId) return
     const lr = parseRate(loanRate)
     if (isLoan && lr <= 0) return
     if (category === WIP_CAT && !assetId) return
+    const where = potWhere(pot)
     const msg = isLoan
-      ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} kot posojilo ${loanGuestLabel(guestId)} in dodam na njegov račun ${(amt / (lr || 1)).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € (tečaj ${lr})?`
+      ? `Odštejem ${ar(amt)} iz ${where} kot posojilo ${loanGuestLabel(guestId)} in dodam na njegov račun ${(amt / (lr || 1)).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € (tečaj ${lr})?`
       : category === WIP_CAT
-        ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} in dodam strošek na pogodbo „${wipLabel(assetId)}“?`
+        ? `Odštejem ${ar(amt)} iz ${where} in dodam strošek na pogodbo „${wipLabel(assetId)}“?`
         : isRent
-          ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} in poknjižim na strošek „${RENT_NAME}“?`
-          : `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"}?`
+          ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „${RENT_NAME}“?`
+          : isAccounting
+            ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „Računovodstvo“?`
+            : `Odštejem ${ar(amt)} iz ${where}?`
     if (!confirm(msg)) return
     setSaving(true)
     try {
       await addNabavaPurchase({
         tripId,
-        name: name.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : ""),
+        name: name.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : ""),
         category,
         amountAr: amt,
-        company,
+        company: pot === "sarl" ? "sarl" : "tourism",
         date,
         annualRatePct: rt,
         reservationId: isLoan ? guestId : undefined,
         loanRate: isLoan ? lr : undefined,
         assetId: category === WIP_CAT ? assetId : undefined,
+        payMethod: pot === "orange" ? "orange" : "cash",
       })
       resetAdd()
       await Promise.all([mutate(), mutateWip()])
@@ -302,7 +368,7 @@ export function NabavaPurchasesSection({
     setEName(p.name)
     setEAmount(String(p.amountAr || ""))
     setECategory(p.category)
-    setECompany(p.company === "sarl" ? "sarl" : "tourism")
+    setEPot(p.payMethod === "orange" ? "orange" : p.company === "sarl" ? "sarl" : "tourism")
     setEDate((p.date || today).slice(0, 10))
     setERate(p.annualRatePct ? String(p.annualRatePct) : "")
     setEGuestId(p.reservationId || "")
@@ -315,7 +381,8 @@ export function NabavaPurchasesSection({
     const amt = parseAmt(eAmount)
     const isLoan = eCategory === LOAN_CAT
     const isRent = eCategory === RENT_CAT
-    if ((!isLoan && !isRent && !eName.trim()) || amt <= 0) return
+    const isAccounting = eCategory === ACCOUNTING_CAT
+    if ((!isLoan && !isRent && !isAccounting && !eName.trim()) || amt <= 0) return
     const rt = parseRate(eRate)
     if (eCategory === ASSET_CAT && rt <= 0) return
     if (isLoan && !eGuestId) return
@@ -326,15 +393,16 @@ export function NabavaPurchasesSection({
     try {
       await updateNabavaPurchase({
         id: editId,
-        name: eName.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : ""),
+        name: eName.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : ""),
         category: eCategory,
         amountAr: amt,
-        company: eCompany,
+        company: ePot === "sarl" ? "sarl" : "tourism",
         date: eDate,
         annualRatePct: rt,
         reservationId: isLoan ? eGuestId : undefined,
         loanRate: isLoan ? lr : undefined,
         assetId: eCategory === WIP_CAT ? eAssetId : undefined,
+        payMethod: ePot === "orange" ? "orange" : "cash",
       })
       setEditId(null)
       await Promise.all([mutate(), mutateWip()])
@@ -343,9 +411,10 @@ export function NabavaPurchasesSection({
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Izbrišem nakup? Odliv iz blagajne se bo razveljavil.")) return
-    await deleteNabavaPurchase(id)
+  const handleDelete = async (p: (typeof purchases)[number]) => {
+    const where = p.payMethod === "orange" ? "Orange Money" : "blagajne"
+    if (!confirm(`Izbrišem nakup? Odliv iz ${where} se bo razveljavil.`)) return
+    await deleteNabavaPurchase(p.id)
     await Promise.all([mutate(), mutateWip()])
   }
 
@@ -423,8 +492,16 @@ export function NabavaPurchasesSection({
                   >
                     Hrana za študente
                   </button>
+                  <AccountingChip
+                    active={eCategory === ACCOUNTING_CAT}
+                    onClick={() => {
+                      setECategory(ACCOUNTING_CAT)
+                      if (!eName.trim()) setEName("Računovodstvo")
+                    }}
+                  />
                 </div>
                 {eCategory === RENT_CAT && <RentNote />}
+                {eCategory === ACCOUNTING_CAT && <AccountingNote />}
                 {eCategory === STIPEND_CAT && (
                   <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
                     Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
@@ -478,19 +555,7 @@ export function NabavaPurchasesSection({
                     )}
                   </div>
                 )}
-                <div className="flex gap-2">
-                  {(["tourism", "sarl"] as const).map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setECompany(c)}
-                      className={`flex-1 rounded-lg px-2 py-1.5 text-[10px] font-medium border transition-colors ${
-                        eCompany === c ? "bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15"
-                      }`}
-                    >
-                      {c === "tourism" ? "Tourism" : "SARL"}
-                    </button>
-                  ))}
-                </div>
+                <PayPotButtons value={ePot} onChange={setEPot} />
                 <input
                   type="date"
                   value={eDate}
@@ -545,7 +610,7 @@ export function NabavaPurchasesSection({
                     </p>
                   )}
                   <p className="text-[10px] text-[#2b2622]/55">
-                    {ar(p.amountAr)} · Gotovina ({p.company === "sarl" ? "SARL" : "Tourism"})
+                    {ar(p.amountAr)} · {p.payMethod === "orange" ? <span className="font-medium text-[#c4741f]">Orange Money</span> : <>Gotovina ({p.company === "sarl" ? "SARL" : "Tourism"})</>}
                     {p.date ? ` · ${new Date(p.date + "T00:00:00").toLocaleDateString("sl-SI", { day: "numeric", month: "short" })}` : ""}
                   </p>
                 </div>
@@ -561,7 +626,7 @@ export function NabavaPurchasesSection({
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
                   <button
-                    onClick={() => handleDelete(p.id)}
+                    onClick={() => handleDelete(p)}
                     className="flex h-7 w-7 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40"
                     aria-label="Izbriši nakup"
                   >
@@ -643,8 +708,16 @@ export function NabavaPurchasesSection({
             >
               Hrana za študente
             </button>
+            <AccountingChip
+              active={category === ACCOUNTING_CAT}
+              onClick={() => {
+                setCategory(ACCOUNTING_CAT)
+                if (!name.trim()) setName("Računovodstvo")
+              }}
+            />
           </div>
           {category === RENT_CAT && <RentNote />}
+          {category === ACCOUNTING_CAT && <AccountingNote />}
           {category === STIPEND_CAT && (
             <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
               Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
@@ -690,19 +763,7 @@ export function NabavaPurchasesSection({
               <p className="text-[9px] text-[#2b2622]/45">Ne bremeni oddelka takoj — knjiži se kot amortizacija čez dobo.</p>
             </div>
           )}
-          <div className="flex gap-2">
-            {(["tourism", "sarl"] as const).map((c) => (
-              <button
-                key={c}
-                onClick={() => setCompany(c)}
-                className={`flex-1 rounded-lg px-2 py-1.5 text-[10px] font-medium border transition-colors ${
-                  company === c ? "bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15"
-                }`}
-              >
-                Blagajna {c === "tourism" ? "Tourism" : "SARL"}
-              </button>
-            ))}
-          </div>
+          <PayPotButtons value={pot} onChange={setPot} />
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-[#2b2622]/55">Datum:</span>
             <input
@@ -717,14 +778,14 @@ export function NabavaPurchasesSection({
               disabled={
                 saving ||
                 parseAmt(amount) <= 0 ||
-                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : category === RENT_CAT ? false : !name.trim()) ||
+                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : category === RENT_CAT || category === ACCOUNTING_CAT ? false : !name.trim()) ||
                 (category === WIP_CAT && !assetId)
               }
               onClick={handleAdd}
               className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               style={{ backgroundColor: `${ACCENT}22`, border: `1px solid ${ACCENT}66`, color: ACCENT }}
             >
-              {saving ? "Beležim…" : "Dodaj nakup (odštej iz blagajne)"}
+              {saving ? "Beležim…" : pot === "orange" ? "Dodaj nakup (odštej iz Orange Money)" : "Dodaj nakup (odštej iz blagajne)"}
             </button>
             <button
               onClick={resetAdd}

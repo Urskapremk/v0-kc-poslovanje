@@ -339,6 +339,7 @@ export async function addNabavaPurchase(params: {
   reservationId?: string
   loanRate?: number
   assetId?: string
+  payMethod?: "cash" | "orange"
 }) {
   await ensureTable()
   const id = `nabp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -353,9 +354,9 @@ export async function addNabavaPurchase(params: {
   if (category === LOAN_CAT && !reservationId) throw new Error("Izberi gosta za posojilo.")
   const loanRate = category === LOAN_CAT ? Number(params.loanRate) || 0 : 0
   if (category === LOAN_CAT && loanRate <= 0) throw new Error("Vpiši menjalni tečaj za posojilo.")
-  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : `Nabava — ${params.name || "nakup"}`
-  // Odliv iz blagajne (gotovina) — nakup/posojilo je vedno plačano z gotovino.
-  const { id: cashExpenseId } = await addCashExpense({ company, date, purpose, amount: amountAr })
+  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : purchasePurpose(category, params.name)
+  // Natanko en lonček: blagajna ALI Orange Money. Bančne vrstice ni.
+  const method = params.payMethod === "orange" ? "orange" : "cash"
   // Posojilo gostu → postavka na računu gosta (plača jo s kartico ob odhodu).
   const orderItemId = category === LOAN_CAT ? await createLoanOrderItem(reservationId, amountAr, date, loanRate) : null
   // Osnovno sredstvo → ustvari zapis v fixed_assets (amortizacija čez čas; nakup NE bremeni oddelka takoj).
@@ -370,10 +371,26 @@ export async function addNabavaPurchase(params: {
     })
     fixedAssetId = fa.id
   }
-  await db.execute(
-    sql`INSERT INTO nabava_purchases (id, "tripId", name, category, "amountAr", company, date, "cashExpenseId", "annualRatePct", "fixedAssetId", "reservationId", "orderItemId", "loanRate", "assetId")
-        VALUES (${id}, ${params.tripId}, ${params.name || ""}, ${category}, ${amountAr}, ${company}, ${date}, ${cashExpenseId}, ${annualRatePct}, ${fixedAssetId}, ${reservationId || null}, ${orderItemId}, ${loanRate || null}, ${assetId || null})`
-  )
+  let cashExpenseId: string | null = null
+  let omLedgerId: string | null = null
+  try {
+    const ledger = await syncPurchasePot({ method, company, date, purpose, amountAr })
+    cashExpenseId = ledger.cashExpenseId
+    omLedgerId = ledger.omLedgerId
+    await db.execute(
+      sql`INSERT INTO nabava_purchases (id, "tripId", name, category, "amountAr", company, date, "cashExpenseId", "annualRatePct", "fixedAssetId", "reservationId", "orderItemId", "loanRate", "assetId", "payMethod", "omLedgerId")
+          VALUES (${id}, ${params.tripId}, ${params.name || ""}, ${category}, ${amountAr}, ${company}, ${date}, ${cashExpenseId}, ${annualRatePct}, ${fixedAssetId}, ${reservationId || null}, ${orderItemId}, ${loanRate || null}, ${assetId || null}, ${method}, ${omLedgerId})`
+    )
+  } catch (e) {
+    if (cashExpenseId) await deleteCashExpense(cashExpenseId)
+    if (omLedgerId) await deleteOmTransaction(omLedgerId)
+    if (orderItemId) await deleteLoanOrderItem(orderItemId)
+    if (fixedAssetId) {
+      const { deleteFixedAsset } = await import("./statistics")
+      await deleteFixedAsset(fixedAssetId)
+    }
+    throw e
+  }
   if (category === WIP_CAT) await syncWipCost(id, category, assetId, date, params.name, amountAr)
   return { ok: true, id }
 }
@@ -389,6 +406,7 @@ export async function updateNabavaPurchase(params: {
   reservationId?: string
   loanRate?: number
   assetId?: string
+  payMethod?: "cash" | "orange"
 }) {
   await ensureTable()
   const category = normCategory(params.category)
@@ -403,27 +421,29 @@ export async function updateNabavaPurchase(params: {
   const loanRate = category === LOAN_CAT ? Number(params.loanRate) || 0 : 0
   if (category === LOAN_CAT && loanRate <= 0) throw new Error("Vpiši menjalni tečaj za posojilo.")
   const existing = await db.execute(
-    sql`SELECT "cashExpenseId", company, "fixedAssetId", "orderItemId", "omLedgerId", category FROM nabava_purchases WHERE id = ${params.id}`
+    sql`SELECT "cashExpenseId", company, "fixedAssetId", "orderItemId", "omLedgerId", "payMethod", category FROM nabava_purchases WHERE id = ${params.id}`
   )
   const row = existing.rows[0] as Record<string, unknown> | undefined
-  if (row?.omLedgerId || String(row?.category || "") === ACCOUNTING_CAT) {
-    throw new Error("Računovodstvo se ureja posebej.")
-  }
-  const oldCashId = row?.cashExpenseId ? String(row.cashExpenseId) : ""
-  const oldCompany = row?.company ? String(row.company) : "tourism"
   const oldFixedAssetId = row?.fixedAssetId ? String(row.fixedAssetId) : ""
   const oldOrderItemId = row?.orderItemId ? String(row.orderItemId) : ""
-  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : `Nabava — ${params.name || "nakup"}`
-  let cashExpenseId = oldCashId
-  if (oldCashId && oldCompany === company) {
-    // Isto podjetje → posodobi obstoječi odliv.
-    await updateCashExpense(oldCashId, { date, purpose, amount: amountAr })
-  } else {
-    // Podjetje se je spremenilo (ali odliva še ni) → izbriši starega in ustvari novega.
-    if (oldCashId) await deleteCashExpense(oldCashId)
-    const created = await addCashExpense({ company, date, purpose, amount: amountAr })
-    cashExpenseId = created.id
-  }
+  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : purchasePurpose(category, params.name)
+  const method: "cash" | "orange" =
+    params.payMethod === "orange" ? "orange" : params.payMethod === "cash" ? "cash" : row?.payMethod === "orange" ? "orange" : "cash"
+  const ledger = await syncPurchasePot({
+    method,
+    company,
+    date,
+    purpose,
+    amountAr,
+    existing: {
+      payMethod: row?.payMethod === "orange" ? "orange" : "cash",
+      company: row?.company ? String(row.company) : "tourism",
+      cashExpenseId: row?.cashExpenseId ? String(row.cashExpenseId) : "",
+      omLedgerId: row?.omLedgerId ? String(row.omLedgerId) : "",
+    },
+  })
+  const cashExpenseId = ledger.cashExpenseId
+  const omLedgerId = ledger.omLedgerId
   // Uskladi postavko na računu gosta (posojilo): vedno na novo, da sledi gostu/znesku/datumu.
   await deleteLoanOrderItem(oldOrderItemId)
   const orderItemId = category === LOAN_CAT ? await createLoanOrderItem(reservationId, amountAr, date, loanRate) : null
@@ -454,7 +474,7 @@ export async function updateNabavaPurchase(params: {
   }
   await db.execute(
     sql`UPDATE nabava_purchases
-        SET name = ${params.name || ""}, category = ${category}, "amountAr" = ${amountAr}, company = ${company}, date = ${date}, "cashExpenseId" = ${cashExpenseId}, "annualRatePct" = ${annualRatePct}, "fixedAssetId" = ${fixedAssetId}, "reservationId" = ${reservationId || null}, "orderItemId" = ${orderItemId}, "loanRate" = ${loanRate || null}, "assetId" = ${assetId || null}
+        SET name = ${params.name || ""}, category = ${category}, "amountAr" = ${amountAr}, company = ${company}, date = ${date}, "cashExpenseId" = ${cashExpenseId}, "payMethod" = ${method}, "omLedgerId" = ${omLedgerId}, "annualRatePct" = ${annualRatePct}, "fixedAssetId" = ${fixedAssetId}, "reservationId" = ${reservationId || null}, "orderItemId" = ${orderItemId}, "loanRate" = ${loanRate || null}, "assetId" = ${assetId || null}
         WHERE id = ${params.id}`
   )
   await syncWipCost(params.id, category, assetId, date, params.name, amountAr)
@@ -549,6 +569,62 @@ function accountingPurpose(note: string) {
   return note ? `Računovodstvo — ${note}` : "Računovodstvo"
 }
 
+function purchasePurpose(category: NabavaCat, name: string) {
+  if (category === ACCOUNTING_CAT) {
+    const trimmed = (name || "").trim()
+    const note = !trimmed || trimmed === "Računovodstvo" ? "" : trimmed
+    return accountingPurpose(note)
+  }
+  return `Nabava — ${name || "nakup"}`
+}
+
+// En odliv: gotovina iz izbrane blagajne ali Orange Money. Nikoli oboje in nikoli banka.
+async function syncPurchasePot(params: {
+  method: "cash" | "orange"
+  company: string
+  date: string
+  purpose: string
+  amountAr: number
+  existing?: { payMethod: string; company: string; cashExpenseId: string; omLedgerId: string }
+}) {
+  const prev = params.existing
+  if (params.method === "orange") {
+    if (prev?.cashExpenseId) await deleteCashExpense(prev.cashExpenseId)
+    if (prev?.payMethod === "orange" && prev.omLedgerId) {
+      await updateOmTransaction(prev.omLedgerId, {
+        date: params.date,
+        direction: "out",
+        category: "placilo",
+        amount: params.amountAr,
+        description: params.purpose,
+      })
+      return { cashExpenseId: null as string | null, omLedgerId: prev.omLedgerId }
+    }
+    if (prev?.omLedgerId) await deleteOmTransaction(prev.omLedgerId)
+    const created = await addOmTransaction({
+      date: params.date,
+      direction: "out",
+      category: "placilo",
+      amount: params.amountAr,
+      description: params.purpose,
+    })
+    return { cashExpenseId: null as string | null, omLedgerId: created.id }
+  }
+  if (prev?.omLedgerId) await deleteOmTransaction(prev.omLedgerId)
+  if (prev && prev.payMethod !== "orange" && prev.cashExpenseId && prev.company === params.company) {
+    await updateCashExpense(prev.cashExpenseId, { date: params.date, purpose: params.purpose, amount: params.amountAr })
+    return { cashExpenseId: prev.cashExpenseId, omLedgerId: null as string | null }
+  }
+  if (prev?.cashExpenseId) await deleteCashExpense(prev.cashExpenseId)
+  const created = await addCashExpense({
+    company: params.company,
+    date: params.date,
+    purpose: params.purpose,
+    amount: params.amountAr,
+  })
+  return { cashExpenseId: created.id, omLedgerId: null as string | null }
+}
+
 async function ensureAccountingTrip(date: string) {
   const existing = await db.execute(sql`
     SELECT id FROM nabava_trips
@@ -589,43 +665,14 @@ async function writeAccountingLedger(params: {
   amountAr: number
   existing?: { payMethod: string; company: string; cashExpenseId: string; omLedgerId: string }
 }) {
-  const purpose = accountingPurpose(params.note)
-  const prev = params.existing
-  if (params.method === "orange") {
-    if (prev?.cashExpenseId) await deleteCashExpense(prev.cashExpenseId)
-    if (prev?.payMethod === "orange" && prev.omLedgerId) {
-      await updateOmTransaction(prev.omLedgerId, {
-        date: params.date,
-        direction: "out",
-        category: "placilo",
-        amount: params.amountAr,
-        description: purpose,
-      })
-      return { cashExpenseId: null as string | null, omLedgerId: prev.omLedgerId }
-    }
-    if (prev?.omLedgerId) await deleteOmTransaction(prev.omLedgerId)
-    const created = await addOmTransaction({
-      date: params.date,
-      direction: "out",
-      category: "placilo",
-      amount: params.amountAr,
-      description: purpose,
-    })
-    return { cashExpenseId: null as string | null, omLedgerId: created.id }
-  }
-  if (prev?.omLedgerId) await deleteOmTransaction(prev.omLedgerId)
-  if (prev && prev.payMethod !== "orange" && prev.cashExpenseId && prev.company === params.company) {
-    await updateCashExpense(prev.cashExpenseId, { date: params.date, purpose, amount: params.amountAr })
-    return { cashExpenseId: prev.cashExpenseId, omLedgerId: null as string | null }
-  }
-  if (prev?.cashExpenseId) await deleteCashExpense(prev.cashExpenseId)
-  const created = await addCashExpense({
+  return syncPurchasePot({
+    method: params.method,
     company: params.company,
     date: params.date,
-    purpose,
-    amount: params.amountAr,
+    purpose: accountingPurpose(params.note),
+    amountAr: params.amountAr,
+    existing: params.existing,
   })
-  return { cashExpenseId: created.id, omLedgerId: null as string | null }
 }
 
 export async function getHvAccountingPayments(): Promise<NabavaPurchase[]> {
@@ -635,7 +682,7 @@ export async function getHvAccountingPayments(): Promise<NabavaPurchase[]> {
     FROM nabava_purchases p
     LEFT JOIN reservations r ON r.id = p."reservationId"
     JOIN nabava_trips t ON t.id = p."tripId"
-    WHERE p.category = ${ACCOUNTING_CAT} AND t.site = 'hv'
+    WHERE p.category = ${ACCOUNTING_CAT} AND t.site = 'hv' AND t.note = ${ACCOUNTING_TRIP_NOTE}
     ORDER BY p.date DESC, p."createdAt" DESC
   `)
   return (res.rows as Record<string, unknown>[]).map(mapPurchase)
