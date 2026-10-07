@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import useSWR, { mutate } from 'swr'
-import { Receipt, Plus, Trash2, ExternalLink, ChevronDown, ChevronRight, ChevronLeft, FileText, Pencil, Check, X, Layers, Languages, Loader2, ImagePlus, ScanLine, Merge, Mail, Building2, Send, CreditCard, Smartphone, Banknote, Printer, Maximize2, Scissors, Search } from 'lucide-react'
+import { Receipt, Plus, Trash2, ExternalLink, ChevronDown, ChevronRight, ChevronLeft, FileText, Pencil, Check, X, Layers, Languages, Loader2, ImagePlus, ScanLine, Merge, Mail, Building2, Send, CreditCard, Smartphone, Banknote, Printer, Maximize2, Scissors, Search, Stamp } from 'lucide-react'
 import {
   getStroskiReceipts,
   deleteStroskiReceipt,
@@ -17,6 +17,7 @@ import {
   sendReceiptToAccounting,
   recognizeAllStroskiReceipts,
   setReceiptPaymentMethod,
+  setReceiptKnjizeno,
   getOmMatchesForReceipt,
   getBankMatchesForReceipt,
   type StroskiReceipt,
@@ -226,6 +227,7 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
 
   // Način plačila
   const [payingId, setPayingId] = useState<string | null>(null)
+  const [knjizenjeId, setKnjizenjeId] = useState<string | null>(null)
   const [cashConfirmId, setCashConfirmId] = useState<string | null>(null)
   const [omMatches, setOmMatches] = useState<Record<string, OmMatch[]>>({})
   const [omChecking, setOmChecking] = useState<string | null>(null)
@@ -323,6 +325,20 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
       setActionError('Shranjevanje e-naslova ni uspelo.')
     } finally {
       setSavingEmail(false)
+    }
+  }
+
+  async function handleToggleKnjizeno(r: StroskiReceipt) {
+    if (knjizenjeId) return
+    setKnjizenjeId(r.id)
+    setActionError(null)
+    try {
+      await setReceiptKnjizeno(r.id, !r.knjizenoAt)
+      refresh()
+    } catch {
+      setActionError('Označevanje knjiženo ni uspelo.')
+    } finally {
+      setKnjizenjeId(null)
     }
   }
 
@@ -1155,6 +1171,30 @@ export default function StroskiArhivTab({ year, month }: { year: number; month: 
                                 </span>
                               )}
                             </div>
+                            {r.knjizenoAt && (
+                              <span className="flex shrink-0 items-center self-stretch px-0.5">
+                                <span
+                                  data-knjizeno-stamp=""
+                                  className="pointer-events-none -rotate-12 select-none rounded-md border-2 border-[#f3b4d0]/90 bg-[#0a2029]/45 px-2 py-0.5 text-[12px] font-extrabold leading-none tracking-[0.12em] text-[#ffd0e6]"
+                                >
+                                  Knjiženo
+                                </span>
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              data-knjizeno-toggle=""
+                              onClick={() => handleToggleKnjizeno(r)}
+                              disabled={knjizenjeId === r.id}
+                              className={`rounded-lg p-2 transition-all disabled:opacity-60 ${
+                                r.knjizenoAt
+                                  ? 'text-[#e56b9f] hover:bg-[#e56b9f]/15'
+                                  : 'text-white/40 hover:bg-white/10 hover:text-[#e56b9f]'
+                              }`}
+                              title={r.knjizenoAt ? 'Knjiženo — klikni za razveljavitev' : 'Označi kot knjiženo'}
+                            >
+                              {knjizenjeId === r.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Stamp className="h-4 w-4" />}
+                            </button>
                             <button
                               onClick={() => handleSendToAccounting(r)}
                               disabled={sendingId === r.id}
