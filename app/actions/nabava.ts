@@ -828,8 +828,60 @@ export async function getAutoMassageOrderItemIds(): Promise<string[]> {
   return (res.rows as Record<string, unknown>[]).map((r) => String(r.massageOrderItemId))
 }
 
+function ymd(value: unknown): string {
+  if (value == null || value === "") return ""
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getUTCFullYear()
+    const m = String(value.getUTCMonth() + 1).padStart(2, "0")
+    const d = String(value.getUTCDate()).padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }
+  const match = String(value).match(/\d{4}-\d{2}-\d{2}/)
+  return match ? match[0] : ""
+}
+
+// Postavka masaže je lahko na računu recepcije (order_items) ali na dobavnici bara.
+// Oba vira knjižita isto gotovino maserki. Id je shranjen v massageOrderItemId.
+async function loadMassageSource(id: string): Promise<{ name: string; category: string; qty: number; eventDate: string; guestName: string } | null> {
+  const itemRes = await db.execute(sql`
+    SELECT oi.name, oi.category, oi.qty, oi."eventDate", r."guestName"
+    FROM order_items oi
+    LEFT JOIN reservations r ON r.id = oi."reservationId"
+    WHERE oi.id = ${id}
+    LIMIT 1
+  `)
+  const item = itemRes.rows[0] as Record<string, unknown> | undefined
+  if (item) {
+    return {
+      name: String(item.name || ""),
+      category: String(item.category || ""),
+      qty: Number(item.qty) || 1,
+      eventDate: ymd(item.eventDate),
+      guestName: String(item.guestName || ""),
+    }
+  }
+  const noteRes = await db.execute(sql`
+    SELECT dni."productName" AS name, dni.category, dni.quantity AS qty, dn.date AS "eventDate",
+           COALESCE(NULLIF(BTRIM(r."guestName"), ''), NULLIF(BTRIM(dn."guestName"), '')) AS "guestName"
+    FROM delivery_note_items dni
+    JOIN delivery_notes dn ON dn.id = dni."deliveryNoteId"
+    LEFT JOIN reservations r ON r.id = dn."reservationId"
+    WHERE dni.id = ${id}
+    LIMIT 1
+  `)
+  const note = noteRes.rows[0] as Record<string, unknown> | undefined
+  if (!note) return null
+  return {
+    name: String(note.name || ""),
+    category: String(note.category || ""),
+    qty: Number(note.qty) || 1,
+    eventDate: ymd(note.eventDate),
+    guestName: String(note.guestName || ""),
+  }
+}
+
 // Ustvari, premakne ali odstrani gotovinsko plačilo maserki za eno postavko na računu gosta.
-// Kliče se ob vpisu, spremembi datuma in brisanju. Če Urška vrstico v nabavi zbriše ročno,
+// Kliče se ob vpisu, spremembi datuma/količine in brisanju. Če Urška vrstico v nabavi zbriše ročno,
 // se ne ustvari znova, dokler postavke znova ne shrani.
 export async function syncMassageWorkerCash(orderItemId: string) {
   if (!orderItemId) return
@@ -839,17 +891,10 @@ export async function syncMassageWorkerCash(orderItemId: string) {
   `)
   const linked = existing.rows[0] as Record<string, unknown> | undefined
 
-  const itemRes = await db.execute(sql`
-    SELECT oi.name, oi.category, oi.qty, oi."eventDate", r."guestName"
-    FROM order_items oi
-    LEFT JOIN reservations r ON r.id = oi."reservationId"
-    WHERE oi.id = ${orderItemId}
-    LIMIT 1
-  `)
-  const item = itemRes.rows[0] as Record<string, unknown> | undefined
-  const eventDate = item?.eventDate ? String(item.eventDate).slice(0, 10) : ""
+  const item = await loadMassageSource(orderItemId)
+  const eventDate = item?.eventDate || ""
   const book = !!item
-    && isGuestMassage(String(item.category || ""), String(item.name || ""))
+    && isGuestMassage(item.category, item.name)
     && /^\d{4}-\d{2}-\d{2}$/.test(eventDate)
     && eventDate >= MASSAGE_AUTO_FROM
 
