@@ -735,6 +735,26 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
       assignments.Alex = 'OFF'
     }
 
+    // 9. oktober 2026: samo ta dan zamenjava Flavi ↔ Frenki (opoldne ↔ večer).
+    // Po Alexovem izstopu, ker ročni vnos pred njim večerno študentko spet
+    // prestavi opoldne. Ostali ta dan ostanejo (Sandia večer, Alex prost).
+    if (date === '2026-10-09') {
+      const flavi = 'Flavienne Winjisna'
+      const frenki = 'Maria Franclise Soanatera'
+      const flaviShift = assignments[flavi]
+      const frenkiShift = assignments[frenki]
+      if (
+        (flaviShift === 'MIDDAY' || flaviShift === 'EVENING') &&
+        (frenkiShift === 'MIDDAY' || frenkiShift === 'EVENING')
+      ) {
+        assignments[flavi] = frenkiShift
+        assignments[frenki] = flaviShift
+      } else {
+        assignments[frenki] = 'MIDDAY'
+        assignments[flavi] = 'EVENING'
+      }
+    }
+
     // Ročno določeni dnevi (BAR_MANUAL_OVERRIDES) so v celoti ročni → samodejni
     // dodatki (top-up 2-18, imenska pomoč 24-29) se zanje NE uporabijo.
     const isManualDay = !!BAR_MANUAL_OVERRIDES[date]
