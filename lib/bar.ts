@@ -404,6 +404,60 @@ function pickRotatedStudent(evening: string[], turn: number): string | null {
   return onEvening[0]
 }
 
+function shiftNames(assignments: Record<string, BarShift>, shift: BarShift): string[] {
+  return Object.entries(assignments)
+    .filter(([, value]) => value === shift)
+    .map(([name]) => name)
+}
+
+function isBarStudent(name: string): boolean {
+  return (BAR_STUDENTS as readonly string[]).includes(name)
+}
+
+type StudentBalance = Record<string, { MORNING: number; MIDDAY: number; EVENING: number }>
+
+function emptyStudentBalance(): StudentBalance {
+  const counts: StudentBalance = {}
+  for (const name of BAR_STUDENTS) counts[name] = { MORNING: 0, MIDDAY: 0, EVENING: 0 }
+  return counts
+}
+
+function noteStudentShift(counts: StudentBalance, name: string, shift: BarShift) {
+  if (shift === 'MORNING' || shift === 'MIDDAY' || shift === 'EVENING') counts[name][shift] += 1
+}
+
+// Študentka z najmanj opoldanskimi smenami od 8. 10. naprej. Ob izenačenju
+// Flavi, nato Brigida, nato Frenki.
+function pickStudentForMidday(eligible: string[], counts: StudentBalance): string {
+  const order = BAR_STUDENTS as readonly string[]
+  return [...eligible].sort((a, b) => {
+    const behind = counts[a].MIDDAY - counts[b].MIDDAY
+    if (behind !== 0) return behind
+    return order.indexOf(a) - order.indexOf(b)
+  })[0]
+}
+
+// Končne smene študentk od 8. 10. do začetka tega meseca, da november ne začne
+// štetja znova. Samo meseci po oktobru 2026 kličejo nazaj; oktober vrne prazno.
+function studentBalanceBefore(year: number, month: number): StudentBalance {
+  const counts = emptyStudentBalance()
+  if (year < 2026 || (year === 2026 && month <= 10)) return counts
+  let y = 2026
+  let m = 10
+  while (y < year || m < month) {
+    for (const day of generateBarSchedule(y, m)) {
+      if (day.date <= ALEX_ROTA_ENDS) continue
+      for (const name of BAR_STUDENTS) noteStudentShift(counts, name, day.assignments[name] || 'OFF')
+    }
+    m += 1
+    if (m > 12) {
+      m = 1
+      y += 1
+    }
+  }
+  return counts
+}
+
 function alexExitTurnsBefore(year: number, month: number): number {
   if (year < 2026 || (year === 2026 && month <= 10)) return 0
   const prev = alexExitEnabled
@@ -441,11 +495,27 @@ function alexExitTurnsBefore(year: number, month: number): number {
  * The evening shift is always a boy (Alex/Walas); Sandia never works evenings;
  * Fransia always works midday when on duty.
  */
+// Polni razpored (Alex-izstop vklopljen) po mesecu. Štetje za poznejše mesece
+// drugače vsak mesec znova zgradi vse prejšnje.
+const barMonthCache = new Map<string, BarDay[]>()
+
 export function generateBarSchedule(year: number, month: number): BarDay[] {
+  const cacheKey = `${year}-${String(month).padStart(2, '0')}`
+  if (alexExitEnabled) {
+    const hit = barMonthCache.get(cacheKey)
+    if (hit) return hit
+  }
+  const days = buildBarSchedule(year, month)
+  if (alexExitEnabled) barMonthCache.set(cacheKey, days)
+  return days
+}
+
+function buildBarSchedule(year: number, month: number): BarDay[] {
   const lastDay = new Date(year, month, 0).getDate()
   const days: BarDay[] = []
   const weekly = usesWeeklyOff(year, month)
   let studentTurn = alexExitEnabled ? alexExitTurnsBefore(year, month) : 0
+  let studentBalance = alexExitEnabled ? studentBalanceBefore(year, month) : emptyStudentBalance()
 
   for (let d = 1; d <= lastDay; d++) {
     const date = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
@@ -735,24 +805,35 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
       assignments.Alex = 'OFF'
     }
 
-    // 9. oktober 2026: samo ta dan zamenjava Flavi ↔ Frenki (opoldne ↔ večer).
-    // Po Alexovem izstopu, ker ročni vnos pred njim večerno študentko spet
-    // prestavi opoldne. Ostali ta dan ostanejo (Sandia večer, Alex prost).
-    if (date === '2026-10-09') {
-      const flavi = 'Flavienne Winjisna'
-      const frenki = 'Maria Franclise Soanatera'
-      const flaviShift = assignments[flavi]
-      const frenkiShift = assignments[frenki]
-      if (
-        (flaviShift === 'MIDDAY' || flaviShift === 'EVENING') &&
-        (frenkiShift === 'MIDDAY' || frenkiShift === 'EVENING')
-      ) {
-        assignments[flavi] = frenkiShift
-        assignments[frenki] = flaviShift
-      } else {
-        assignments[frenki] = 'MIDDAY'
-        assignments[flavi] = 'EVENING'
+    // Od 8. 10.: če sta zjutraj dve osebi in je opoldne prazno, ena študentka
+    // z jutra gre opoldne. Mentorja (Walas/Sandia) ne premaknemo, če je študentka
+    // na voljo. Najbolj za opoldnem zaostala študentka; ob izenačenju Flavi,
+    // Brigida, Frenki. Štetje se nadaljuje v naslednje mesece.
+    if (alexExitEnabled && date > ALEX_ROTA_ENDS) {
+      const morning = shiftNames(assignments, 'MORNING')
+      const midday = shiftNames(assignments, 'MIDDAY')
+      if (morning.length === 2 && midday.length === 0) {
+        const eligible = morning.filter(isBarStudent)
+        if (eligible.length > 0) {
+          assignments[pickStudentForMidday(eligible, studentBalance)] = 'MIDDAY'
+        }
       }
+    }
+
+    // Izrecna dneva na koncu, da ju splošno pravilo ne povozi.
+    // 9. 10.: Frenki opoldne, Flavi zvečer (Sandia zvečer, Walas zjutraj, Alex prost).
+    if (alexExitEnabled && date === '2026-10-09') {
+      assignments['Maria Franclise Soanatera'] = 'MIDDAY'
+      assignments['Flavienne Winjisna'] = 'EVENING'
+    }
+    // 11. 10.: Frenki opoldne, Brigida sama zjutraj.
+    if (alexExitEnabled && date === '2026-10-11') {
+      assignments['Maria Franclise Soanatera'] = 'MIDDAY'
+      assignments['Brigida Aoulati'] = 'MORNING'
+    }
+
+    if (alexExitEnabled && date > ALEX_ROTA_ENDS) {
+      for (const name of BAR_STUDENTS) noteStudentShift(studentBalance, name, assignments[name] || 'OFF')
     }
 
     // Ročno določeni dnevi (BAR_MANUAL_OVERRIDES) so v celoti ročni → samodejni
