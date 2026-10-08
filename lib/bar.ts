@@ -31,7 +31,13 @@ export const BAR_STUDENTS = ['Flavienne Winjisna', 'Brigida Aoulati', 'Maria Fra
 // septembra 2026 naprej (glej usesSepPattern / BAR_STUDENTS).
 export function getActiveBarStaff(year: number, month: number): string[] {
   const fransiaActive = year < 2026 || (year === 2026 && month <= 9)
-  const core: string[] = fransiaActive ? ['Alex', 'Fransia', 'Sandia', 'Walas'] : ['Alex', 'Sandia', 'Walas']
+  // Alex je v oktobru 2026 še na seznamu (do 7. 10. dela, od datuma izstopa ga
+  // skrije datum). Od novembra 2026 ga ni več v razporedu.
+  const alexActive = year < 2026 || (year === 2026 && month <= 10)
+  const core: string[] = []
+  if (alexActive) core.push('Alex')
+  if (fransiaActive) core.push('Fransia')
+  core.push('Sandia', 'Walas')
   const jonnyActive = year < 2026 || (year === 2026 && month <= 8)
   const withJonny = jonnyActive ? [...core, 'Jonny'] : core
   const students = year > 2026 || (year === 2026 && month >= 9) ? [...BAR_STUDENTS] : []
@@ -370,6 +376,59 @@ const BAR_MANUAL_EXTRA_OVERRIDES: Record<string, Partial<Record<BarStaff, BarExt
   return year > 2026 || (year === 2026 && month >= 10)
   }
 
+// Od 8. 10. 2026 Alex ne dela več. Kjer so zvečer natanko tri osebe (Alex se ne
+// šteje, če je sam eden od treh — potem ostaneta dva in študentke ne premikamo),
+// gre ena študentka v opoldansko smeno. Študentke se izmenjujejo po vrsti.
+const ALEX_ROTA_ENDS = '2026-10-07'
+let alexExitEnabled = true
+
+function eveningNames(assignments: Record<string, BarShift>): string[] {
+  return Object.entries(assignments)
+    .filter(([, shift]) => shift === 'EVENING')
+    .map(([name]) => name)
+}
+
+function eveningNeedsStudentMove(evening: string[]): boolean {
+  const withoutAlex = evening.filter((name) => name !== 'Alex')
+  if (evening.includes('Alex')) return withoutAlex.length === 3
+  return evening.length === 3
+}
+
+function pickRotatedStudent(evening: string[], turn: number): string | null {
+  const onEvening = BAR_STUDENTS.filter((name) => evening.includes(name))
+  if (onEvening.length === 0) return null
+  for (let k = 0; k < BAR_STUDENTS.length; k++) {
+    const name = BAR_STUDENTS[(turn + k) % BAR_STUDENTS.length]
+    if (onEvening.includes(name)) return name
+  }
+  return onEvening[0]
+}
+
+function alexExitTurnsBefore(year: number, month: number): number {
+  if (year < 2026 || (year === 2026 && month <= 10)) return 0
+  const prev = alexExitEnabled
+  alexExitEnabled = false
+  try {
+    let turns = 0
+    let y = 2026
+    let m = 10
+    while (y < year || m < month) {
+      for (const day of generateBarSchedule(y, m)) {
+        if (day.date <= ALEX_ROTA_ENDS) continue
+        if (eveningNeedsStudentMove(eveningNames(day.assignments))) turns += 1
+      }
+      m += 1
+      if (m > 12) {
+        m = 1
+        y += 1
+      }
+    }
+    return turns
+  } finally {
+    alexExitEnabled = prev
+  }
+}
+
 /**
  * Generate the bar schedule for a whole month.
  *
@@ -386,6 +445,7 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
   const lastDay = new Date(year, month, 0).getDate()
   const days: BarDay[] = []
   const weekly = usesWeeklyOff(year, month)
+  let studentTurn = alexExitEnabled ? alexExitTurnsBefore(year, month) : 0
 
   for (let d = 1; d <= lastDay; d++) {
     const date = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`
@@ -658,6 +718,21 @@ export function generateBarSchedule(year: number, month: number): BarDay[] {
   for (const [p, shift] of Object.entries(override)) {
   if (shift && p in assignments) (assignments as Record<string, BarShift>)[p] = shift
   }
+    }
+
+    // Od 8. 10. 2026: Alex ven. Če so zvečer trije (brez njega, oziroma trije
+    // ostanejo, ko ga vzamemo ven), ena študentka gre opoldne. Vrstni red se
+    // menja, da ni vsak dan ista.
+    if (alexExitEnabled && date > ALEX_ROTA_ENDS && assignments.Alex) {
+      const evening = eveningNames(assignments)
+      if (eveningNeedsStudentMove(evening)) {
+        const student = pickRotatedStudent(evening, studentTurn)
+        if (student) {
+          assignments[student] = 'MIDDAY'
+          studentTurn += 1
+        }
+      }
+      assignments.Alex = 'OFF'
     }
 
     // Ročno določeni dnevi (BAR_MANUAL_OVERRIDES) so v celoti ročni → samodejni

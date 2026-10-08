@@ -337,8 +337,8 @@ export default function BarTab({
       <div className="no-print flex items-start gap-2 rounded-xl border border-[#c59b5b]/30 bg-[#c59b5b]/10 px-3 py-2 text-xs text-[#c59b5b]">
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          Razpored se samodejno izračuna: 3 izmene (jutro 6-12:30, opoldne 11-17, večer 15:30-22), vsak dan ena oseba prosta.
-          Fransia je vedno opoldanska izmena, večerno izmeno dela vedno fant (Alex ali Walas), da nobeno dekle ne dela zvečer samo.
+          Razpored se samodejno izračuna: 3 izmene (jutro 6-12:30, opoldne 11-17, večer 15:30-22).
+          Od 8. oktobra 2026 Alex ne dela več. Kjer so zvečer tri osebe, gre ena študentka opoldne, izmenično.
         </span>
       </div>
       )}
