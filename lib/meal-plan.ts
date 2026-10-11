@@ -37,6 +37,49 @@ export function isMealCoveredByPlan(
   return mealPlanCoveredProductIds(mealPlan).includes(productId)
 }
 
+/** Reservation meal plan marked "Plačano", not "Za plačilo". */
+export function isMealPlanPaid(status: string | null | undefined): boolean {
+  return String(status || '').toUpperCase() === 'PAID'
+}
+
+/**
+ * Same meals the invoice refuses to charge when the pension is already paid.
+ * Half board: breakfast and dinner. Full board: breakfast, lunch, and dinner.
+ * Breakfast only: breakfast. Lunch on half board, snacks, and desserts stay billable.
+ * Matched by cenik product id or by the same name test the invoice uses.
+ */
+export function paidPensionCoversMeal(opts: {
+  mealPlan?: string | null
+  mealPlanPaymentStatus?: string | null
+  productId?: string | null
+  productName?: string | null
+}): boolean {
+  if (!isMealPlanPaid(opts.mealPlanPaymentStatus)) return false
+  const plan = String(opts.mealPlan || '').toUpperCase()
+  const planCode = plan === 'BB' ? 'B' : plan
+  if (opts.productId && isMealCoveredByPlan(planCode, opts.productId)) return true
+  const n = String(opts.productName || '').toLowerCase()
+  const breakfast = /breakfast|zajtrk|petit[- ]d[ée]jeuner/.test(n)
+  const lunch = /lunch|kosilo|d[ée]jeuner/.test(n) && !breakfast
+  const dinner = /dinner|ve[cč]erj|d[iî]ner/.test(n)
+  if (plan === 'FB') return breakfast || lunch || dinner
+  if (plan === 'HB') return breakfast || dinner
+  if (plan === 'B' || plan === 'BB') return breakfast
+  return false
+}
+
+/**
+ * The single Prehrana line check-in writes for a prepaid pension:
+ * `${mealName} (${paxLabel} × ${days} dni)`.
+ * That lump is the same nights as the nightly 50/80 € split, so kalkulacije
+ * must not add it on top.
+ */
+export function isCheckInPensionLump(name: string | null | undefined): boolean {
+  const n = String(name || '').trim()
+  if (!/×\s*\d+\s*dni\s*\)?\s*$/i.test(n)) return false
+  return /(polpenzion|polni penzion|half board|full board|\(hb\)|\(fb\)|breakfast|zajtrk)/i.test(n)
+}
+
 /**
  * Koliko gostov iz rezervacije penzion dejansko pokriva.
  *

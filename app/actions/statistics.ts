@@ -1,7 +1,7 @@
 'use server'
 
 import { db } from '@/lib/db'
-import { boardPax } from '@/lib/meal-plan'
+import { boardPax, isCheckInPensionLump, isMealPlanPaid, paidPensionCoversMeal } from '@/lib/meal-plan'
 import { 
   reservations, 
   orderItems, 
@@ -915,6 +915,10 @@ export async function getMonthlyStatistics(year: number, month: number) {
   })
   const mealPlanValueEur = (
     mealPlan: string | null | undefined,
+    // Only a prepaid pension ("Plačano") is food money already inside the stay rate.
+    // "Za plačilo" is invoiced as the meals the bar types, so carving the same
+    // 50/80 € out of the room would count that food twice against the invoice.
+    paymentStatus: string | null | undefined,
     pax: number,
     nights: number,
     capEur: number,
@@ -924,6 +928,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     // whole party here would book the same food twice.
     mealPlanPax?: number | null,
   ) => {
+    if (!isMealPlanPaid(paymentStatus)) return 0
     const perPaxNightAr = mealPlanPriceArByPlan[(mealPlan as string) || ''] || 0
     if (perPaxNightAr <= 0 || nights <= 0) return 0
     const covered = boardPax(pax > 0 ? pax : 1, mealPlanPax)
@@ -952,6 +957,62 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // checkout status (consistent with excursions/bar: revenue counts by actual date,
   // not by guest checkout). Includes guests who are still staying.
   const allReservationsForNights = await db.select().from(reservations)
+  const resById = new Map(allReservationsForNights.map(r => [r.id, r]))
+  const dnReservationId = new Map(monthDeliveryNotes.map(dn => [dn.id, dn.reservationId]))
+
+  // A bar meal the invoice does not charge, because a paid pension covers it,
+  // adds nothing to kitchen revenue. The stored euro amount on the note stays
+  // as the guest was charged (or not) — this is the kalkulacije view only.
+  const pensionCoversDeliveryItem = (i: {
+    deliveryNoteId: string
+    productId?: string | null
+    productName?: string | null
+    coveredByMealPlan?: boolean | null
+  }) => {
+    if (i.coveredByMealPlan) return true
+    const resId = dnReservationId.get(i.deliveryNoteId)
+    const r = resId ? resById.get(resId) : undefined
+    if (!r) return false
+    return paidPensionCoversMeal({
+      mealPlan: r.mealPlan,
+      mealPlanPaymentStatus: r.mealPlanPaymentStatus,
+      productId: i.productId,
+      productName: i.productName,
+    })
+  }
+  const deliveryFoodRevenueAr = (i: {
+    deliveryNoteId: string
+    totalAr?: number | null
+    productId?: string | null
+    productName?: string | null
+    coveredByMealPlan?: boolean | null
+    costCategory?: string | null
+  }) => {
+    if ((i.costCategory || '') !== 'prehrana') return Number(i.totalAr || 0)
+    if (pensionCoversDeliveryItem(i)) return 0
+    return Number(i.totalAr || 0)
+  }
+  // Check-in also writes one Prehrana lump for the whole prepaid stay, dated on
+  // arrival. The nightly split above is the same money, placed in the month of
+  // each night, so the lump must not be added again. A meal the invoice then
+  // marks included is not extra food revenue either.
+  const prehranaOrderRevenueAr = (o: {
+    reservationId?: string | null
+    name?: string | null
+    priceAr?: number | null
+  }) => {
+    const price = Number(o.priceAr || 0)
+    if (!price) return 0
+    const r = o.reservationId ? resById.get(o.reservationId) : undefined
+    if (!r) return price
+    if (isMealPlanPaid(r.mealPlanPaymentStatus) && isCheckInPensionLump(o.name)) return 0
+    if (paidPensionCoversMeal({
+      mealPlan: r.mealPlan,
+      mealPlanPaymentStatus: r.mealPlanPaymentStatus,
+      productName: o.name,
+    })) return 0
+    return price
+  }
   
   // Filter to reservations that have nights in this month
   const reservationsWithNightsInMonth = allReservationsForNights.filter(r => {
@@ -963,8 +1024,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
   })
   
   // Calculate accommodation revenue proportionally based on nights in this month.
-  // The board (meal plan) portion is prepaid inside totalAmount, so we split it out and
-  // attribute it to kitchen (mealPlanPrepaidRevenue) instead of accommodation.
+  // A prepaid board is inside totalAmount, so that nightly amount moves to the kitchen
+  // once. An unpaid board stays inside the room rate: the guest is invoiced for the
+  // meals themselves, and those are the kitchen food.
   let accommodationRevenue = 0
   let totalNightsInMonth = 0
   let mealPlanPrepaidRevenue = 0
@@ -986,7 +1048,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     // Proportional revenue for this month
     const pricePerNight = Number(r.totalAmount || 0) / totalNights
     const grossAccMonth = pricePerNight * nightsInMonth
-    const mealMonth = mealPlanValueEur(r.mealPlan, Number(r.pax || 1), nightsInMonth, grossAccMonth, r.mealPlanPax)
+    const mealMonth = mealPlanValueEur(r.mealPlan, r.mealPlanPaymentStatus, Number(r.pax || 1), nightsInMonth, grossAccMonth, r.mealPlanPax)
     accommodationRevenue += grossAccMonth - mealMonth
     mealPlanPrepaidRevenue += mealMonth
     totalNightsInMonth += nightsInMonth
@@ -1147,10 +1209,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   const excursionCost = excursionBoatCost + excursionBaseCost + excursionManualCost
   
-  // Meal Plan (Prehrana). Prepaid board split out of accommodation (mealPlanPrepaidRevenue) plus any
-  // explicit Prehrana order_items (these usually store priceAr=0 since board is prepaid).
+  // Predplačilo: the prepaid pension once (nightly, in the month of each night),
+  // plus Prehrana order items that are real invoiced meals. The check-in lump for
+  // the same prepaid nights is left out.
   const mealPlanItems = monthOrderItems.filter(o => o.category === 'Prehrana')
-  const mealPlanRevenue = mealPlanItems.reduce((sum, o) => sum + (o.priceAr || 0), 0) / rate + mealPlanPrepaidRevenue
+  const mealPlanRevenue = mealPlanItems.reduce((sum, o) => sum + prehranaOrderRevenueAr(o), 0) / rate + mealPlanPrepaidRevenue
   
   // Meal plan cost (use same percentage as bar_prehrana for food cost)
   // Will be calculated after costMap is created
@@ -1166,9 +1229,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
   
   const pijacaRevenue = pijacaDeliveryRevenue + pijacaOrderRevenue
   
-  // Prehrana from delivery_note_items (bar daily orders)
+  // Prehrana from delivery_note_items (bar daily orders).
+  // Meals a paid pension already covers contribute quantity only — revenue 0 —
+  // because the invoice does not charge them. Lunch on half board stays.
   const barPrehranaDeliveryItems = allDeliveryItems.filter(i => (i as { costCategory?: string }).costCategory === 'prehrana')
-  const barPrehranaDeliveryRevenue = barPrehranaDeliveryItems.reduce((sum, i) => sum + (i.totalAr || 0), 0) / rate
+  const barPrehranaDeliveryRevenue = barPrehranaDeliveryItems.reduce((sum, i) => sum + deliveryFoodRevenueAr(i), 0) / rate
   
   // Note: Prehrana from order_items is counted separately as mealPlanRevenue (prepaid meal plans)
   const barPrehranaRevenue = barPrehranaDeliveryRevenue
@@ -1528,9 +1593,6 @@ export async function getMonthlyStatistics(year: number, month: number) {
     ostaloFallbackRevenue: number
   }
   const guestMap = new Map<string, GuestAgg>()
-  const resById = new Map(allReservationsForNights.map(r => [r.id, r]))
-  const dnToReservation: Record<string, string | null> = {}
-  monthDeliveryNotes.forEach(dn => { dnToReservation[dn.id] = dn.reservationId })
 
   const getGuest = (id: string, name?: string | null, bungalow?: string | null, arrival?: string | null, departure?: string | null): GuestAgg => {
     let g = guestMap.get(id)
@@ -1564,7 +1626,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const g = getGuest(r.id, r.guestName, r.bungalow, r.arrival, r.departure)
     g.nightsInMonth += nIn
     const grossAccMonthG = (Number(r.totalAmount || 0) / totalN) * nIn
-    const mealMonthG = mealPlanValueEur(r.mealPlan, Number(r.pax || 1), nIn, grossAccMonthG, r.mealPlanPax)
+    const mealMonthG = mealPlanValueEur(r.mealPlan, r.mealPlanPaymentStatus, Number(r.pax || 1), nIn, grossAccMonthG, r.mealPlanPax)
     g.accommodation += grossAccMonthG - mealMonthG
     g.mealPlan += mealMonthG
     g.agencyCommission += Number(r.agencyCommission || 0) * prop
@@ -1575,7 +1637,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   // Helper: resolve guest from a delivery note
   const guestFromDeliveryItem = (deliveryNoteId: string): GuestAgg | null => {
-    const resId = dnToReservation[deliveryNoteId]
+    const resId = dnReservationId.get(deliveryNoteId)
     if (!resId) return null
     const dn = monthDeliveryNotes.find(d => d.id === deliveryNoteId)
     const r = resById.get(resId)
@@ -1584,14 +1646,14 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   // Bar / wellness / ostalo from delivery note items
   pijacaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.pijaca += (i.totalAr || 0) / rate })
-  barPrehranaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.prehrana += (i.totalAr || 0) / rate })
+  barPrehranaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.prehrana += deliveryFoodRevenueAr(i) / rate })
   wellnessDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { const eur = (i.totalAr || 0) / rate; g.wellness += eur; g.wellnessCount += (i.quantity || 0); if (!autoMassageIds.has(i.id)) { g.wellnessFormulaCount += (i.quantity || 0); g.wellnessFormulaRevenue += eur } } })
   ostaloItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { g.ostalo += (i.totalAr || 0) / rate; const c = i.productId ? productCostArById.get(i.productId) : undefined; if (c != null && !i.isFree && !(i as { coveredByMealPlan?: boolean }).coveredByMealPlan) { g.ostaloProductCost += (c * (i.quantity || 0)) / rate } else { g.ostaloFallbackRevenue += (i.totalAr || 0) / rate } } })
 
   // Bar / wellness / meal plan / excursions from order items (have reservationId directly)
   pijacaOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.pijaca += (o.priceAr || 0) / rate })
   wellnessOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); const eur = (o.priceAr || 0) / rate; g.wellness += eur; g.wellnessCount += 1; if (!autoMassageIds.has(o.id)) { g.wellnessFormulaCount += 1; g.wellnessFormulaRevenue += eur } })
-  mealPlanItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.mealPlan += (o.priceAr || 0) / rate })
+  mealPlanItems.forEach(o => { if (!o.reservationId) return; const eur = prehranaOrderRevenueAr(o) / rate; if (!eur) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.mealPlan += eur })
   excursionItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.excursions += excItemRevenueAr(o) / rate; g.excursionCost += ((o as { costAr?: number | null }).costAr || 0) / rate })
   ostaloOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); const revAr = orderItemRevenueAr(o); g.ostalo += revAr / rate; const p = ostaloProductByName.get(o.name!)!; const manual = (o as { costAr?: number | null }).costAr; if (manual != null) { g.ostaloProductCost += Number(manual) / rate } else if (p.priceAr > 0 && p.costAr > 0) { g.ostaloProductCost += (revAr * p.costAr / p.priceAr) / rate } else { g.ostaloFallbackRevenue += revAr / rate } })
 
@@ -1692,7 +1754,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   // Bar product sales breakdown — how many of each article were sold in the bar
   // (from delivery_note_items). Chargeable revenue comes from totalAr; complimentary
-  // "On House" and meal-plan-covered items count toward quantity but add 0 revenue.
+  // "On House" items and meals a paid pension covers count toward quantity but add 0 revenue.
   const barSalesMap = new Map<string, {
     name: string
     category: string
@@ -1709,10 +1771,16 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const qty = Number(i.quantity || 0)
     const key = `${name}|||${category}`
     const e = barSalesMap.get(key) || { name, category, costCategory, quantity: 0, revenueEur: 0, freeQuantity: 0, coveredQuantity: 0 }
+    const coveredFood = costCategory === 'prehrana' && pensionCoversDeliveryItem({
+      deliveryNoteId: String(i.deliveryNoteId || ''),
+      productId: (i.productId as string | null) ?? null,
+      productName: (i.productName as string | null) ?? null,
+      coveredByMealPlan: Boolean(i.coveredByMealPlan),
+    })
     e.quantity += qty
-    e.revenueEur += Number(i.totalAr || 0) / rate
+    if (!coveredFood) e.revenueEur += Number(i.totalAr || 0) / rate
     if (i.isFree) e.freeQuantity += qty
-    if (i.coveredByMealPlan) e.coveredQuantity += qty
+    if (i.coveredByMealPlan || coveredFood) e.coveredQuantity += qty
     barSalesMap.set(key, e)
   }
   const barProductSales = [...barSalesMap.values()]
