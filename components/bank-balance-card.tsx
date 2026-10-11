@@ -6,8 +6,11 @@ import { getBankAccount, getBankTransactions } from '@/app/actions/banka'
 
 /**
  * Read-only bank balance for Borut: just the current balance on the account,
- * no individual transactions. Balance = opening balance + all inflows − all
- * outflows dated up to today (future-dated entries do not count toward "today").
+ * no individual transactions.
+ * Tourism: opening + every booked inflow and outflow, including rows dated after
+ * resort-today and provisional "v obdelavi" lines. The bank already counts those
+ * in the current balance (a booking date of tomorrow must not hide them).
+ * SARL stays capped at resort-today (UTC+3).
  */
 export default function BankBalanceCard({ company = 'tourism' }: { company?: string }) {
   const { data: account } = useSWR(['bank-account', company], () => getBankAccount(company))
@@ -15,16 +18,22 @@ export default function BankBalanceCard({ company = 'tourism' }: { company?: str
 
   const today = new Date(Date.now() + 3 * 3600 * 1000).toISOString().slice(0, 10)
   const cur = account?.currency === 'Ar' ? 'Ar' : '€'
+  // Tourism keeps centimes so the figure matches the bank (7.398.651,08). SARL stays whole Ar.
+  const fractionDigits = company === 'tourism' ? 2 : cur === 'Ar' ? 0 : 2
   const fmt = (v: number) =>
     `${new Intl.NumberFormat('sl-SI', {
-      minimumFractionDigits: cur === 'Ar' ? 0 : 2,
-      maximumFractionDigits: cur === 'Ar' ? 0 : 2,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
     }).format(v)} ${cur}`
 
   const loading = !account || !txs
-  const upToToday = (txs ?? []).filter((t) => String(t.date).slice(0, 10) <= today)
-  const totalIn = upToToday.filter((t) => t.direction === 'in').reduce((s, t) => s + Number(t.amount), 0)
-  const totalOut = upToToday.filter((t) => t.direction === 'out').reduce((s, t) => s + Number(t.amount), 0)
+  // Tourism matches the bank's current balance. SARL still ignores dates after today.
+  const counted =
+    company === 'tourism'
+      ? (txs ?? [])
+      : (txs ?? []).filter((t) => String(t.date).slice(0, 10) <= today)
+  const totalIn = counted.filter((t) => t.direction === 'in').reduce((s, t) => s + Number(t.amount), 0)
+  const totalOut = counted.filter((t) => t.direction === 'out').reduce((s, t) => s + Number(t.amount), 0)
   const opening = Number(account?.openingBalance ?? 0)
   const balance = opening + totalIn - totalOut
 
