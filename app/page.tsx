@@ -922,6 +922,7 @@ const PAYMENT_METHODS = [
   { value: 'transfer', label: 'Bancni transfer' },
   { value: 'orange_money', label: 'Orange Money' },
   { value: 'cash', label: 'Gotovina' },
+  { value: 'kompenzacija', label: 'Kompenzacija' },
   ];
   
   // Police Registration Form Modal
@@ -1545,6 +1546,13 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
               />
             </div>
             {/* Samo pri Orange Money: koliko Ar je dejansko prišlo na OM denarnico → priliv v kalkulacije */}
+            {newPayment.method === 'kompenzacija' && (
+              <div className="col-span-2">
+                <p className="text-[11px] leading-relaxed text-[#c59b5b]">
+                  Račun se poravna s kontra stroškom Reklama (reklamni material). Denar ne gre v blagajno, banko ali Orange Money.
+                </p>
+              </div>
+            )}
             {newPayment.method === 'orange_money' && (
               <div className="col-span-2">
                 <label className="block text-xs text-[#c59b5b] mb-1">Znesek na Orange Money (Ar)</label>
@@ -1904,7 +1912,7 @@ export default function KombaCabanaApp() {
     const payments = res.payments || [];
     const paymentInfoParts = payments.map((p: { amount: number | string; method: string; paidAt: string }) => {
       const amt = Number(p.amount);
-      const method = p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method;
+      const method = p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method === 'kompenzacija' ? 'Kompenzacija' : p.method;
       const date = new Date(p.paidAt).toLocaleDateString('sl-SI');
       return `${amt.toFixed(2)} EUR (${method}, ${date})`;
     });

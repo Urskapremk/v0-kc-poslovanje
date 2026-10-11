@@ -958,6 +958,18 @@ function StatistikaContent() {
             </div>
           )}
 
+          {/* REKLAMA — kontra strošek kompenzacije, lasten kot računovodstvo */}
+          {((stats.costs as { reklama?: number }).reklama || 0) > 0 && (
+            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+              <h2 className="text-base sm:text-lg font-bold text-[#c59b5b] mb-4">REKLAMA</h2>
+              <p className="text-white/40 text-xs mb-3">Kontra strošek (reklamni material). Ne premakne blagajne, banke ali Orange Money.</p>
+              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
+                <span className="text-white/50">Reklama</span>
+                <span className="text-[#c59b5b] font-bold">{formatEur((stats.costs as { reklama?: number }).reklama || 0)}</span>
+              </div>
+            </div>
+          )}
+
           {/* RAČUNOVODSTVO — samostojen strošek z Nabave HV */}
           {((stats.costs as { racunovodstvo?: number }).racunovodstvo || 0) > 0 && (
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">

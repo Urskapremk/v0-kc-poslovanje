@@ -9,6 +9,7 @@ const PAYMENT_METHODS = [
   { value: 'transfer', label: 'Bancni transfer' },
   { value: 'orange_money', label: 'Orange Money' },
   { value: 'cash', label: 'Gotovina' },
+  { value: 'kompenzacija', label: 'Kompenzacija' },
 ]
 
 type PaymentRow = {
@@ -183,6 +184,13 @@ export default function ArchivePaymentEditor({
                   <label className={labelCls}>Opomba</label>
                   <input type="text" className={inputCls} placeholder="npr. depozit..." value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                 </div>
+                {form.method === 'kompenzacija' && (
+                  <div className="col-span-2">
+                    <p className="text-[11px] leading-relaxed text-[#c59b5b]">
+                      Račun se poravna s kontra stroškom Reklama. Denar ne gre v blagajno, banko ali Orange Money.
+                    </p>
+                  </div>
+                )}
                 {form.method === 'orange_money' && (
                   <div className="col-span-2">
                     <label className="mb-1 block text-xs text-[#c59b5b]">Znesek na Orange Money (Ar)</label>

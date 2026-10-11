@@ -27,6 +27,11 @@ import { parseCategories } from '@/lib/stroski-categories'
 import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
 
+async function ensureKompenzacijaColumns() {
+  await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS "contraExpenseId" text`)
+  await db.execute(sql`ALTER TABLE marketing_expenses ADD COLUMN IF NOT EXISTS "compensationPaymentId" text`)
+}
+
 // Get exchange rate from settings
 async function getExchangeRate(): Promise<number> {
   const result = await db.query.settings.findFirst({
@@ -50,6 +55,7 @@ export async function updateCostSetting(id: string, value: number) {
 // --- Marketing expenses / Stroški marketinga ---
 // Get marketing expenses for a month
 export async function getMarketingExpenses(year: number, month: number, category: string = 'marketing') {
+  await ensureKompenzacijaColumns()
   return await db.select().from(marketingExpenses)
     .where(and(
       eq(marketingExpenses.year, year),
@@ -61,6 +67,7 @@ export async function getMarketingExpenses(year: number, month: number, category
 
 // Get all marketing expenses for a whole year (for listing, grouped by month)
 export async function getMarketingExpensesYear(year: number, category: string = 'marketing') {
+  await ensureKompenzacijaColumns()
   return await db.select().from(marketingExpenses)
     .where(and(
       eq(marketingExpenses.year, year),
@@ -72,6 +79,7 @@ export async function getMarketingExpensesYear(year: number, category: string = 
 // Get all expenses (across all categories) paid via Hnatura d.o.o. (paymentMethod = 'in_kind')
 // for a whole year — used for the "Vračilo Hnatura d.o.o." tab (amount to be repaid).
 export async function getHnaturaExpensesYear(year: number) {
+  await ensureKompenzacijaColumns()
   return await db.select().from(marketingExpenses)
     .where(and(
       eq(marketingExpenses.year, year),
@@ -690,6 +698,7 @@ export async function getFixedAssetRegister(year: number, month: number): Promis
 
 // Add a marketing expense (date determines the booking month)
 export async function addMarketingExpense(date: string, description: string, amount: number, category: string = 'marketing', paymentMethod?: string) {
+  await ensureKompenzacijaColumns()
   const d = new Date(date)
   const year = d.getFullYear()
   const month = d.getMonth() + 1
@@ -702,6 +711,7 @@ export async function addMarketingExpense(date: string, description: string, amo
 
 // Update a marketing expense (date determines the booking month)
 export async function updateMarketingExpense(id: string, date: string, description: string, amount: number, paymentMethod?: string) {
+  await ensureKompenzacijaColumns()
   const d = new Date(date)
   const year = d.getFullYear()
   const month = d.getMonth() + 1
@@ -711,10 +721,25 @@ export async function updateMarketingExpense(id: string, date: string, descripti
   revalidatePath('/statistika')
 }
 
-// Delete a marketing expense
+// Delete a marketing expense. A reklama contra line linked to a Kompenzacija
+// payment removes that payment too. The pair never moves cash, the bank, or Orange Money.
 export async function deleteMarketingExpense(id: string) {
+  await ensureKompenzacijaColumns()
+  const [row] = await db
+    .select({ paymentId: marketingExpenses.compensationPaymentId })
+    .from(marketingExpenses)
+    .where(eq(marketingExpenses.id, id))
+  const paymentId = row?.paymentId || null
+  if (paymentId) {
+    await db.execute(sql`UPDATE payments SET "contraExpenseId" = NULL WHERE id = ${paymentId}`)
+  }
   await db.delete(marketingExpenses).where(eq(marketingExpenses.id, id))
+  if (paymentId) {
+    const { deletePayment } = await import('./komba')
+    await deletePayment(paymentId)
+  }
   revalidatePath('/statistika')
+  revalidatePath('/')
 }
 
 // Get staff salaries for a month
@@ -769,6 +794,7 @@ export async function deleteStaffSalary(id: string) {
 // Get statistics for a month
 export async function getMonthlyStatistics(year: number, month: number) {
   await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
+  await ensureKompenzacijaColumns()
   const startDate = new Date(year, month - 1, 1)
   const endDate = new Date(year, month, 0) // Last day of month
   
@@ -1222,6 +1248,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const monthExpenses = await db.select().from(marketingExpenses)
     .where(and(eq(marketingExpenses.year, year), eq(marketingExpenses.month, month)))
   const marketingCost = monthExpenses.filter(e => (e.category || 'marketing') === 'marketing').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
+  // Reklama je lasten kontra strošek (kompenzacija), ne Ostalo in ne Marketing.
+  const reklamaCost = monthExpenses.filter(e => e.category === 'reklama').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
   const bookingCost = monthExpenses.filter(e => e.category === 'booking').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
   const optimaplusCost = monthExpenses.filter(e => e.category === 'optimaplus').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
   const platformCommissionCost = bookingCost + optimaplusCost
@@ -1329,7 +1357,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const depreciationCost = depreciation.total
 
   const totalSalaryCost = accommodationSalaryCost + barSalaryCost + kuhinjaSalaryCost + managementSalaryCost
-  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + stipendijaCost + hranaStudentiCost + racunovodstvoCost + portersCost + tuctucCost + depreciationCost
+  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + stipendijaCost + hranaStudentiCost + racunovodstvoCost + reklamaCost + portersCost + tuctucCost + depreciationCost
 
   // ===== PER-GUEST BREAKDOWN (analytics) =====
   // Attribute revenue and costs to each reservation/guest. Salaries are allocated
@@ -1590,6 +1618,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
       stipendija: Math.round(stipendijaCost * 100) / 100,
       hranaStudenti: Math.round(hranaStudentiCost * 100) / 100,
       racunovodstvo: Math.round(racunovodstvoCost * 100) / 100,
+      reklama: Math.round(reklamaCost * 100) / 100,
       porters: Math.round(portersCost * 100) / 100,
       tuctuc: Math.round(tuctucCost * 100) / 100,
       depreciation: Math.round(depreciationCost * 100) / 100,
@@ -1851,6 +1880,7 @@ export async function getYearlyStatistics(year: number) {
       stipendija: 0,
       hranaStudenti: 0,
       racunovodstvo: 0,
+      reklama: 0,
       porters: 0,
       tuctuc: 0,
       depreciation: 0,
@@ -1889,6 +1919,7 @@ export async function getYearlyStatistics(year: number) {
     yearly.costs.stipendija += (m.costs as { stipendija?: number }).stipendija || 0
     yearly.costs.hranaStudenti += (m.costs as { hranaStudenti?: number }).hranaStudenti || 0
     yearly.costs.racunovodstvo += (m.costs as { racunovodstvo?: number }).racunovodstvo || 0
+    yearly.costs.reklama += (m.costs as { reklama?: number }).reklama || 0
     yearly.costs.porters += (m.costs as { porters?: number }).porters || 0
     yearly.costs.tuctuc += (m.costs as { tuctuc?: number }).tuctuc || 0
     yearly.costs.depreciation += (m.costs as { depreciation?: number }).depreciation || 0

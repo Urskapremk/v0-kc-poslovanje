@@ -683,6 +683,7 @@ export default function RacunPage() {
       cash: { en: 'cash', fr: 'espèces' },
       transfer: { en: 'bank transfer', fr: 'virement' },
       orange_money: { en: 'Orange Money', fr: 'Orange Money' },
+      kompenzacija: { en: 'Kompenzacija', fr: 'Kompenzacija' },
     }
     const e = map[m.toLowerCase()]
     return e ? (invoiceLang === 'fr' ? e.fr : e.en) : m

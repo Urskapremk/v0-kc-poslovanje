@@ -98,7 +98,7 @@ export type BackfillInput = {
   // Payments — one or more, each with its own method/amount/date. Lets a historical stay be
   // split across methods (e.g. part cash, part card).
   payments: {
-    method: 'cash' | 'card' | 'orange_money'
+    method: 'cash' | 'card' | 'orange_money' | 'kompenzacija'
     amountEur: number
     date: string // YYYY-MM-DD
     cashCompany?: 'tourism' | 'sarl' // when method === 'cash'
