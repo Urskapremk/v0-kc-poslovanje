@@ -6,6 +6,7 @@ import Link from "next/link";
 import useSWR, { mutate } from "swr";
   import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart } from "lucide-react";
   import { bungalowDisplayName } from "@/lib/bungalow";
+  import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
@@ -9715,13 +9716,18 @@ function GuestCard() {
                   const boatNet = Math.max(0, boatCompletePrice - guidePrice);
                   // Top of Nosy Komba: čoln FIKSNO 80.000 Ar + vodič (guidePriceAr, npr. 50.000)
                   const dilipOverride = members.map(m => (m.excursion as { dilipOverrideAr?: number | null }).dilipOverrideAr).find(v => v != null);
+                  // Nosy Tanikely and trip around Nosy Komba + Dilip: polna cena čolna, brez vodiča in brez 10 %.
+                  const dilipPaysFullBoat = dilipOverride == null && dilipOwesFullBoatPrice(item.excursionName, exc.boatId);
                   const dilipPayment = dilipOverride != null
                     ? Number(dilipOverride)
+                    : dilipPaysFullBoat
+                    ? dilipFullBoatAr(boatCompletePrice)
                     : isFixedDilipExcursion
                     ? 80000 + guidePrice
                     : isDirectBoatExcursion
                       ? boatCompletePrice + guidePrice
                       : (boatNet > 0 ? Math.round(boatNet * 0.9) + guidePrice : 0);
+                  const dilipPayLabel = dilipPaysFullBoat ? 'Dilipu (čoln)' : 'Dilipu (čoln + vodič)';
                   // Vstopnina (skiper jo plača na licu mesta) = vstopnina/os × SKUPNO število oseb
                   const entranceTotalAr = Math.round((excType?.entranceFeeAr || 0) * totalPax);
                   // Dodatna vstopnina (npr. Maki park), vpisana na posamezni booking (znesek v Ar za celo rezervacijo)
@@ -9787,7 +9793,7 @@ function GuestCard() {
                           {/* Zneski za plačilo */}
                           <div className="mt-2 space-y-1 border-t border-[#0f2e3a]/12 pt-2">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-[#2b2622]/55">{isFanjaExcursion ? 'Plačilo Fanji' : 'Dilipu (čoln + vodič)'}</span>
+                              <span className="text-[10px] text-[#2b2622]/55">{isFanjaExcursion ? 'Plačilo Fanji' : dilipPayLabel}</span>
                               <span className="text-[11px] font-semibold text-[#3f6b7d] whitespace-nowrap">
                                 {isFanjaExcursion
                                   ? (fanjaPayment > 0 ? ar(fanjaPayment) : '—')
@@ -9976,7 +9982,7 @@ function GuestCard() {
                             if (!hasAny) return null;
                             return (
                               <div className="mt-2 space-y-1.5">
-                                {dilipPayment > 0 && renderSupplierPay(`excursion:${groupKey}:dilip`, 'dilip', dilipPayment, 'Dilipu (čoln + vodič)', excLabel('Dilip'), '#3f6b7d')}
+                                {dilipPayment > 0 && renderSupplierPay(`excursion:${groupKey}:dilip`, 'dilip', dilipPayment, dilipPayLabel, excLabel('Dilip'), '#3f6b7d')}
                                 {lunchTotal > 0 && renderSupplierPay(`excursion:${groupKey}:lunch`, 'lunch', lunchTotal, 'Vodiču za kosilo', excLabel('kosilo'), '#8f6d3a')}
                                 {entranceTotalAr > 0 && renderSupplierPay(`excursion:${groupKey}:entrance`, 'entrance', entranceTotalAr, `Skiperju za vstopnino (${totalPax} os)`, excLabel('vstopnina'), '#a8543a')}
                               </div>

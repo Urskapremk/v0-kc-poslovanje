@@ -382,6 +382,8 @@ export const excursions = pgTable('excursions', {
   excursionId: text('excursionId').notNull().references(() => excursions.id, { onDelete: 'cascade' }),
   boatId: text('boatId').notNull().references(() => boats.id, { onDelete: 'cascade' }),
   priceAr: integer('priceAr').notNull().default(0),
+  // Obračun Dilipu. Stolpec je v bazi; brez njega v shemi cenik pokaže "Dilip: 0 Ar".
+  supplierPriceAr: integer('supplierPriceAr').default(0),
   active: boolean('active').default(true),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })

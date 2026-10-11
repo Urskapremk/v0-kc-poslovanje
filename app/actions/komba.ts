@@ -6,6 +6,7 @@ import { eq, and, or, lte, gte, desc, isNull, isNotNull, sql } from 'drizzle-orm
 import { revalidatePath } from 'next/cache'
 import { unpaySupplier } from './supplier-payment'
 import { unpayFanja } from './fanja-payment'
+import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
 
 // Generate unique ID
 function uid(prefix: string) {
@@ -2625,8 +2626,12 @@ export async function getArchivedExcursions() {
     const isDirectBoat = nameLc.includes('ampangorina') || nameLc.includes('maki')
     const boatNet = Math.max(0, boatCompletePrice - guidePrice)
     const dilipOverride = members.find(m => m.dilipOverrideAr != null)?.dilipOverrideAr
+    // Ista izjema kot na seznamu "Izleti za naročiti": polna cena čolna, brez provizije.
+    const dilipPaysFullBoat = dilipOverride == null && dilipOwesFullBoatPrice(excursionName, first.boatId)
     const dilipPayment = dilipOverride != null
       ? Number(dilipOverride)
+      : dilipPaysFullBoat
+      ? dilipFullBoatAr(boatCompletePrice)
       : isFixedDilip
       ? 80000 + guidePrice
       : isDirectBoat
