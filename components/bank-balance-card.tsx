@@ -36,10 +36,13 @@ export default function BankBalanceCard({ company = 'tourism' }: { company?: str
 
   const accountName = company === 'sarl' ? 'Komba Cabana Sarl' : 'Komba Cabana Tourism Sarl'
   const accountNameColor = company === 'sarl' ? 'text-[#7bb585]' : 'text-[#6aa9d6]'
+  // Display-only marks so the two BMOI accounts can be told apart.
+  // Not stored, not an IBAN, and not part of the balance.
+  const visualMark = company === 'sarl' ? '82994957' : '65932920'
 
   return (
-    <section className="mx-auto max-w-md">
-      <div className="rounded-2xl border border-[#c59b5b]/25 bg-[#0f2e3a]/60 p-8 text-center">
+    <section className="mx-auto w-full max-w-md">
+      <div className="rounded-2xl border border-[#c59b5b]/25 bg-[#0f2e3a]/60 px-4 py-8 text-center sm:p-8">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-[#c59b5b]/30 bg-[#c59b5b]/10">
           <Landmark className="h-5 w-5 text-[#c59b5b]" />
         </div>
@@ -48,8 +51,10 @@ export default function BankBalanceCard({ company = 'tourism' }: { company?: str
           Stanje na bančnem računu
           <span aria-hidden className="h-px w-4 bg-[#c59b5b]/60" />
         </p>
-        <p className="mt-1 text-sm tracking-wide text-white/50">
-          <span className={`font-semibold ${accountNameColor}`}>{accountName}</span> · BMOI
+        <p className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm leading-snug tracking-wide text-white/50">
+          <span className={`font-semibold ${accountNameColor}`}>{accountName}</span>
+          <span className={`font-semibold tabular-nums tracking-[0.18em] ${accountNameColor}`}>{visualMark}</span>
+          <span>BMOI</span>
         </p>
 
         {loading ? (
