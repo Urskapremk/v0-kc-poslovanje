@@ -134,6 +134,7 @@ function StatistikaContent() {
     activeMonths: [1,2,3,4,5,6,7,8,9,10,11,12],
     startDate: ''
   })
+  const [barArtikliOpen, setBarArtikliOpen] = useState(true)
 
   const { data: stats, mutate } = useSWR(
     ['statistics', year, month],
@@ -536,38 +537,51 @@ function StatistikaContent() {
                 const totalFree = sales.reduce((s, i) => s + i.freeQuantity, 0)
                 return (
                   <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
-                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                      <h2 className="text-base sm:text-lg font-bold text-[#c59b5b]">PRODAJA BAR — PO ARTIKLIH</h2>
+                    <button
+                      type="button"
+                      onClick={() => setBarArtikliOpen((open) => !open)}
+                      aria-expanded={barArtikliOpen}
+                      aria-controls="prodaja-bar-po-artiklih"
+                      className="flex w-full cursor-pointer flex-wrap items-center justify-between gap-2 rounded-xl px-1 py-2 text-left transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c59b5b]/60"
+                    >
+                      <h2 className="flex min-w-0 items-center gap-2 text-base font-bold text-[#c59b5b] sm:text-lg">
+                        <ChevronDown className={`h-4 w-4 shrink-0 text-[#c59b5b] transition-transform ${barArtikliOpen ? '' : '-rotate-90'}`} />
+                        PRODAJA BAR — PO ARTIKLIH
+                      </h2>
                       <div className="text-sm text-white/50">Skupaj <span className="text-white font-semibold tabular-nums">{totalQty}</span> kos · <span className="text-[#7fa8b8] font-semibold tabular-nums">{formatEur(totalRev)}</span></div>
-                    </div>
-                    <div className="space-y-5">
-                      {groups.map(g => {
-                        const gQty = g.items.reduce((s, i) => s + i.quantity, 0)
-                        const gRev = g.items.reduce((s, i) => s + i.revenueEur, 0)
-                        return (
-                          <div key={g.cc}>
-                            <div className="flex justify-between items-baseline mb-2">
-                              <span className="text-xs uppercase tracking-wider text-[#c59b5b]/80 font-semibold">{catLabels[g.cc] || 'Ostalo'}</span>
-                              <span className="text-xs text-white/40 tabular-nums">{gQty} kos · {formatEur(gRev)}</span>
-                            </div>
-                            <div className="rounded-xl overflow-hidden border border-white/5">
-                              {g.items.map((it, idx) => (
-                                <div key={it.name + idx} className={`flex items-center gap-3 px-3 py-2 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
-                                  <span className="text-sm font-bold text-white tabular-nums w-10 text-right shrink-0">{it.quantity}×</span>
-                                  <span className="text-sm text-white/80 truncate flex-1 min-w-0">
-                                    {it.name}
-                                    {it.freeQuantity > 0 && <span className="ml-2 text-xs text-[#8fae92] whitespace-nowrap">{it.freeQuantity} On House</span>}
-                                  </span>
-                                  <span className="text-sm text-[#7fa8b8] font-medium tabular-nums whitespace-nowrap shrink-0">{formatEur(it.revenueEur)}</span>
+                    </button>
+                    {barArtikliOpen && (
+                      <div id="prodaja-bar-po-artiklih" className="mt-4">
+                        <div className="space-y-5">
+                          {groups.map(g => {
+                            const gQty = g.items.reduce((s, i) => s + i.quantity, 0)
+                            const gRev = g.items.reduce((s, i) => s + i.revenueEur, 0)
+                            return (
+                              <div key={g.cc}>
+                                <div className="flex justify-between items-baseline mb-2">
+                                  <span className="text-xs uppercase tracking-wider text-[#c59b5b]/80 font-semibold">{catLabels[g.cc] || 'Ostalo'}</span>
+                                  <span className="text-xs text-white/40 tabular-nums">{gQty} kos · {formatEur(gRev)}</span>
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    {totalFree > 0 && (
-                      <p className="mt-4 text-xs text-white/40 text-pretty">Časne (On House) postavke so vštete v količino &quot;prodano&quot;, a ne prinašajo prihodka.</p>
+                                <div className="rounded-xl overflow-hidden border border-white/5">
+                                  {g.items.map((it, idx) => (
+                                    <div key={it.name + idx} className={`flex items-center gap-3 px-3 py-2 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
+                                      <span className="text-sm font-bold text-white tabular-nums w-10 text-right shrink-0">{it.quantity}×</span>
+                                      <span className="text-sm text-white/80 truncate flex-1 min-w-0">
+                                        {it.name}
+                                        {it.freeQuantity > 0 && <span className="ml-2 text-xs text-[#8fae92] whitespace-nowrap">{it.freeQuantity} On House</span>}
+                                      </span>
+                                      <span className="text-sm text-[#7fa8b8] font-medium tabular-nums whitespace-nowrap shrink-0">{formatEur(it.revenueEur)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        {totalFree > 0 && (
+                          <p className="mt-4 text-xs text-white/40 text-pretty">Časne (On House) postavke so vštete v količino &quot;prodano&quot;, a ne prinašajo prihodka.</p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )
