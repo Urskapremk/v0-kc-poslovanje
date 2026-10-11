@@ -77,8 +77,9 @@ const IZLET_CAT = "izlet"
 const STIPEND_CAT = "stipendija"
 const STUDENT_FOOD_CAT = "hrana_studenti"
 const ACCOUNTING_CAT = "racunovodstvo"
+const PREVOZNIKI_CAT = "prevozniki"
 const ACCOUNTING_TRIP_NOTE = "Računovodstvo"
-type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina" | "izlet" | "stipendija" | "hrana_studenti" | "racunovodstvo"
+type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina" | "izlet" | "stipendija" | "hrana_studenti" | "racunovodstvo" | "prevozniki"
 
 async function syncWipCost(purchaseId: string, category: NabavaCat, assetId: string, date: string, name: string, amountAr: number) {
   const { upsertNabavaAssetCost, removeNabavaAssetCost } = await import("./statistics")
@@ -102,6 +103,7 @@ function normCategory(c: string): NabavaCat {
   if (c === STIPEND_CAT) return STIPEND_CAT
   if (c === STUDENT_FOOD_CAT) return STUDENT_FOOD_CAT
   if (c === ACCOUNTING_CAT) return ACCOUNTING_CAT
+  if (c === PREVOZNIKI_CAT) return PREVOZNIKI_CAT
   return STROSEK_CATEGORIES.includes(c as StrosekCategory) ? (c as StrosekCategory) : "kuhinja"
 }
 
@@ -574,6 +576,10 @@ function purchasePurpose(category: NabavaCat, name: string) {
     const trimmed = (name || "").trim()
     const note = !trimmed || trimmed === "Računovodstvo" ? "" : trimmed
     return accountingPurpose(note)
+  }
+  if (category === PREVOZNIKI_CAT) {
+    const trimmed = (name || "").trim()
+    return !trimmed || trimmed === "Prevozniki" ? "Prevozniki" : `Prevozniki — ${trimmed}`
   }
   return `Nabava — ${name || "nakup"}`
 }

@@ -25,9 +25,11 @@ const IZLET_CAT = "izlet"
 const STIPEND_CAT = "stipendija"
 const STUDENT_FOOD_CAT = "hrana_studenti"
 const ACCOUNTING_CAT = "racunovodstvo"
+const PREVOZNIKI_CAT = "prevozniki"
 const STUDENT_FOOD_NAME = "Hrana za študente"
+const PREVOZNIKI_NAME = "Prevozniki"
 const RENT_NAME = "Najemnina hiša"
-type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT | typeof IZLET_CAT | typeof STIPEND_CAT | typeof STUDENT_FOOD_CAT | typeof ACCOUNTING_CAT
+type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT | typeof IZLET_CAT | typeof STIPEND_CAT | typeof STUDENT_FOOD_CAT | typeof ACCOUNTING_CAT | typeof PREVOZNIKI_CAT
 const ASSET_COLOR = "#c9a86a"
 const LOAN_COLOR = "#3f6b7d"
 const WIP_COLOR = "#a0662f"
@@ -36,6 +38,7 @@ const IZLET_COLOR = "#c59b5b"
 const STIPEND_COLOR = "#6d5a8a"
 const STUDENT_FOOD_COLOR = "#c46a3a"
 const ACCOUNTING_COLOR = "#3d5c78"
+const PREVOZNIKI_COLOR = "#1d6b63"
 
 const CAT_COLORS: Record<StrosekCategory, string> = {
   bar: "#3f6b7d",
@@ -47,7 +50,7 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   ostalo: "#6b6b6b",
 }
 const catColor = (c: NabavaCategory) =>
-  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : c === IZLET_CAT ? IZLET_COLOR : c === STIPEND_CAT ? STIPEND_COLOR : c === STUDENT_FOOD_CAT ? STUDENT_FOOD_COLOR : c === ACCOUNTING_CAT ? ACCOUNTING_COLOR : CAT_COLORS[c]
+  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : c === IZLET_CAT ? IZLET_COLOR : c === STIPEND_CAT ? STIPEND_COLOR : c === STUDENT_FOOD_CAT ? STUDENT_FOOD_COLOR : c === ACCOUNTING_CAT ? ACCOUNTING_COLOR : c === PREVOZNIKI_CAT ? PREVOZNIKI_COLOR : CAT_COLORS[c]
 const catLabel = (c: NabavaCategory) =>
   c === ASSET_CAT
     ? "Osnovno sredstvo"
@@ -65,7 +68,9 @@ const catLabel = (c: NabavaCategory) =>
                 ? STUDENT_FOOD_NAME
                 : c === ACCOUNTING_CAT
                   ? "Računovodstvo"
-                  : CATEGORY_LABELS[c]
+                  : c === PREVOZNIKI_CAT
+                    ? PREVOZNIKI_NAME
+                    : CATEGORY_LABELS[c]
 
 function RentButton({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
@@ -138,6 +143,29 @@ function AccountingNote() {
   return (
     <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${ACCOUNTING_COLOR}55`, backgroundColor: `${ACCOUNTING_COLOR}10`, color: ACCOUNTING_COLOR }}>
       Knjiži se na strošek „Računovodstvo“ — ločeno od oddelkov. Denar gre iz izbrane blagajne ali iz Orange Money.
+    </p>
+  )
+}
+
+function PrevoznikiChip({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg px-2 py-1 text-[10px] font-medium border transition-colors ${
+        active ? "" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10"
+      }`}
+      style={active ? { backgroundColor: `${PREVOZNIKI_COLOR}22`, borderColor: `${PREVOZNIKI_COLOR}66`, color: PREVOZNIKI_COLOR } : undefined}
+    >
+      Prevozniki
+    </button>
+  )
+}
+
+function PrevoznikiNote() {
+  return (
+    <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${PREVOZNIKI_COLOR}55`, backgroundColor: `${PREVOZNIKI_COLOR}10`, color: PREVOZNIKI_COLOR }}>
+      Knjiži se na strošek „Prevozniki“ — ločeno od oddelkov. Denar gre iz izbrane blagajne ali iz Orange Money.
     </p>
   )
 }
@@ -323,7 +351,8 @@ export function NabavaPurchasesSection({
     const isLoan = category === LOAN_CAT
     const isRent = category === RENT_CAT
     const isAccounting = category === ACCOUNTING_CAT
-    if ((!isLoan && !isRent && !isAccounting && !name.trim()) || amt <= 0) return
+    const isCarriers = category === PREVOZNIKI_CAT
+    if ((!isLoan && !isRent && !isAccounting && !isCarriers && !name.trim()) || amt <= 0) return
     const rt = parseRate(rate)
     if (category === ASSET_CAT && rt <= 0) return
     if (isLoan && !guestId) return
@@ -339,13 +368,15 @@ export function NabavaPurchasesSection({
           ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „${RENT_NAME}“?`
           : isAccounting
             ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „Računovodstvo“?`
-            : `Odštejem ${ar(amt)} iz ${where}?`
+            : isCarriers
+              ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „Prevozniki“?`
+              : `Odštejem ${ar(amt)} iz ${where}?`
     if (!confirm(msg)) return
     setSaving(true)
     try {
       await addNabavaPurchase({
         tripId,
-        name: name.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : ""),
+        name: name.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : isCarriers ? PREVOZNIKI_NAME : ""),
         category,
         amountAr: amt,
         company: pot === "sarl" ? "sarl" : "tourism",
@@ -382,7 +413,8 @@ export function NabavaPurchasesSection({
     const isLoan = eCategory === LOAN_CAT
     const isRent = eCategory === RENT_CAT
     const isAccounting = eCategory === ACCOUNTING_CAT
-    if ((!isLoan && !isRent && !isAccounting && !eName.trim()) || amt <= 0) return
+    const isCarriers = eCategory === PREVOZNIKI_CAT
+    if ((!isLoan && !isRent && !isAccounting && !isCarriers && !eName.trim()) || amt <= 0) return
     const rt = parseRate(eRate)
     if (eCategory === ASSET_CAT && rt <= 0) return
     if (isLoan && !eGuestId) return
@@ -393,7 +425,7 @@ export function NabavaPurchasesSection({
     try {
       await updateNabavaPurchase({
         id: editId,
-        name: eName.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : ""),
+        name: eName.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : isCarriers ? PREVOZNIKI_NAME : ""),
         category: eCategory,
         amountAr: amt,
         company: ePot === "sarl" ? "sarl" : "tourism",
@@ -499,9 +531,17 @@ export function NabavaPurchasesSection({
                       if (!eName.trim()) setEName("Računovodstvo")
                     }}
                   />
+                  <PrevoznikiChip
+                    active={eCategory === PREVOZNIKI_CAT}
+                    onClick={() => {
+                      setECategory(PREVOZNIKI_CAT)
+                      if (!eName.trim()) setEName(PREVOZNIKI_NAME)
+                    }}
+                  />
                 </div>
                 {eCategory === RENT_CAT && <RentNote />}
                 {eCategory === ACCOUNTING_CAT && <AccountingNote />}
+                {eCategory === PREVOZNIKI_CAT && <PrevoznikiNote />}
                 {eCategory === STIPEND_CAT && (
                   <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
                     Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
@@ -715,9 +755,17 @@ export function NabavaPurchasesSection({
                 if (!name.trim()) setName("Računovodstvo")
               }}
             />
+            <PrevoznikiChip
+              active={category === PREVOZNIKI_CAT}
+              onClick={() => {
+                setCategory(PREVOZNIKI_CAT)
+                if (!name.trim()) setName(PREVOZNIKI_NAME)
+              }}
+            />
           </div>
           {category === RENT_CAT && <RentNote />}
           {category === ACCOUNTING_CAT && <AccountingNote />}
+          {category === PREVOZNIKI_CAT && <PrevoznikiNote />}
           {category === STIPEND_CAT && (
             <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
               Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
@@ -778,7 +826,7 @@ export function NabavaPurchasesSection({
               disabled={
                 saving ||
                 parseAmt(amount) <= 0 ||
-                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : category === RENT_CAT || category === ACCOUNTING_CAT ? false : !name.trim()) ||
+                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : category === RENT_CAT || category === ACCOUNTING_CAT || category === PREVOZNIKI_CAT ? false : !name.trim()) ||
                 (category === WIP_CAT && !assetId)
               }
               onClick={handleAdd}

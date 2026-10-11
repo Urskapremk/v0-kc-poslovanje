@@ -982,6 +982,16 @@ function StatistikaContent() {
             </div>
           )}
 
+          {/* PREVOZNIKI — samostojen strošek gotovinske nabave, viden tudi pri 0 */}
+          <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+            <h2 className="text-base sm:text-lg font-bold text-[#1d6b63] mb-4">PREVOZNIKI</h2>
+            <p className="text-white/40 text-xs mb-3">Samostojen strošek — gotovina iz blagajne ali Orange Money. Banka se ne premakne.</p>
+            <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
+              <span className="text-white/50">Prevozniki (gotovina ali Orange Money)</span>
+              <span className="text-[#1d6b63] font-bold">{formatEur((stats.costs as { prevozniki?: number }).prevozniki || 0)}</span>
+            </div>
+          </div>
+
           {/* HRANA ZA ŠTUDENTE — samostojen strošek, ne kuhinja */}
           {((stats.costs as { hranaStudenti?: number }).hranaStudenti || 0) > 0 && (
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
