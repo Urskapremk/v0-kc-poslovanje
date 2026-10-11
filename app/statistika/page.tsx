@@ -516,10 +516,12 @@ function StatistikaContent() {
                         <span className="text-white/50">Plače (barman)</span>
                         <span className="text-white">{formatEur((stats.salaryBreakdown as { bar?: number })?.bar || 0)}</span>
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Bar</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsBar?: number }).receiptsBar || 0)}</span>
-                      </div>
+                      <KuhinjaRacuniRow
+                        label="Računi nabava Bar"
+                        listId="bar-racuni-seznam"
+                        amount={(stats.costs as { receiptsBar?: number }).receiptsBar || 0}
+                        items={(stats.costs as { receiptsBarItems?: KuhinjaRacunLine[] }).receiptsBarItems || []}
+                      />
                     </div>
                   </div>
                 </div>

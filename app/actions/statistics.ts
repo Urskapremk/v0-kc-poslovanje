@@ -1307,6 +1307,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Isti odliv (gotovina ali Orange Money), ki je že račun v arhivu, se ne šteje še enkrat.
   const archiveLedgerIds = new Set<string>()
   const kuhinjaLinesRaw: KuhinjaRacunLine[] = []
+  const barLinesRaw: KuhinjaRacunLine[] = []
+  const pushDeptLine = (category: string, line: KuhinjaRacunLine) => {
+    if (category === 'kuhinja') kuhinjaLinesRaw.push(line)
+    else if (category === 'bar') barLinesRaw.push(line)
+  }
   for (const r of monthReceipts.rows) {
     const cashId = r.cashLedgerId ? String(r.cashLedgerId) : ''
     const omId = r.omLedgerId ? String(r.omLedgerId) : ''
@@ -1314,8 +1319,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
     if (omId) archiveLedgerIds.add(omId)
     parseCategories(r.categories).forEach((c, idx) => {
       receiptsByCategory[c.category] = (receiptsByCategory[c.category] || 0) + c.amountEur
-      if (c.category === 'kuhinja' && c.amountEur !== 0) {
-        kuhinjaLinesRaw.push({
+      if (c.amountEur !== 0) {
+        pushDeptLine(c.category, {
           id: `arhiv-${String(r.id)}-${idx}`,
           date: r.date ? String(r.date) : '',
           name: (r.description ? String(r.description) : '').trim() || 'Brez imena',
@@ -1373,8 +1378,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
   if ((p.cashExpenseId && archiveLedgerIds.has(p.cashExpenseId)) || (p.omLedgerId && archiveLedgerIds.has(p.omLedgerId))) continue
   const purchaseEur = p.amountAr / rate
   receiptsByCategory[p.category] = (receiptsByCategory[p.category] || 0) + purchaseEur
-  if (p.category === 'kuhinja' && purchaseEur !== 0) {
-    kuhinjaLinesRaw.push({
+  if (purchaseEur !== 0) {
+    pushDeptLine(p.category, {
       id: `gotovina-${p.id}`,
       date: p.date || '',
       name: (p.name || '').trim() || 'Brez imena',
@@ -1386,6 +1391,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const receiptsKuhinjaCost = receiptsByCategory.kuhinja || 0
   const receiptsKuhinjaItems = roundKuhinjaLines(kuhinjaLinesRaw, receiptsKuhinjaCost)
   const receiptsBarCost = receiptsByCategory.bar || 0
+  const receiptsBarItems = roundKuhinjaLines(barLinesRaw, receiptsBarCost)
   const receiptsNocitveCost = receiptsByCategory.nocitve || 0
   const receiptsWellnessCost = receiptsByCategory.wellness || 0
   const receiptsOstaloCost = receiptsByCategory.ostalo || 0
@@ -1684,6 +1690,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
       receiptsKuhinja: Math.round(receiptsKuhinjaCost * 100) / 100,
       receiptsKuhinjaItems,
       receiptsBar: Math.round(receiptsBarCost * 100) / 100,
+      receiptsBarItems,
       receiptsNocitve: Math.round(receiptsNocitveCost * 100) / 100,
       receiptsWellness: Math.round(receiptsWellnessCost * 100) / 100,
       receiptsOstalo: Math.round(receiptsOstaloCost * 100) / 100,

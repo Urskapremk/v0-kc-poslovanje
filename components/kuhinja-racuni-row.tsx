@@ -24,9 +24,13 @@ function formatSlDate(iso: string) {
 export default function KuhinjaRacuniRow({
   amount,
   items,
+  label = 'Računi nabava Kuhinja',
+  listId = 'kuhinja-racuni-seznam',
 }: {
   amount: number
   items: KuhinjaRacunLine[]
+  label?: string
+  listId?: string
 }) {
   const [open, setOpen] = useState(false)
   const sum = Math.round(items.reduce((s, i) => s + i.amountEur, 0) * 100) / 100
@@ -47,20 +51,20 @@ export default function KuhinjaRacuniRow({
         onClick={() => setOpen((v) => !v)}
         className="flex w-full cursor-pointer items-center justify-between gap-3 text-left text-sm group"
         aria-expanded={open}
-        aria-controls="kuhinja-racuni-seznam"
+        aria-controls={listId}
       >
         <span className="flex min-w-0 items-center gap-1 text-white/50 group-hover:text-white/90 transition-colors">
           {open
             ? <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#c59b5b]" />
             : <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#c59b5b]" />}
-          <span className="underline decoration-white/20 underline-offset-2 group-hover:decoration-[#c59b5b]">Računi nabava Kuhinja</span>
+          <span className="underline decoration-white/20 underline-offset-2 group-hover:decoration-[#c59b5b]">{label}</span>
         </span>
         <span className="shrink-0 text-white tabular-nums">{formatEur(amount)}</span>
       </button>
 
       {open && (
         <div
-          id="kuhinja-racuni-seznam"
+          id={listId}
           className="mt-2 overflow-hidden rounded-xl border border-white/10 bg-[#0b2731]"
         >
           <div className="flex items-center justify-between gap-3 border-b border-white/10 px-3 py-2">
