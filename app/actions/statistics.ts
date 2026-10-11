@@ -27,6 +27,44 @@ import { parseCategories } from '@/lib/stroski-categories'
 import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
 
+type KuhinjaRacunLine = {
+  id: string
+  date: string
+  name: string
+  amountEur: number
+  source: 'gotovina' | 'arhiv'
+}
+
+// Posamezne postavke zaokroži na cent. Če se vsota centov razlikuje od zneska
+// na vrstici, cent premaknemo na postavko, ki je zaokrožitvi najbližje
+// (običajno gotovino iz ariaryjev), da arhivski račun ostane na svojem znesku.
+function roundKuhinjaLines(raw: KuhinjaRacunLine[], totalEur: number): KuhinjaRacunLine[] {
+  const sorted = [...raw].sort((a, b) =>
+    a.date.localeCompare(b.date) || a.name.localeCompare(b.name, 'sl') || a.id.localeCompare(b.id)
+  )
+  const exact = sorted.map((l) => l.amountEur * 100)
+  const cents = exact.map((c) => Math.round(c))
+  let drift = Math.round(totalEur * 100) - cents.reduce((sum, c) => sum + c, 0)
+  let steps = 0
+  while (drift !== 0 && sorted.length > 0 && steps < Math.abs(drift) + sorted.length) {
+    const step = drift > 0 ? 1 : -1
+    let best = 0
+    let bestScore = -Infinity
+    for (let i = 0; i < cents.length; i++) {
+      const improvement = Math.abs(cents[i] - exact[i]) - Math.abs(cents[i] + step - exact[i])
+      const score = improvement + (sorted[i].source === 'gotovina' ? 0.001 : 0)
+      if (score > bestScore) {
+        bestScore = score
+        best = i
+      }
+    }
+    cents[best] += step
+    drift -= step
+    steps++
+  }
+  return sorted.map((l, i) => ({ ...l, amountEur: cents[i] / 100 }))
+}
+
 async function ensureKompenzacijaColumns() {
   await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS "contraExpenseId" text`)
   await db.execute(sql`ALTER TABLE marketing_expenses ADD COLUMN IF NOT EXISTS "compensationPaymentId" text`)
@@ -1261,14 +1299,31 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Računi, dodani k sredstvu v izdelavi, niso tekoči strošek (gredo v nabavno vrednost sredstva).
   await ensureAssetSchema()
   const monthReceipts = await db.execute(
-    sql`SELECT categories FROM stroski_receipts WHERE year = ${year} AND month = ${month}
+    sql`SELECT id, date, description, categories, "cashLedgerId", "omLedgerId"
+        FROM stroski_receipts WHERE year = ${year} AND month = ${month}
         AND id NOT IN (SELECT "receiptId" FROM fixed_asset_costs WHERE "receiptId" IS NOT NULL)`
   )
   const receiptsByCategory: Record<string, number> = {}
+  // Isti odliv (gotovina ali Orange Money), ki je že račun v arhivu, se ne šteje še enkrat.
+  const archiveLedgerIds = new Set<string>()
+  const kuhinjaLinesRaw: KuhinjaRacunLine[] = []
   for (const r of monthReceipts.rows) {
-    for (const c of parseCategories(r.categories)) {
+    const cashId = r.cashLedgerId ? String(r.cashLedgerId) : ''
+    const omId = r.omLedgerId ? String(r.omLedgerId) : ''
+    if (cashId) archiveLedgerIds.add(cashId)
+    if (omId) archiveLedgerIds.add(omId)
+    parseCategories(r.categories).forEach((c, idx) => {
       receiptsByCategory[c.category] = (receiptsByCategory[c.category] || 0) + c.amountEur
-    }
+      if (c.category === 'kuhinja' && c.amountEur !== 0) {
+        kuhinjaLinesRaw.push({
+          id: `arhiv-${String(r.id)}-${idx}`,
+          date: r.date ? String(r.date) : '',
+          name: (r.description ? String(r.description) : '').trim() || 'Brez imena',
+          amountEur: c.amountEur,
+          source: 'arhiv',
+        })
+      }
+    })
   }
   // Gotovinski nakupi na Borutovih nabavnih poteh (kalamari, riba, pijača …): ista logika
   // razvrščanja kot arhiv računov — hrana bremeni kuhinjo, pijača bar itd. Zneski so v Ar → EUR.
@@ -1315,9 +1370,21 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Posojilo gostu ni strošek — gost ga vrne prek računa (postavka "Cash advance").
   if (p.category === "posojilo_gostu") continue
   if (p.category === "sredstvo_v_izdelavi") continue
-  receiptsByCategory[p.category] = (receiptsByCategory[p.category] || 0) + p.amountAr / rate
+  if ((p.cashExpenseId && archiveLedgerIds.has(p.cashExpenseId)) || (p.omLedgerId && archiveLedgerIds.has(p.omLedgerId))) continue
+  const purchaseEur = p.amountAr / rate
+  receiptsByCategory[p.category] = (receiptsByCategory[p.category] || 0) + purchaseEur
+  if (p.category === 'kuhinja' && purchaseEur !== 0) {
+    kuhinjaLinesRaw.push({
+      id: `gotovina-${p.id}`,
+      date: p.date || '',
+      name: (p.name || '').trim() || 'Brez imena',
+      amountEur: purchaseEur,
+      source: 'gotovina',
+    })
+  }
   }
   const receiptsKuhinjaCost = receiptsByCategory.kuhinja || 0
+  const receiptsKuhinjaItems = roundKuhinjaLines(kuhinjaLinesRaw, receiptsKuhinjaCost)
   const receiptsBarCost = receiptsByCategory.bar || 0
   const receiptsNocitveCost = receiptsByCategory.nocitve || 0
   const receiptsWellnessCost = receiptsByCategory.wellness || 0
@@ -1615,6 +1682,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
       transfers: Math.round(transferCostTotal * 100) / 100,
       mealPlan: Math.round(mealPlanCost * 100) / 100,
       receiptsKuhinja: Math.round(receiptsKuhinjaCost * 100) / 100,
+      receiptsKuhinjaItems,
       receiptsBar: Math.round(receiptsBarCost * 100) / 100,
       receiptsNocitve: Math.round(receiptsNocitveCost * 100) / 100,
       receiptsWellness: Math.round(receiptsWellnessCost * 100) / 100,

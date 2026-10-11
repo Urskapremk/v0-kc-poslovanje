@@ -43,6 +43,7 @@ import BankaTab from '@/components/banka-tab'
 import OrangeMoneyTab from '@/components/orange-money-tab'
 import BlagajniskiDnevnik from '@/components/blagajniski-dnevnik'
 import MarketingOverviewRow from '@/components/marketing-overview-row'
+import KuhinjaRacuniRow, { type KuhinjaRacunLine } from '@/components/kuhinja-racuni-row'
 import LeaveDocument from '@/components/leave-document'
 import PayrollSettingsPanel from '@/components/payroll-settings'
 import { getUpcomingContributionAlerts } from '@/app/actions/payroll'
@@ -607,10 +608,10 @@ function StatistikaContent() {
                         <span className="text-white/50">Nabava hrana ({stats.costSettings?.find(c => c.category === 'bar_prehrana')?.value || 0}%)</span>
                         <span className="text-white">{formatEur(stats.costs.barPrehrana + ((stats.costs as { mealPlan?: number }).mealPlan || 0))}</span>
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Kuhinja</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsKuhinja?: number }).receiptsKuhinja || 0)}</span>
-                      </div>
+                      <KuhinjaRacuniRow
+                        amount={(stats.costs as { receiptsKuhinja?: number }).receiptsKuhinja || 0}
+                        items={(stats.costs as { receiptsKuhinjaItems?: KuhinjaRacunLine[] }).receiptsKuhinjaItems || []}
+                      />
                       <div className="flex justify-between text-sm">
                         <span className="text-white/50">Plače (kuhinja)</span>
                         <span className="text-white">{formatEur((stats.salaryBreakdown as { kuhinja?: number })?.kuhinja || 0)}</span>
