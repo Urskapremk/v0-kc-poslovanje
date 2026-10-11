@@ -32,7 +32,14 @@ type KuhinjaRacunLine = {
   date: string
   name: string
   amountEur: number
-  source: 'gotovina' | 'arhiv'
+  source: string
+}
+
+function isoDay(v: unknown): string {
+  if (!v) return ''
+  if (v instanceof Date) return v.toISOString().slice(0, 10)
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v))
+  return m ? m[1] : ''
 }
 
 // Posamezne postavke zaokroži na cent. Če se vsota centov razlikuje od zneska
@@ -1306,11 +1313,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const receiptsByCategory: Record<string, number> = {}
   // Isti odliv (gotovina ali Orange Money), ki je že račun v arhivu, se ne šteje še enkrat.
   const archiveLedgerIds = new Set<string>()
-  const kuhinjaLinesRaw: KuhinjaRacunLine[] = []
-  const barLinesRaw: KuhinjaRacunLine[] = []
+  const deptLines: Record<string, KuhinjaRacunLine[]> = {
+    kuhinja: [], bar: [], nocitve: [], wellness: [], ostalo: [], reprezentanca: [], vzdrzevanje: [],
+  }
   const pushDeptLine = (category: string, line: KuhinjaRacunLine) => {
-    if (category === 'kuhinja') kuhinjaLinesRaw.push(line)
-    else if (category === 'bar') barLinesRaw.push(line)
+    deptLines[category]?.push(line)
   }
   for (const r of monthReceipts.rows) {
     const cashId = r.cashLedgerId ? String(r.cashLedgerId) : ''
@@ -1340,34 +1347,50 @@ export async function getMonthlyStatistics(year: number, month: number) {
   let izletNabavaAr = 0
   let racunovodstvoAr = 0
   let prevoznikiAr = 0
+  const nabavaExtra: Record<string, KuhinjaRacunLine[]> = {
+    najemnina: [], racunovodstvo: [], prevozniki: [], stipendija: [], hrana_studenti: [], izlet: [],
+  }
+  const nabavaLine = (p: { id: string; date: string; name: string; amountAr: number; payMethod: string }): KuhinjaRacunLine => ({
+    id: `nabava-${p.id}`,
+    date: p.date || '',
+    name: (p.name || '').trim() || 'Brez imena',
+    amountEur: p.amountAr / rate,
+    source: p.payMethod === 'orange' ? 'Orange' : 'gotovina',
+  })
   for (const p of nabavaPurchases) {
   if (p.category === "najemnina") {
     najemninaHisaAr += p.amountAr
+    if (p.amountAr) nabavaExtra.najemnina.push(nabavaLine(p))
     continue
   }
   // Računovodstvo (gotovina ali Orange Money z Nabave HV) je samostojen strošek.
   if (p.category === "racunovodstvo") {
     racunovodstvoAr += p.amountAr
+    if (p.amountAr) nabavaExtra.racunovodstvo.push(nabavaLine(p))
     continue
   }
   // Prevozniki (gotovina ali Orange Money z nabave) so samostojen strošek, ne Ostalo.
   if (p.category === "prevozniki") {
     prevoznikiAr += p.amountAr
+    if (p.amountAr) nabavaExtra.prevozniki.push(nabavaLine(p))
     continue
   }
   // Štipendija (šolnina) je samostojen strošek, ne bremeni oddelkov.
   if (p.category === "stipendija") {
     stipendijaAr += p.amountAr
+    if (p.amountAr) nabavaExtra.stipendija.push(nabavaLine(p))
     continue
   }
   // Hrana za študente je samostojen strošek, ne bremeni kuhinje.
   if (p.category === "hrana_studenti") {
     hranaStudentiAr += p.amountAr
+    if (p.amountAr) nabavaExtra.hrana_studenti.push(nabavaLine(p))
     continue
   }
   // Gotovinsko plačilo dobavitelju za izlet (npr. gosta na vrh Kombe) gre v strošek izletov.
   if (p.category === "izlet") {
     izletNabavaAr += p.amountAr
+    if (p.amountAr) nabavaExtra.izlet.push(nabavaLine(p))
     continue
   }
   // Osnovno sredstvo se NE knjiži kot takojšen strošek oddelka — amortizira se prek fixed_assets.
@@ -1389,9 +1412,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
   }
   }
   const receiptsKuhinjaCost = receiptsByCategory.kuhinja || 0
-  const receiptsKuhinjaItems = roundKuhinjaLines(kuhinjaLinesRaw, receiptsKuhinjaCost)
+  const receiptsKuhinjaItems = roundKuhinjaLines(deptLines.kuhinja, receiptsKuhinjaCost)
   const receiptsBarCost = receiptsByCategory.bar || 0
-  const receiptsBarItems = roundKuhinjaLines(barLinesRaw, receiptsBarCost)
+  const receiptsBarItems = roundKuhinjaLines(deptLines.bar, receiptsBarCost)
   const receiptsNocitveCost = receiptsByCategory.nocitve || 0
   const receiptsWellnessCost = receiptsByCategory.wellness || 0
   const receiptsOstaloCost = receiptsByCategory.ostalo || 0
@@ -1431,6 +1454,42 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const tuctucAr = Number(cashExtra.tuctuc || 0) + Number(omExtra.tuctuc || 0)
   const portersCost = portersAr / rate
   const tuctucCost = tuctucAr / rate
+  const cashDetailRows = await db.execute(sql`
+    SELECT id, date, purpose AS name, amount
+    FROM bank_cash_expenses
+    WHERE date >= ${monthStart} AND date < ${nextMonthStart}
+      AND (
+        purpose ILIKE '%nosač%' OR purpose ILIKE '%nosac%'
+        OR purpose ILIKE '%tuc tuc%' OR purpose ILIKE '%tuctuc%' OR purpose ILIKE '%tuk tuk%'
+      )
+  `)
+  const omDetailRows = await db.execute(sql`
+    SELECT id, date, description AS name, amount
+    FROM orange_money_transactions
+    WHERE direction = 'out' AND date >= ${monthStart} AND date < ${nextMonthStart}
+      AND (
+        description ILIKE '%nosač%' OR description ILIKE '%nosac%'
+        OR description ILIKE '%tuc tuc%' OR description ILIKE '%tuctuc%' OR description ILIKE '%tuk tuk%'
+      )
+  `)
+  const porterLinesRaw: KuhinjaRacunLine[] = []
+  const tucLinesRaw: KuhinjaRacunLine[] = []
+  const pushCarry = (row: Record<string, unknown>, source: string) => {
+    const name = String(row.name || '')
+    const amountEur = Number(row.amount || 0) / rate
+    if (!amountEur) return
+    const line: KuhinjaRacunLine = {
+      id: `${source}-${String(row.id)}`,
+      date: isoDay(row.date),
+      name: name.trim() || 'Brez imena',
+      amountEur,
+      source,
+    }
+    if (/nosač|nosac/i.test(name)) porterLinesRaw.push({ ...line, id: `porter-${line.id}` })
+    if (/tuc tuc|tuctuc|tuk tuk/i.test(name)) tucLinesRaw.push({ ...line, id: `tuc-${line.id}` })
+  }
+  for (const row of cashDetailRows.rows as Record<string, unknown>[]) pushCarry(row, 'gotovina')
+  for (const row of omDetailRows.rows as Record<string, unknown>[]) pushCarry(row, 'Orange')
 
   // Osnovna sredstva: mesečna amortizacija (v EUR) — knjiži se kot ločen strošek.
   const depreciation = await getFixedAssetsDepreciation(year, month)
@@ -1660,6 +1719,325 @@ export async function getMonthlyStatistics(year: number, month: number) {
     .map(e => ({ ...e, revenueEur: Math.round(e.revenueEur * 100) / 100 }))
     .sort((a, b) => b.revenueEur - a.revenueEur || b.quantity - a.quantity)
 
+  const salaryMonth = `${year}-${String(month).padStart(2, '0')}-01`
+  const guestNameById = new Map(allReservationsForNights.map(r => [r.id, r.guestName || '']))
+  const noteDate = new Map(monthDeliveryNotes.map(n => [n.id, isoDay(n.date)]))
+  const salaryLines = (staff: typeof accommodationStaff): KuhinjaRacunLine[] =>
+    staff
+      .map(s => ({
+        id: `placa-${s.id}`,
+        date: salaryMonth,
+        name: (s.staffName || '').trim() || 'Brez imena',
+        amountEur: monthSalary(s) / rate,
+        source: 'placa',
+      }))
+      .filter(l => l.amountEur !== 0)
+  const expenseKind = (method: string | null | undefined) => {
+    if (method === 'cash') return 'gotovina'
+    if (method === 'orange_money') return 'Orange'
+    if (method === 'transfer') return 'Nakazilo'
+    if (method === 'in_kind') return 'V naravi'
+    if (method === 'kompenzacija') return 'Kompenzacija'
+    return 'Vnos'
+  }
+  const expenseLines = (category: string): KuhinjaRacunLine[] =>
+    monthExpenses
+      .filter(e => category === 'marketing' ? (e.category || 'marketing') === 'marketing' : e.category === category)
+      .filter(e => Number(e.amount) !== 0)
+      .map(e => ({
+        id: String(e.id),
+        date: isoDay(e.date) || salaryMonth,
+        name: (e.description || '').trim() || 'Brez imena',
+        amountEur: Number(e.amount),
+        source: expenseKind(e.paymentMethod),
+      }))
+
+  const transferDilipRaw: KuhinjaRacunLine[] = []
+  const transferHermanRaw: KuhinjaRacunLine[] = []
+  for (const t of allTransfers) {
+    const guest = guestNameById.get(t.reservationId) || 'Prevoz'
+    const when = isoDay(t.pickupDate)
+    if (t.boatId && !t.skipBoatPay) {
+      let routeId = t.route
+      if (t.route && !t.route.startsWith('route-')) {
+        const foundRoute = allRoutes.find(r => r.name === t.route)
+        if (foundRoute) routeId = foundRoute.id
+      }
+      const routeData = allRoutes.find(r => r.id === routeId)
+      const pricingRouteId = routeData?.baseRouteId || routeId
+      const pricing = allSupplierPricing.find(sp => sp.boatId === t.boatId && sp.routeId === pricingRouteId)
+      const ar = pricing?.priceAr || 0
+      if (ar) {
+        transferDilipRaw.push({
+          id: `dilip-${t.id}`,
+          date: when,
+          name: [guest, routeData?.name || t.route || ''].filter(Boolean).join(' · '),
+          amountEur: ar / rate,
+          source: 'Cenik',
+        })
+      }
+    }
+    if (t.hermanRouteId) {
+      const hp = allSupplierPricing.find(sp => sp.boatId === 'taxi-herman' && sp.routeId === t.hermanRouteId)
+      const ar = hp?.priceAr || 0
+      if (ar) {
+        const routeData = allRoutes.find(r => r.id === t.hermanRouteId)
+        transferHermanRaw.push({
+          id: `herman-${t.id}`,
+          date: when,
+          name: [guest, routeData?.name || 'Herman'].filter(Boolean).join(' · '),
+          amountEur: ar / rate,
+          source: 'Cenik',
+        })
+      }
+    }
+  }
+
+  const excursionFormulaRaw: KuhinjaRacunLine[] = []
+  for (const booking of allExcursionBookings) {
+    let ar = 0
+    if (booking.boatId && booking.excursionId) {
+      const pricing = allExcursionPricing.find(p => p.excursionId === booking.excursionId && p.boatId === booking.boatId)
+      if (pricing) ar += pricing.priceAr || 0
+    }
+    const exc = allExcursions.find(e => e.id === booking.excursionId)
+    if (exc) {
+      const pax = booking.pax || 1
+      ar += (exc.guidePriceAr || 0) + (exc.entranceFeeAr || 0) * pax
+      if (booking.lunchProviderId) ar += (exc.lunchPriceAr || 0) * pax
+    }
+    if (ar) {
+      excursionFormulaRaw.push({
+        id: `izlet-${booking.id}`,
+        date: isoDay(booking.date),
+        name: [guestNameById.get(booking.reservationId), exc?.name || 'Izlet'].filter(Boolean).join(' · ') || 'Izlet',
+        amountEur: ar / rate,
+        source: 'Cenik',
+      })
+    }
+  }
+  for (const o of excursionItems) {
+    const costAr = Number((o as { costAr?: number | null }).costAr || 0)
+    if (!costAr) continue
+    excursionFormulaRaw.push({
+      id: `izlet-rocno-${o.id}`,
+      date: isoDay(o.eventDate),
+      name: (o.name || '').trim() || 'Izlet',
+      amountEur: costAr / rate,
+      source: 'Ročno',
+    })
+  }
+
+  const wellnessFormulaRaw: KuhinjaRacunLine[] = []
+  if (costMap.wellness) {
+    if (costMap.wellness.type === 'fixed') {
+      const unit = costMap.wellness.value
+      for (const i of formulaWellnessDelivery) {
+        const qty = i.quantity || 0
+        if (!qty) continue
+        wellnessFormulaRaw.push({
+          id: `well-${i.id}`,
+          date: noteDate.get(i.deliveryNoteId) || '',
+          name: `${i.productName || 'Masaža'}${qty > 1 ? ` × ${qty}` : ''}`,
+          amountEur: qty * unit,
+          source: 'Cenik',
+        })
+      }
+      for (const o of formulaWellnessOrders) {
+        wellnessFormulaRaw.push({
+          id: `well-${o.id}`,
+          date: isoDay(o.eventDate),
+          name: [guestNameById.get(o.reservationId || ''), o.name || 'Masaža'].filter(Boolean).join(' · '),
+          amountEur: unit,
+          source: 'Cenik',
+        })
+      }
+    } else {
+      const pct = costMap.wellness.value / 100
+      for (const i of formulaWellnessDelivery) {
+        const rev = (i.totalAr || 0) / rate
+        if (!rev) continue
+        wellnessFormulaRaw.push({
+          id: `well-${i.id}`,
+          date: noteDate.get(i.deliveryNoteId) || '',
+          name: i.productName || 'Masaža',
+          amountEur: rev * pct,
+          source: 'Odstotek',
+        })
+      }
+      for (const o of formulaWellnessOrders) {
+        const rev = (o.priceAr || 0) / rate
+        if (!rev) continue
+        wellnessFormulaRaw.push({
+          id: `well-${o.id}`,
+          date: isoDay(o.eventDate),
+          name: o.name || 'Masaža',
+          amountEur: rev * pct,
+          source: 'Odstotek',
+        })
+      }
+    }
+  }
+
+  const ostaloRaw: KuhinjaRacunLine[] = []
+  for (const i of ostaloItems) {
+    const c = i.productId ? productCostArById.get(i.productId) : undefined
+    if (c != null && !i.isFree && !(i as { coveredByMealPlan?: boolean }).coveredByMealPlan && (i.quantity || 0) > 0) {
+      ostaloRaw.push({
+        id: `ostalo-${i.id}`,
+        date: noteDate.get(i.deliveryNoteId) || '',
+        name: i.productName || 'Izdelek',
+        amountEur: c * (i.quantity || 0) / rate,
+        source: 'Nabava',
+      })
+    }
+  }
+  for (const o of ostaloOrderItems) {
+    const revAr = orderItemRevenueAr(o)
+    const p = ostaloProductByName.get(o.name!)!
+    let costAr = 0
+    if ((o as { costAr?: number | null }).costAr != null) costAr = Number((o as { costAr?: number | null }).costAr)
+    else if (p.priceAr > 0 && p.costAr > 0) costAr = revAr * p.costAr / p.priceAr
+    if (!costAr) continue
+    ostaloRaw.push({
+      id: `ostalo-${o.id}`,
+      date: isoDay(o.eventDate),
+      name: o.name || 'Izdelek',
+      amountEur: costAr / rate,
+      source: 'Nabava',
+    })
+  }
+  if (ostaloRaw.length > 0 && ostaloFallbackCost !== 0) {
+    ostaloRaw.push({
+      id: 'ostalo-odstotek',
+      date: salaryMonth,
+      name: `Odstotek (${costMap.ostalo?.value || 0}%)`,
+      amountEur: ostaloFallbackCost,
+      source: 'Odstotek',
+    })
+  }
+
+  const salariesAccommodation = roundKuhinjaLines(salaryLines(accommodationStaff), accommodationSalaryCost)
+  const salariesBar = roundKuhinjaLines(salaryLines(barStaff), barSalaryCost)
+  const salariesKuhinja = roundKuhinjaLines(salaryLines(kuhinjaStaff), kuhinjaSalaryCost)
+  const salariesManagement = roundKuhinjaLines(salaryLines(managementStaff), managementSalaryCost)
+  const marketingItems = roundKuhinjaLines(expenseLines('marketing'), marketingCost)
+  const bookingItems = roundKuhinjaLines(expenseLines('booking'), bookingCost)
+  const optimaplusItems = roundKuhinjaLines(expenseLines('optimaplus'), optimaplusCost)
+  const reklamaItems = roundKuhinjaLines(expenseLines('reklama'), reklamaCost)
+  const starlinkItems: KuhinjaRacunLine[] = starlinkCost
+    ? [{ id: 'starlink', date: salaryMonth, name: 'Starlink', amountEur: starlinkCost, source: 'Fiksno' }]
+    : []
+  const receiptsNocitveItems = roundKuhinjaLines(deptLines.nocitve, receiptsNocitveCost)
+  const receiptsWellnessItems = roundKuhinjaLines(deptLines.wellness, receiptsWellnessCost)
+  const receiptsOstaloItems = roundKuhinjaLines(deptLines.ostalo, receiptsOstaloCost)
+  const receiptsReprezentancaItems = roundKuhinjaLines(deptLines.reprezentanca, receiptsReprezentancaCost)
+  const receiptsVzdrzevanjeItems = roundKuhinjaLines(deptLines.vzdrzevanje, receiptsVzdrzevanjeCost)
+  const najemninaItems = roundKuhinjaLines(nabavaExtra.najemnina, najemninaHisaCost)
+  const stipendijaItems = roundKuhinjaLines(nabavaExtra.stipendija, stipendijaCost)
+  const hranaStudentiItems = roundKuhinjaLines(nabavaExtra.hrana_studenti, hranaStudentiCost)
+  const racunovodstvoItems = roundKuhinjaLines(nabavaExtra.racunovodstvo, racunovodstvoCost)
+  const prevoznikiItems = roundKuhinjaLines(nabavaExtra.prevozniki, prevoznikiCost)
+  const izletGotovinaItems = roundKuhinjaLines(nabavaExtra.izlet, izletGotovinaCost)
+  const transfersDilip = roundKuhinjaLines(transferDilipRaw, dilipCost)
+  const transfersHerman = roundKuhinjaLines(transferHermanRaw, hermanCost)
+  const transfersItems = roundKuhinjaLines([...transferDilipRaw, ...transferHermanRaw], transferCostTotal)
+  const excursionFormulaItems = roundKuhinjaLines(excursionFormulaRaw, excursionCost)
+  const wellnessFormulaItems = roundKuhinjaLines(wellnessFormulaRaw, wellnessCost)
+  const ostaloItemsLines = roundKuhinjaLines(ostaloRaw, ostaloCost)
+  const depreciationItemsLines = roundKuhinjaLines(
+    depreciation.items.filter(i => i.active && i.monthlyEur).map(i => ({
+      id: `amort-${i.id}`,
+      date: salaryMonth,
+      name: i.name,
+      amountEur: i.monthlyEur,
+      source: 'Amortizacija',
+    })),
+    depreciationCost,
+  )
+  const portersItems = roundKuhinjaLines(porterLinesRaw, portersCost)
+  const tuctucItems = roundKuhinjaLines(tucLinesRaw, tuctucCost)
+
+  const skupajParts: { key: string; name: string; amount: number; items: KuhinjaRacunLine[] }[] = [
+    { key: 'place-nocitve', name: 'Plače (vrtnar, sobarica)', amount: accommodationSalaryCost, items: salariesAccommodation },
+    { key: 'place-bar', name: 'Plače (barman)', amount: barSalaryCost, items: salariesBar },
+    { key: 'place-kuhinja', name: 'Plače (kuhinja)', amount: kuhinjaSalaryCost, items: salariesKuhinja },
+    { key: 'place-management', name: 'Plače (management)', amount: managementSalaryCost, items: salariesManagement },
+    { key: 'marketing', name: 'Marketing', amount: marketingCost, items: marketingItems },
+    { key: 'booking', name: 'Booking', amount: bookingCost, items: bookingItems },
+    { key: 'optimaplus', name: 'Optima plus', amount: optimaplusCost, items: optimaplusItems },
+    { key: 'starlink', name: 'Starlink', amount: starlinkCost, items: starlinkItems },
+    { key: 'nabava-pijaca', name: 'Nabava pijača', amount: barPijacaCost, items: [] },
+    { key: 'nabava-hrana', name: 'Nabava hrana', amount: barPrehranaCost + mealPlanCost, items: [] },
+    { key: 'racuni-kuhinja', name: 'Računi nabava Kuhinja', amount: receiptsKuhinjaCost, items: receiptsKuhinjaItems },
+    { key: 'racuni-bar', name: 'Računi nabava Bar', amount: receiptsBarCost, items: receiptsBarItems },
+    { key: 'racuni-nocitve', name: 'Računi nabava Nočitve', amount: receiptsNocitveCost, items: receiptsNocitveItems },
+    { key: 'racuni-wellness', name: 'Plačilo maserki', amount: receiptsWellnessCost, items: receiptsWellnessItems },
+    { key: 'racuni-ostalo', name: 'Računi ostalo', amount: receiptsOstaloCost, items: receiptsOstaloItems },
+    { key: 'reprezentanca', name: 'Računi reprezentanca', amount: receiptsReprezentancaCost, items: receiptsReprezentancaItems },
+    { key: 'vzdrzevanje', name: 'Računi vzdrževanje', amount: receiptsVzdrzevanjeCost, items: receiptsVzdrzevanjeItems },
+    { key: 'prevozi', name: 'Dobavitelj prevozov', amount: transferCostTotal, items: transfersItems },
+    { key: 'izleti', name: 'Najem čolnov + vodič + vstop + kosilo', amount: excursionCost, items: excursionFormulaItems },
+    { key: 'izlet-gotovina', name: 'Plačilo dobavitelju (gotovina)', amount: izletGotovinaCost, items: izletGotovinaItems },
+    { key: 'maserke', name: 'Maserke', amount: wellnessCost, items: wellnessFormulaItems },
+    { key: 'ostalo', name: 'Nabavna cena + pranje', amount: ostaloCost, items: ostaloItemsLines },
+    { key: 'amortizacija', name: 'Amortizacija', amount: depreciationCost, items: depreciationItemsLines },
+    { key: 'najemnina', name: 'Najemnina hiša', amount: najemninaHisaCost, items: najemninaItems },
+    { key: 'stipendija', name: 'Štipendija', amount: stipendijaCost, items: stipendijaItems },
+    { key: 'hrana-studenti', name: 'Hrana za študente', amount: hranaStudentiCost, items: hranaStudentiItems },
+    { key: 'racunovodstvo', name: 'Računovodstvo', amount: racunovodstvoCost, items: racunovodstvoItems },
+    { key: 'prevozniki', name: 'Prevozniki', amount: prevoznikiCost, items: prevoznikiItems },
+    { key: 'reklama', name: 'Reklama', amount: reklamaCost, items: reklamaItems },
+    { key: 'nosaci', name: 'Nosači', amount: portersCost, items: portersItems },
+    { key: 'tuctuc', name: 'Tuc tuc', amount: tuctucCost, items: tuctucItems },
+  ]
+  const skupajRaw: KuhinjaRacunLine[] = []
+  for (const part of skupajParts) {
+    if (part.items.length) skupajRaw.push(...part.items)
+    else if (Math.round(part.amount * 100) !== 0) {
+      skupajRaw.push({
+        id: `skupaj-${part.key}`,
+        date: salaryMonth,
+        name: part.name,
+        amountEur: part.amount,
+        source: 'Odstotek',
+      })
+    }
+  }
+
+  const costLines = {
+    salariesAccommodation,
+    salariesBar,
+    salariesKuhinja,
+    salariesManagement,
+    marketing: marketingItems,
+    booking: bookingItems,
+    optimaplus: optimaplusItems,
+    reklama: reklamaItems,
+    starlink: starlinkItems,
+    receiptsNocitve: receiptsNocitveItems,
+    receiptsWellness: receiptsWellnessItems,
+    receiptsOstalo: receiptsOstaloItems,
+    receiptsReprezentanca: receiptsReprezentancaItems,
+    receiptsVzdrzevanje: receiptsVzdrzevanjeItems,
+    najemnina: najemninaItems,
+    stipendija: stipendijaItems,
+    hranaStudenti: hranaStudentiItems,
+    racunovodstvo: racunovodstvoItems,
+    prevozniki: prevoznikiItems,
+    izletGotovina: izletGotovinaItems,
+    transfers: transfersItems,
+    transfersDilip,
+    transfersHerman,
+    excursions: excursionFormulaItems,
+    wellness: wellnessFormulaItems,
+    ostalo: ostaloItemsLines,
+    depreciation: depreciationItemsLines,
+    porters: portersItems,
+    tuctuc: tuctucItems,
+    skupaj: roundKuhinjaLines(skupajRaw, totalCosts),
+  }
+
   return {
     year,
     month,
@@ -1744,7 +2122,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
     guestBreakdown,
     barProductSales,
     costSettings: costs,
-    staffMembers: activeStaff
+    staffMembers: activeStaff,
+    costLines,
   }
 }
 
