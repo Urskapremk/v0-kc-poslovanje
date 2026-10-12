@@ -29,7 +29,8 @@ const COUNTRIES: Array<[string, string, string[]]> = [
   ["IT", "Italija", ["italy", "italija", "italian", "italia", "it"]],
   ["ES", "Španija", ["spain", "spanija", "spanish", "espana", "es"]],
   ["PT", "Portugalska", ["portugal", "portugalska", "portuguese", "pt"]],
-  ["SE", "Švedska", ["sweden", "svedska", "swedish", "sverige", "se"]],
+  // "Švedska" folds to svedska. Genitive "Švedske" / "iz Švedske" does not, so those are listed too.
+  ["SE", "Švedska", ["sweden", "svedska", "svedske", "svedski", "svedsko", "iz svedske", "swedish", "sverige", "svensk", "svenska", "swe", "se"]],
   ["NO", "Norveška", ["norway", "norveska", "norwegian", "no"]],
   ["DK", "Danska", ["denmark", "danska", "danish", "dk"]],
   ["FI", "Finska", ["finland", "finska", "finnish", "fi"]],
