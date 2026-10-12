@@ -241,10 +241,10 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
           .map((d) => {
             const serviceRows = d.services
               .map((s) => {
-                // Separately-paid excursions/transfers (showPaidEur set) are charged at their
+                // Separately-paid excursions (showPaidEur set) are charged at their
                 // real price and carry a green "Paid · method · date" note (they are part of the
-                // total and Total paid). Other paid items (meals/On House/prepaid) stay at 0.00
-                // with an inline (Included)/(On House) badge.
+                // total and Total paid). Paid transfers and other paid items (meals/On House/prepaid)
+                // stay at 0.00 with an inline (Paid)/(Included)/(On House) badge.
                 const separatelyPaid = s.showPaidEur !== undefined
                 const badge = s.paid && !separatelyPaid ? ` <span style="color:#8fae92;font-size:11px;">(${s.free ? t.complimentary : s.included ? mealIncludedLabel : t.paid})</span>` : ''
                 const paidSubRow = separatelyPaid
@@ -733,13 +733,15 @@ async function buildInvoiceData(
 
   // ---- Totals (identical logic to the /racun page) ----
   const invoiceOrderItems = orderItems.filter((i) => i.category !== 'Bivanje')
-  // Excursions/transfers the guest paid separately (e.g. in advance) are counted toward the
-  // invoice TOTAL and Total paid, at their real refPriceAr. Agency bookings never reveal prices.
+  // Excursions the guest paid separately (e.g. in advance) are counted toward the
+  // invoice TOTAL and Total paid, at their real refPriceAr. A paid transfer is already
+  // settled: it is shown as Paid at 0.00 and is not added again (same as a paid meal plan).
+  // Unpaid transfers stay on the invoice. Agency bookings never reveal prices.
   const isAgencyBookingE = reservation.bookingSource === 'Agency'
   const isSeparatelyPaidService = (i: AnyRec) =>
     i.paymentStatus === 'PAID' &&
     !i.isFree &&
-    (i.category === 'Izlet' || i.category === 'Transfer') &&
+    i.category === 'Izlet' &&
     Number(i.refPriceAr || 0) > 0 &&
     !isAgencyBookingE &&
     !hidePayments
@@ -765,8 +767,9 @@ async function buildInvoiceData(
   const creditAr = applicableDiscounts.filter((d) => d.kind === 'credit').reduce((s, d) => s + Number(d.amountAr || 0), 0)
   const amountPaidEur = Number(reservation.amountPaid) || 0
   const prepaymentEur = excludeAccommodation ? Math.max(0, amountPaidEur - accommodationEurFull) : amountPaidEur
-  // Total paid = accommodation prepayment + separately-paid excursions/transfers. Both the
-  // excursions (now in subtotal) and this paid amount rise together, so Balance due is unchanged.
+  // Total paid = accommodation prepayment + separately-paid excursions. Paid transfers
+  // are omitted from both. Both the excursions (now in subtotal) and this paid amount rise
+  // together, so Balance due is unchanged.
   const totalPaidEur = prepaymentEur + separatePaidEur
   const balanceDueEur = Math.max(0, grandTotalEur - totalPaidEur)
   // Unused credit (e.g. from a cancelled excursion) shown to the guest: the part of the credit
@@ -820,6 +823,8 @@ async function buildInvoiceData(
   }
   if (!isAgencyBooking) {
     for (const i of invoiceOrderItems as AnyRec[]) {
+      // Paid transfers are already settled and are not part of this invoice's payments.
+      if (i.category === 'Transfer') continue
       if (i.paymentStatus === 'PAID' && !i.isFree && Number(i.refPriceAr || 0) > 0 && (i.paidMethod || i.paidDate)) {
         paymentSpec.push({
           label: translateItemName(i.name as string, lang),
@@ -894,10 +899,11 @@ async function buildInvoiceData(
         totalAr: dayTotalAr,
         services: dayItems.map((i) => {
           const paid = i.paymentStatus === 'PAID'
-          // For paid excursions/transfers show the real price (refPriceAr) with a "Paid"
-          // label; NOT added to the total. For agency bookings never reveal prices.
+          // Paid excursions show the real price (refPriceAr) with a Paid note and are part of
+          // the total. Paid transfers are not charged: 0.00 with (Paid), like a paid meal plan.
+          // Agency bookings never reveal prices.
           const showPaidEur =
-            paid && !i.isFree && !isMealItem(i) && !isAgencyBooking && Number(i.refPriceAr || 0) > 0
+            paid && !i.isFree && !isMealItem(i) && !isTransferItem(i) && !isAgencyBooking && Number(i.refPriceAr || 0) > 0
               ? Number(i.refPriceAr) / exchangeRate
               : undefined
           const showPaidNote =

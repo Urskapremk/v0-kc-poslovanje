@@ -381,16 +381,17 @@ export default function RacunPage() {
     ? (rawDeliveryNotes as DeliveryNote[]).map((n) => ({ ...n, items: n.items.filter(isFoodBarItem) }))
     : (rawDeliveryNotes as DeliveryNote[])
 
-  // Excursions/transfers the guest paid separately (e.g. in advance, before arrival).
-  // The user wants these to count toward the invoice TOTAL and toward Total paid, so the
-  // guest sees the full picture and the Balance due stays correct. We use refPriceAr (the
-  // real price kept even when the line's priceAr was zeroed on payment). Agency bookings
-  // never reveal prices, so they are excluded here (kept at 0.00, off the totals).
+  // Excursions the guest paid separately (e.g. in advance, before arrival) count toward
+  // the invoice TOTAL and toward Total paid, so the Balance due stays correct. We use
+  // refPriceAr (the real price kept even when the line's priceAr was zeroed on payment).
+  // A paid transfer (arrival or departure) is already settled: it stays on the invoice as
+  // Paid at 0.00 and is not charged again, the same way a paid meal plan is excluded.
+  // Unpaid transfers stay on the invoice at their price. Agency bookings never reveal prices.
   const isAgencyBooking = reservation.bookingSource === 'Agency'
   const isSeparatelyPaidService = (item: OrderItem) =>
     item.paymentStatus === 'PAID' &&
     !item.isFree &&
-    (item.category === 'Izlet' || item.category === 'Transfer') &&
+    item.category === 'Izlet' &&
     Number(item.refPriceAr || 0) > 0 &&
     !isAgencyBooking &&
     showPayments
@@ -400,7 +401,7 @@ export default function RacunPage() {
   const separatePaidEur = separatePaidAr / exchangeRate
 
   // Calculate totals. Services = unpaid items (their priceAr) + separately-paid
-  // excursions/transfers (their real refPriceAr), so both flow into the TOTAL.
+  // excursions (their real refPriceAr). Paid transfers are not included.
   const servicesTotal =
     invoiceOrderItems
       .filter((item) => item.paymentStatus === 'UNPAID')
@@ -495,7 +496,8 @@ export default function RacunPage() {
   const accRemainingEur = Math.max(0, accommodationEur - accPaidEur)
   const accommodationPartiallyPaid = !isAgencyBooking && accPaidEur > 0.01 && accRemainingEur > 0.01
 
-  // Total the guest has paid = accommodation prepayment + separately-paid excursions/transfers.
+  // Total the guest has paid = accommodation prepayment + separately-paid excursions.
+  // Paid transfers are omitted from both the total and Total paid (already settled).
   // Both the excursions (now in subtotal) and this paid amount rise together, so the Balance
   // due is unchanged — but TOTAL and Total paid now reflect the full picture.
   const totalPaidEur = alreadyPaidEur + separatePaidEur
@@ -717,6 +719,8 @@ export default function RacunPage() {
   }
   if (!isAgencyBooking) {
     for (const i of invoiceOrderItems) {
+      // Paid transfers are already settled and are not part of this invoice's payments.
+      if (i.category === 'Transfer') continue
       if (i.paymentStatus === 'PAID' && !i.isFree && Number(i.refPriceAr || 0) > 0 && (i.paidMethod || i.paidDate)) {
         paymentSpec.push({
           label: translateItemName(i.name, invoiceLang),
@@ -1117,9 +1121,9 @@ export default function RacunPage() {
                         <div className="px-4 py-1">
                           {dayItems.map((item) => {
                             const notCharged = item.paymentStatus === 'PAID'
-                            // Separately-paid excursions/transfers are charged at their real price
+                            // Separately-paid excursions are charged at their real price
                             // (refPriceAr) and counted in the total; they carry a green "Paid · method ·
-                            // date" note. Other paid items (meals, On House, prepaid) stay at 0.00.
+                            // date" note. Paid transfers, meals, On House and other prepaid lines stay at 0.00.
                             const separatelyPaid = isSeparatelyPaidService(item)
                             // Meals are labelled as included (half/full board); other paid items as paid.
                             const notChargedLabel = item.isFree ? t.complimentary : (isMealItem(item) ? mealIncludedLabel : t.paid)
@@ -1466,7 +1470,7 @@ export default function RacunPage() {
             )}
             {separatePaidEur > 0 && (
               <div className="flex justify-between text-sm text-[#8fae92]">
-                <span>Plačani izleti / transferji</span>
+                <span>Plačani izleti</span>
                 <span>-{formatEur(separatePaidEur)} EUR</span>
               </div>
             )}

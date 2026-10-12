@@ -7280,7 +7280,8 @@ function GuestCard() {
 
     // ===== Invoice TOTAL (matches /racun and the reservation-row balance) =====
     // TOTAL = accommodation + unpaid services/bar (minus discounts) + separately-paid
-    // excursions/transfers. Those separately-paid items also count toward "Placano",
+    // excursions. A paid transfer is not charged again. Unpaid transfers stay via their
+    // UNPAID order item. Separately-paid excursions also count toward "Placano",
     // so the remaining stays correct. Uses raw order_items (incl. the Transfer mirror).
     const isAgency = reservation.bookingSource === 'Agency';
     const unpaidServicesInvAr = (orderItems as any[])
@@ -7290,7 +7291,7 @@ function GuestCard() {
       .reduce((s, i) => s + ((i.coveredByMealPlan || i.isFree) ? 0 : Number(i.priceAr || 0) * Number(i.quantity || 1)), 0);
     const invDiscountAr = discounts.reduce((s, d) => s + (d.amountAr || 0), 0);
     const sepPaidRaw = (orderItems as any[])
-      .filter(i => !isAgency && i.paymentStatus === 'PAID' && !i.isFree && (i.category === 'Izlet' || i.category === 'Transfer') && Number(i.refPriceAr || 0) > 0);
+      .filter(i => !isAgency && i.paymentStatus === 'PAID' && !i.isFree && i.category === 'Izlet' && Number(i.refPriceAr || 0) > 0);
     const sepPaidItems = isAgency ? [] : sepPaidRaw.map(i => ({
       label: toEnglishItemName(i.name),
       eur: arToEur(Number(i.refPriceAr || 0), exchangeRate),
