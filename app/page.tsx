@@ -10,7 +10,7 @@ import useSWR, { mutate } from "swr";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
-  import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, type ChildrenAges } from "@/lib/meal-plan";
+  import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
   import { TimelineCalendar } from "@/components/timeline-calendar";
   import { DailyReminder, type ReminderSection } from "@/components/daily-reminder";
   import BankBalanceCard from "@/components/bank-balance-card";
@@ -287,7 +287,7 @@ interface Reservation {
   mealPlanPax?: number | null; // Za koliko oseb velja penzion (prazno = za vse)
   mealPlanPaymentStatus?: string | null; // PAID, UNPAID
   mealPlanSnack?: boolean | null; // Gost ima poleg penziona naročen tudi snack (kuhinja)
-  childrenAges?: Record<string, number> | null; // (opuščeno) nadomeščeno z guestBand/secondGuestBand/...
+  childrenAges?: ({ years?: number[] } & Record<string, number>) | null; // years = starosti na kartici; ostalo = prehrana
   checkedInAt?: string | null; // When guest checked in
   checkedOutAt?: string | null; // When guest checked out
   excludeFromBar?: boolean | null; // Skrij iz bar dobavnic (fakturira se na drug bungalov)
@@ -1407,6 +1407,47 @@ function isPaidPlanMeal(
   if (plan === 'HB') return breakfast || dinner;
   if (plan === 'B' || plan === 'BB') return breakfast;
   return false;
+}
+
+/** Full guest invoice total (stay + unpaid bar/services + separately-paid excursions). Matches /racun. */
+function computeGuestInvoiceTotalEur(
+  reservation: {
+    totalAmount?: number | null;
+    bookingSource?: string | null;
+    orderItems?: { paymentStatus?: string; category?: string; priceAr?: number; refPriceAr?: number | null; isFree?: boolean }[];
+    barItems?: { priceAr?: number; quantity?: number; coveredByMealPlan?: boolean; isFree?: boolean }[];
+    invoiceDiscounts?: { amountAr?: number }[];
+  },
+  exchangeRate: number,
+  discounts?: { amountAr?: number }[],
+): number {
+  const isAgency = reservation.bookingSource === 'Agency';
+  const orderItems = reservation.orderItems || [];
+  const barItems = reservation.barItems || [];
+  const discountRows = discounts ?? reservation.invoiceDiscounts ?? [];
+  const unpaidServicesInvAr = orderItems
+    .filter((i) => i.paymentStatus === 'UNPAID' && i.category !== 'Bivanje')
+    .reduce((s, i) => s + Number(i.priceAr || 0), 0);
+  const barChargeInvAr = barItems.reduce(
+    (s, i) => s + ((i.coveredByMealPlan || i.isFree) ? 0 : Number(i.priceAr || 0) * Number(i.quantity || 1)),
+    0,
+  );
+  const invDiscountAr = discountRows.reduce((s, d) => s + (d.amountAr || 0), 0);
+  const sepPaidAr = orderItems
+    .filter(
+      (i) =>
+        !isAgency &&
+        i.paymentStatus === 'PAID' &&
+        !i.isFree &&
+        i.category === 'Izlet' &&
+        Number(i.refPriceAr || 0) > 0,
+    )
+    .reduce((s, i) => s + Number(i.refPriceAr || 0), 0);
+  return (
+    Number(reservation.totalAmount || 0) +
+    arToEur(unpaidServicesInvAr + barChargeInvAr - invDiscountAr, exchangeRate) +
+    arToEur(sepPaidAr, exchangeRate)
+  );
 }
 
 function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange, separatePaidItems = [], onRemainingChange }: { 
@@ -2552,54 +2593,8 @@ async function handleCreateReservation() {
             };
           })();
 
-          // Children's ages, derived from the police-form birth dates so nothing is typed
-          // twice. Measured at ARRIVAL, not today: that is the age that matters for the
-          // stay and it does not tick over while the card is on screen. Date parts are
-          // compared numerically �� parsing to Date would shift the day in our timezone.
-          const childAgeInfo = (() => {
-            if (!paxSrc) return null;
-            const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
-            const ref = paxSrc.arrival ? String(paxSrc.arrival).slice(0, 10) : "";
-            if (!isDay(ref)) return null;
-            const [ry, rm, rd] = ref.split("-").map(Number);
-            const people = [
-              { dob: paxSrc.dateOfBirth, name: paxSrc.guestName },
-              { dob: paxSrc.secondDateOfBirth, name: paxSrc.secondGuestName },
-              { dob: paxSrc.thirdDateOfBirth, name: paxSrc.thirdGuestName },
-              { dob: paxSrc.fourthDateOfBirth, name: paxSrc.fourthGuestName },
-            ];
-            const kids: { age: number; name: string }[] = [];
-            for (const p of people) {
-              const dob = p.dob ? String(p.dob).slice(0, 10) : "";
-              if (!isDay(dob)) continue;
-              const [by, bm, bd] = dob.split("-").map(Number);
-              let age = ry - by;
-              if (rm < bm || (rm === bm && rd < bd)) age -= 1;
-              if (age < 0 || age >= 18) continue;
-              kids.push({ age, name: (p.name || "").trim() });
-            }
-            if (!kids.length) return null;
-            kids.sort((a, b) => a.age - b.age);
-            const label = kids.length === 1 ? "Otrok" : kids.length === 2 ? "Otroka" : "Otroci";
-            // The unit agrees with the last number listed: 1 leto, 2 leti, 3 leta, 5 let.
-            const last = kids[kids.length - 1].age;
-            const m10 = last % 10;
-            const m100 = last % 100;
-            const unit =
-              m100 !== 11 && m10 === 1
-                ? "leto"
-                : m100 !== 12 && m10 === 2
-                  ? "leti"
-                  : m100 !== 13 && m100 !== 14 && (m10 === 3 || m10 === 4)
-                    ? "leta"
-                    : "let";
-            return {
-              ages: kids.map(k => k.age).join(" · "),
-              label,
-              unit,
-              why: `${kids.map(k => `${k.name || "Otrok"} — ${k.age}`).join(" · ")} (starost ob prihodu, iz rojstnih datumov)`,
-            };
-          })();
+          // Children's ages on the card: explicit years on the reservation, else DOBs.
+          const childAgeInfo = paxSrc ? buildChildAgeCardInfo(paxSrc) : null;
 
           // Transport / excursion markers (boat, Herman's car, excursion palm) for the
           // current or next guest. Built once: they sit in the header row while the card
@@ -5978,7 +5973,11 @@ function GuestCard() {
   {/* Payment Section */}
   <PaymentSection
     reservationId={reservation.id}
-    totalAmount={reservation.totalAmount || '0'}
+    totalAmount={
+      reservation.checkedInAt
+        ? computeGuestInvoiceTotalEur(reservation, exchangeRate).toFixed(2)
+        : String(reservation.totalAmount || '0')
+    }
     currency={reservation.currency || 'EUR'}
     onPaymentChange={refresh}
   />
@@ -7298,11 +7297,11 @@ function GuestCard() {
       method: i.paidMethod || 'card',
       date: i.paidDate ? formatDateSlo(i.paidDate) : '',
     }));
-    const sepPaidInvEur = arToEur(sepPaidRaw.reduce((s, i) => s + Number(i.refPriceAr || 0), 0), exchangeRate);
-    const invoiceTotalEur =
-      Number(reservation.totalAmount || 0) +
-      arToEur(unpaidServicesInvAr + barChargeInvAr - invDiscountAr, exchangeRate) +
-      sepPaidInvEur;
+    const invoiceTotalEur = computeGuestInvoiceTotalEur(
+      { ...reservation, orderItems: orderItems as typeof reservation.orderItems, barItems: barItems as typeof reservation.barItems },
+      exchangeRate,
+      discounts,
+    );
     // Show the guest's real remaining once payments have loaded; before that fall back to
     // the full invoice total so the box is never blank.
     const balanceEur = Math.max(0, balanceDueEur ?? invoiceTotalEur);

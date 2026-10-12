@@ -198,3 +198,101 @@ export function countByBand(pax: number, bands: (string | null | undefined)[]): 
   }
   return { adults, children }
 }
+
+/** Slovenian unit for a child's age in years (1 leto, 2 leti, 3 leta, 5 let). */
+export function slovenianLetWord(age: number): string {
+  const m10 = age % 10
+  const m100 = age % 100
+  if (m100 !== 11 && m10 === 1) return 'leto'
+  if (m100 !== 12 && m10 === 2) return 'leti'
+  if (m100 !== 13 && m100 !== 14 && (m10 === 3 || m10 === 4)) return 'leta'
+  return 'let'
+}
+
+/** Explicit child ages stored on the reservation (reception), not meal bands. */
+export function childAgesYearsFromReservation(raw: unknown): number[] | null {
+  if (!raw || typeof raw !== 'object') return null
+  const years = (raw as Record<string, unknown>).years
+  if (!Array.isArray(years) || years.length === 0) return null
+  const nums = years
+    .map((y) => Number(y))
+    .filter((n) => Number.isFinite(n) && n >= 0 && n < 18)
+  return nums.length ? nums : null
+}
+
+export type ChildAgeCardInfo = {
+  ages: string
+  label: string
+  unit: string
+  why: string
+}
+
+/** Ages for the bungalow card: stored years first, else from police-form DOBs at arrival. */
+export function buildChildAgeCardInfo(res: {
+  arrival?: string | null
+  guestName?: string | null
+  secondGuestName?: string | null
+  thirdGuestName?: string | null
+  fourthGuestName?: string | null
+  dateOfBirth?: string | null
+  secondDateOfBirth?: string | null
+  thirdDateOfBirth?: string | null
+  fourthDateOfBirth?: string | null
+  childrenAges?: unknown
+}): ChildAgeCardInfo | null {
+  const stored = childAgesYearsFromReservation(res.childrenAges)
+  if (stored?.length) {
+    const label = stored.length === 1 ? 'Otrok' : stored.length === 2 ? 'Otroka' : 'Otroci'
+    const unit = slovenianLetWord(stored[stored.length - 1])
+    const ages =
+      stored.length === 1
+        ? String(stored[0])
+        : stored.length === 2
+          ? `${stored[0]} in ${stored[1]}`
+          : `${stored.slice(0, -1).join(', ')} in ${stored[stored.length - 1]}`
+    return {
+      ages,
+      label,
+      unit,
+      why: `Otroci ${ages} ${unit} (starost ob prihodu)`,
+    }
+  }
+
+  const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v)
+  const ref = res.arrival ? String(res.arrival).slice(0, 10) : ''
+  if (!isDay(ref)) return null
+  const [ry, rm, rd] = ref.split('-').map(Number)
+  const people = [
+    { dob: res.dateOfBirth, name: res.guestName },
+    { dob: res.secondDateOfBirth, name: res.secondGuestName },
+    { dob: res.thirdDateOfBirth, name: res.thirdGuestName },
+    { dob: res.fourthDateOfBirth, name: res.fourthGuestName },
+  ]
+  const kids: { age: number; name: string }[] = []
+  for (const p of people) {
+    const dob = p.dob ? String(p.dob).slice(0, 10) : ''
+    if (!isDay(dob)) continue
+    const [by, bm, bd] = dob.split('-').map(Number)
+    let age = ry - by
+    if (rm < bm || (rm === bm && rd < bd)) age -= 1
+    if (age < 0 || age >= 18) continue
+    kids.push({ age, name: (p.name || '').trim() })
+  }
+  if (!kids.length) return null
+  kids.sort((a, b) => a.age - b.age)
+  const agesNums = kids.map((k) => k.age)
+  const label = kids.length === 1 ? 'Otrok' : kids.length === 2 ? 'Otroka' : 'Otroci'
+  const unit = slovenianLetWord(agesNums[agesNums.length - 1])
+  const ages =
+    agesNums.length === 1
+      ? String(agesNums[0])
+      : agesNums.length === 2
+        ? `${agesNums[0]} in ${agesNums[1]}`
+        : `${agesNums.slice(0, -1).join(', ')} in ${agesNums[agesNums.length - 1]}`
+  return {
+    ages,
+    label,
+    unit,
+    why: `${kids.map((k) => `${k.name || 'Otrok'} — ${k.age}`).join(' · ')} (starost ob prihodu, iz rojstnih datumov)`,
+  }
+}
