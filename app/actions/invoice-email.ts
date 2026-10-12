@@ -98,14 +98,14 @@ const T: Record<InvoiceLang, Record<string, string>> = {
 const itemWordMap: Record<InvoiceLang, Record<string, string>> = {
   en: {
     Bivanje: 'Accommodation', noci: 'nights', 'noči': 'nights', oseb: 'persons', dni: 'days',
-    Skupaj: 'Total', Placano: 'Paid', 'Plačano': 'Paid', kartica: 'card', gotovina: 'cash', nakazilo: 'transfer',
+    Skupaj: 'Total', Placano: 'Paid', 'Plačano': 'Paid', kartica: 'card', gotovina: 'cash', nakazilo: 'transfer', Kompenzacija: 'Compensation',
     Zajtrk: 'Breakfast', Polpenzion: 'Half Board', 'Polni penzion': 'Full Board', Kosilo: 'Lunch',
     Vecerja: 'Dinner', 'Večerja': 'Dinner',
     Izlet: 'Excursion', Vklj: 'Incl', vstopnina: 'entrance fee', kosilo: 'lunch',
   },
   fr: {
     Bivanje: 'Hébergement', noci: 'nuits', 'noči': 'nuits', oseb: 'personnes', dni: 'jours',
-    Skupaj: 'Total', Placano: 'Payé', 'Plačano': 'Payé', kartica: 'carte', gotovina: 'espèces', nakazilo: 'virement',
+    Skupaj: 'Total', Placano: 'Payé', 'Plačano': 'Payé', kartica: 'carte', gotovina: 'espèces', nakazilo: 'virement', Kompenzacija: 'compensation',
     Zajtrk: 'Petit-déjeuner', Polpenzion: 'Demi-pension', 'Polni penzion': 'Pension complète', Kosilo: 'Déjeuner',
     Vecerja: 'Dîner', 'Večerja': 'Dîner',
     Izlet: 'Excursion', Vklj: 'Incl', vstopnina: "droit d'entrée", kosilo: 'déjeuner',
@@ -791,7 +791,7 @@ async function buildInvoiceData(
       cash: { en: 'cash', fr: 'espèces' },
       transfer: { en: 'bank transfer', fr: 'virement' },
       orange_money: { en: 'Orange Money', fr: 'Orange Money' },
-      kompenzacija: { en: 'Kompenzacija', fr: 'Kompenzacija' },
+      kompenzacija: { en: 'Compensation', fr: 'compensation' },
     }
     const e = map[m.toLowerCase()]
     return e ? (lang === 'fr' ? e.fr : e.en) : m

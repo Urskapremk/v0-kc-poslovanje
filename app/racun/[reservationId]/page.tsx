@@ -223,6 +223,7 @@ const itemWordMap: Record<InvoiceLang, Record<string, string>> = {
     'kartica': 'card',
     'gotovina': 'cash',
     'nakazilo': 'transfer',
+    'Kompenzacija': 'Compensation',
     'Zajtrk': 'Breakfast',
     'Polpenzion': 'Half Board',
     'Polni penzion': 'Full Board',
@@ -246,6 +247,7 @@ const itemWordMap: Record<InvoiceLang, Record<string, string>> = {
     'kartica': 'carte',
     'gotovina': 'espèces',
     'nakazilo': 'virement',
+    'Kompenzacija': 'compensation',
     'Zajtrk': 'Petit-déjeuner',
     'Polpenzion': 'Demi-pension',
     'Polni penzion': 'Pension complète',
@@ -683,7 +685,7 @@ export default function RacunPage() {
       cash: { en: 'cash', fr: 'espèces' },
       transfer: { en: 'bank transfer', fr: 'virement' },
       orange_money: { en: 'Orange Money', fr: 'Orange Money' },
-      kompenzacija: { en: 'Kompenzacija', fr: 'Kompenzacija' },
+      kompenzacija: { en: 'Compensation', fr: 'compensation' },
     }
     const e = map[m.toLowerCase()]
     return e ? (invoiceLang === 'fr' ? e.fr : e.en) : m
