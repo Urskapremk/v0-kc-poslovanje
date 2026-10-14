@@ -49,13 +49,24 @@ export const LEAVE_DEPARTMENTS: Record<LeaveDepartment, { sl: string; fr: string
   barman: { sl: 'Bar', fr: 'Bar', en: 'Bar' },
 }
 
-export type LeaveType = 'annual' | 'sick' | 'unpaid'
+export type LeaveType = 'annual' | 'exceptional' | 'sick' | 'unpaid'
+
+/** Izredni dopust (cl. 126 t. 4): družinski dogodki, do 10 dni/leto, ne od rednega dopusta. */
+export const LEAVE_EXCEPTIONAL_ANNUAL_QUOTA = 10
 
 export const LEAVE_TYPES: Record<LeaveType, { sl: string; fr: string; en: string }> = {
   annual: { sl: 'Redni dopust', fr: 'Congé annuel payé', en: 'Paid annual leave' },
+  exceptional: {
+    sl: 'Izredni dopust',
+    fr: 'Congé exceptionnel',
+    en: 'Exceptional leave (family events)',
+  },
   sick: { sl: 'Bolniška', fr: 'Congé de maladie', en: 'Sick leave' },
   unpaid: { sl: 'Neplačan dopust', fr: 'Congé sans solde', en: 'Unpaid leave' },
 }
+
+/** Vrste v obrazcu »Nov dopust« (bolniška ima ločen gumb). */
+export const DOPUST_FORM_LEAVE_TYPES: LeaveType[] = ['annual', 'exceptional']
 
 export interface LeaveRequest {
   id: string
@@ -125,11 +136,46 @@ export function leaveDateSl(d: string | null): string {
 }
 
 // Porabljeni dnevi rednega dopusta v koledarskem letu.
-// Bolniška se NE šteje: dan je plačan v celoti (100 %) in ne zmanjša kvote dopusta.
+// Bolniška in izredni dopust se NE štejeta proti redni kvoti.
 export function usedDaysInYear(requests: LeaveRequest[], year: number): number {
   return requests
-    .filter(r => r.leaveType !== 'sick' && new Date(r.startDate + 'T00:00:00').getFullYear() === year)
+    .filter(
+      r =>
+        r.leaveType !== 'sick' &&
+        r.leaveType !== 'exceptional' &&
+        new Date(r.startDate + 'T00:00:00').getFullYear() === year,
+    )
     .reduce((sum, r) => sum + (r.days || 0), 0)
+}
+
+// Porabljeni dnevi izrednega dopusta v koledarskem letu (0–10).
+export function exceptionalLeaveUsedInYear(
+  requests: LeaveRequest[],
+  year: number,
+  excludeId?: string | null,
+): number {
+  return requests
+    .filter(r => {
+      if (r.leaveType !== 'exceptional') return false
+      if (excludeId && r.id === excludeId) return false
+      return new Date(r.startDate + 'T00:00:00').getFullYear() === year
+    })
+    .reduce((sum, r) => sum + (r.days || 0), 0)
+}
+
+export function exceptionalLeaveRemaining(
+  requests: LeaveRequest[],
+  year: number,
+  excludeId?: string | null,
+): number {
+  const used = exceptionalLeaveUsedInYear(requests, year, excludeId)
+  return Math.max(0, LEAVE_EXCEPTIONAL_ANNUAL_QUOTA - used)
+}
+
+export function exceptionalLeaveOverQuotaMessage(remaining: number, year: number): string {
+  const d = Math.max(0, Math.round(remaining * 2) / 2)
+  const unit = d === 1 ? 'dan' : 'dni'
+  return `V letu ${year} vam je še le ${d} ${unit} izrednega dopusta.`
 }
 
 export function isSickLeave(type: string | null | undefined): boolean {

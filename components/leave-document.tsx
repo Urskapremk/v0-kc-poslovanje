@@ -19,6 +19,7 @@ import {
   LeaveDepartment,
   LEAVE_DEPARTMENTS,
   LEAVE_TYPES,
+  DOPUST_FORM_LEAVE_TYPES,
   LeaveType,
   daysBetween,
   isLongLeave,
@@ -27,6 +28,8 @@ import {
   LeaveRequest,
   proratedAnnualQuota,
   usedDaysInYear,
+  exceptionalLeaveRemaining,
+  exceptionalLeaveOverQuotaMessage,
 } from '@/lib/leave'
 import { kitchenLeaveAdvancePay, type KitchenLeaveAdvance } from '@/lib/kitchen'
 import { salaryForMonth } from '@/lib/employment'
@@ -88,6 +91,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   const [year, setYear] = useState(new Date().getFullYear())
   const [uploadingId, setUploadingId] = useState<string | null>(null)
   const [savingPrior, setSavingPrior] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   async function handleSavePriorLeave(staffId: string, yearKey: number, value: number) {
     setSavingPrior(true)
@@ -166,9 +170,20 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   const selectedStaff = deptStaff.find(s => s.id === form.staffId)
   const calendarDays = daysBetween(form.startDate, form.endDate)
   const days = Number(daysInput)
+  const allLeaves = leaves ?? []
+  const formLeaveYear = new Date(form.startDate + 'T00:00:00').getFullYear()
+  const formStaffLeaves = form.staffId ? allLeaves.filter(l => l.staffId === form.staffId) : []
+  const exceptionalRemaining = exceptionalLeaveRemaining(formStaffLeaves, formLeaveYear, editingId)
+  const formLeaveTypeOptions: LeaveType[] =
+    form.leaveType === 'sick'
+      ? ['sick']
+      : form.leaveType === 'unpaid'
+        ? [...DOPUST_FORM_LEAVE_TYPES, 'unpaid']
+        : DOPUST_FORM_LEAVE_TYPES
 
   function openNew(leaveType: LeaveType = 'annual') {
     setEditingId(null)
+    setFormError(null)
     const today = todayStr()
     setForm({ staffId: '', leaveType, startDate: today, endDate: today, reason: '' })
     setDaysInput('1')
@@ -176,6 +191,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   }
 
   function openEdit(leave: LeaveRequest) {
+    setFormError(null)
     setEditingId(leave.id)
     setForm({
       staffId: leave.staffId,
@@ -198,7 +214,6 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
 
   // Pregled po delavcu
   const viewedStaff = deptStaff.find(s => s.id === selectedStaffId)
-  const allLeaves = leaves ?? []
   const viewedLeaves = selectedStaffId
     ? allLeaves.filter(l => l.staffId === selectedStaffId)
     : allLeaves
@@ -236,6 +251,11 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
 
   async function handleSave() {
     if (!selectedStaff || !(days > 0)) return
+    if (form.leaveType === 'exceptional' && days > exceptionalRemaining) {
+      setFormError(exceptionalLeaveOverQuotaMessage(exceptionalRemaining, formLeaveYear))
+      return
+    }
+    setFormError(null)
     setSaving(true)
     try {
       const payload = {
@@ -258,6 +278,8 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       setShowForm(false)
     } catch (e) {
       console.error('[v0] leave save error', e)
+      const msg = e instanceof Error ? e.message : 'Shranjevanje ni uspelo.'
+      setFormError(msg)
     }
     setSaving(false)
   }
@@ -388,11 +410,14 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
               <label className="mb-1 block text-[10px] uppercase tracking-wider text-white/40">Vrsta dopusta</label>
               <select
                 value={form.leaveType}
-                onChange={e => setForm(p => ({ ...p, leaveType: e.target.value as LeaveType }))}
+                onChange={e => {
+                  setFormError(null)
+                  setForm(p => ({ ...p, leaveType: e.target.value as LeaveType }))
+                }}
                 className="w-full rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-white focus:border-[#7fa8b8]/40 focus:outline-none"
               >
-                {Object.entries(LEAVE_TYPES).map(([k, v]) => (
-                  <option key={k} value={k}>{v.sl}</option>
+                {formLeaveTypeOptions.map(k => (
+                  <option key={k} value={k}>{LEAVE_TYPES[k].sl}</option>
                 ))}
               </select>
               {form.leaveType === 'sick' && (
@@ -400,6 +425,18 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                   Bolniška se takoj zapiše v razpored. Dan ostane plačan v celoti (100 %) in ne zmanjša rednega dopusta.
                   Potrdilo zdravnika dodaš po shranitvi.
                 </p>
+              )}
+              {form.leaveType === 'exceptional' && (
+                <>
+                  <p className="mt-2 text-[11px] leading-snug text-white/50">
+                    Družinski dogodek, do 10 dni na leto, ne odšteva se od rednega dopusta.
+                  </p>
+                  {form.staffId && (
+                    <p className="mt-1 text-xs font-medium text-[#7fa8b8]">
+                      Še {exceptionalRemaining} {exceptionalRemaining === 1 ? 'dan' : 'dni'} v tem letu
+                    </p>
+                  )}
+                </>
               )}
             </div>
 
@@ -456,6 +493,9 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                 <p className="mt-1 text-xs text-amber-400/80">
                   Vnesi veljaven datum &quot;Od&quot; in &quot;Do&quot; in število dni.
                 </p>
+              )}
+              {formError && (
+                <p className="mt-2 text-xs text-amber-400/90">{formError}</p>
               )}
             </div>
             <div className="flex gap-2">

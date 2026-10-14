@@ -3,7 +3,53 @@
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
-import { daysBetween } from '@/lib/leave'
+import {
+  daysBetween,
+  exceptionalLeaveOverQuotaMessage,
+  exceptionalLeaveRemaining,
+  type LeaveRequest,
+} from '@/lib/leave'
+
+async function staffLeaveRequestsForYear(staffId: string, year: number): Promise<LeaveRequest[]> {
+  const result = await db.execute(
+    sql`SELECT id, "staffId", "staffName", department, company, "leaveType",
+               "startDate", "endDate", days, reason, status, "signedAt", "createdAt"
+        FROM leave_requests
+        WHERE "staffId" = ${staffId}
+          AND EXTRACT(YEAR FROM "startDate") = ${year}`,
+  )
+  return result.rows.map(r => ({
+    id: r.id as string,
+    staffId: r.staffId as string,
+    staffName: r.staffName as string,
+    department: r.department as string,
+    company: r.company as string,
+    leaveType: r.leaveType as string,
+    startDate: r.startDate as string,
+    endDate: r.endDate as string,
+    days: Number(r.days) || 0,
+    reason: (r.reason as string | null) ?? '',
+    status: r.status as string,
+    signedAt: r.signedAt as string | null,
+    createdAt: r.createdAt as string,
+  }))
+}
+
+async function assertExceptionalLeaveQuota(args: {
+  staffId: string
+  leaveType: string
+  startDate: string
+  days: number
+  excludeId?: string | null
+}) {
+  if (args.leaveType !== 'exceptional') return
+  const year = new Date(args.startDate + 'T00:00:00').getFullYear()
+  const requests = await staffLeaveRequestsForYear(args.staffId, year)
+  const remaining = exceptionalLeaveRemaining(requests, year, args.excludeId ?? null)
+  if (args.days > remaining) {
+    throw new Error(exceptionalLeaveOverQuotaMessage(remaining, year))
+  }
+}
 
 async function ensureLeaveColumns() {
   await db.execute(sql`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS "advancePayAr" integer`)
@@ -58,6 +104,12 @@ export async function createLeaveRequest(data: {
   const id = `leave-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const counted = daysBetween(data.startDate, data.endDate)
   const days = data.days && data.days > 0 ? Math.round(data.days * 2) / 2 : counted
+  await assertExceptionalLeaveQuota({
+    staffId: data.staffId,
+    leaveType: data.leaveType,
+    startDate: data.startDate,
+    days,
+  })
   await db.execute(
     sql`INSERT INTO leave_requests (id, "staffId", "staffName", department, company, "leaveType", "startDate", "endDate", days, reason)
         VALUES (${id}, ${data.staffId}, ${data.staffName}, ${data.department}, ${data.company}, ${data.leaveType}, ${data.startDate}, ${data.endDate}, ${days}, ${data.reason ?? ''})`
@@ -79,6 +131,13 @@ export async function updateLeaveRequest(id: string, data: {
 }) {
   const counted = daysBetween(data.startDate, data.endDate)
   const days = data.days > 0 ? Math.round(data.days * 2) / 2 : counted
+  await assertExceptionalLeaveQuota({
+    staffId: data.staffId,
+    leaveType: data.leaveType,
+    startDate: data.startDate,
+    days,
+    excludeId: id,
+  })
   await db.execute(
     sql`UPDATE leave_requests SET
       "staffId" = ${data.staffId},
