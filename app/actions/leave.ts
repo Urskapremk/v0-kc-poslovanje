@@ -56,6 +56,31 @@ async function ensureLeaveColumns() {
   await db.execute(sql`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS "doctorCertificatePath" text`)
 }
 
+export async function getAllLeaveRequests() {
+  await ensureLeaveColumns()
+  const result = await db.execute(
+    sql`SELECT * FROM leave_requests WHERE status != 'rejected' ORDER BY "startDate" DESC`,
+  )
+  return result.rows.map(r => ({
+    id: r.id as string,
+    staffId: r.staffId as string,
+    staffName: r.staffName as string,
+    department: r.department as string,
+    company: r.company as string,
+    leaveType: r.leaveType as string,
+    startDate: r.startDate as string,
+    endDate: r.endDate as string,
+    days: r.days as number,
+    reason: (r.reason as string | null) ?? '',
+    status: r.status as string,
+    signedAt: r.signedAt as string | null,
+    signedDocumentPath: (r.signedDocumentPath as string | null) ?? null,
+    doctorCertificatePath: (r.doctorCertificatePath as string | null) ?? null,
+    advancePayAr: r.advancePayAr == null ? null : Number(r.advancePayAr),
+    createdAt: r.createdAt as string,
+  }))
+}
+
 export async function getLeaveRequests(department: string) {
   await ensureLeaveColumns()
   const result = await db.execute(

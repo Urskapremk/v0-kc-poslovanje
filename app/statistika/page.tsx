@@ -25,6 +25,7 @@ import {
 } from '@/app/actions/statistics'
 import { isoDate, periodCovers, periodLabel, salaryHistory, salaryOn, slDate } from '@/lib/employment'
 import RazporedTab from '@/components/razpored-tab'
+import { WcCleaningSection } from '@/components/wc-cleaning-section'
 import VrtnarjiTab from '@/components/vrtnarji-tab'
 import KuhinjaTab from '@/components/kuhinja-tab'
 import BarTab from '@/components/bar-tab'
@@ -1337,7 +1338,8 @@ function StatistikaContent() {
 
         {kadriView === 'razpored' && (
           <div className="space-y-4">
-            {/* Sub-toggle: Sobarice / Vrtnarji / Kuhinja */}
+            <WcCleaningSection year={year} month={month} />
+            {/* Sub-toggle: Sobarice / Vrtnarji / Kuhinja / Bar */}
             <div className="no-print flex gap-2 overflow-x-auto pb-1">
               <button
                 onClick={() => setRazporedView('sobarice')}
