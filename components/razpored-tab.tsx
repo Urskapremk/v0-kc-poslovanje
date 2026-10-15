@@ -20,6 +20,7 @@ import { themeFor } from '@/lib/schedule-theme'
 import { GuestArrivalsLinen } from '@/components/guest-arrivals-linen'
 import { defaultPrintFrom, printAfterDialog, printStartDay, printWithClass } from '@/lib/print-from'
 import { PrintFromDialog } from '@/components/print-from-dialog'
+import { WcCleaningSection } from '@/components/wc-cleaning-section'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
@@ -464,6 +465,20 @@ export default function RazporedTab({
           </table>
         </div>
         </>
+      )}
+
+      {hasSchedule && (
+        <WcCleaningSection
+          year={year}
+          month={month}
+          schedule={schedule}
+          leaves={leaves}
+          roster={roster}
+          endByName={endByName}
+          readOnly={readOnly}
+          selectedStaff={selectedStaff}
+          cardClass={`no-print print-area rounded-2xl border p-3 sm:p-4 overflow-x-auto ${t.card}`}
+        />
       )}
 
       <GuestArrivalsLinen year={year} month={month} />
