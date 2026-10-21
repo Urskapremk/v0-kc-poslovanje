@@ -100,6 +100,7 @@ export async function GET(request: Request) {
               pax: now.pax ?? 2,
               arrival: toYmd(now.arrival),
               departure: toYmd(now.departure),
+              mealPlan: now.mealPlan ?? null,
             }
           : null
 
