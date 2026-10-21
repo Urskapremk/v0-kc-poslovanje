@@ -33,12 +33,21 @@ function toYmd(value: unknown): string {
   return String(value).split("T")[0]
 }
 
+/** Kitchen app server calls (header) or optional shared bearer secret. */
 function authorize(request: Request): boolean {
-  const secret = process.env.KC_KITCHEN_GUEST_BOARD_SECRET
-  if (!secret) return false
+  if (request.headers.get("x-kc-kitchen-client") === "v0-kc-kitchen") return true
+
   const auth = request.headers.get("authorization") || ""
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : ""
-  return token.length > 0 && token === secret
+  if (!token) return false
+
+  const kitchenSecret = process.env.KC_KITCHEN_GUEST_BOARD_SECRET
+  if (kitchenSecret && token === kitchenSecret) return true
+
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret && token === cronSecret) return true
+
+  return false
 }
 
 export async function GET(request: Request) {
