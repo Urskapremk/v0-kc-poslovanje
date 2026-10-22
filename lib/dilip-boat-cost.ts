@@ -1,4 +1,4 @@
-// Oznaka stroška na plačilu Dilipu za čoln Nero (nabava HV).
+// Oznaka stroška na plačilih nabave HV: Dilip (čoln Nero), voznik čolna in nosači.
 // Ista taksonomija kot nakupi (nabava_purchases): vrsta stroška + povezava na pogodbo
 // (sredstvo v izdelavi) ali osnovno sredstvo. Brez drugega seznama kategorij.
 import { STROSEK_CATEGORIES, CATEGORY_LABELS, type StrosekCategory } from "./stroski-categories"
@@ -39,9 +39,17 @@ const EXTRA_LABELS: Record<(typeof EXTRA_CATS)[number], string> = {
   [PREVOZNIKI_CAT]: "Prevozniki",
 }
 
-/** Samo plačilo čolna na nabavi HV (`nabava:<id>:boat`), ne voznik/nosači/tuc tuc. */
-export function isDilipBoatPayRef(refKey: string): boolean {
-  return /^nabava:[^:]+:boat$/.test(refKey)
+/** Nabava HV: čoln Dilip, voznik čolna in nosači. Ne tuc tuc, ne transfer, ne nakup. */
+const TRANSPORT_COST_REF = /^nabava:[^:]+:(boat|boatdriver|porters)$/
+
+export function isTransportCostPayRef(refKey: string): boolean {
+  return TRANSPORT_COST_REF.test(refKey)
+}
+
+export function transportCostTitle(refKey: string): string {
+  if (/^nabava:[^:]+:boatdriver$/.test(refKey)) return "Voznik čolna"
+  if (/^nabava:[^:]+:porters$/.test(refKey)) return "Nosači"
+  return "Dilip (čoln Nero)"
 }
 
 export function parseCostRate(raw: string | number | null | undefined): number {
@@ -142,4 +150,77 @@ export function dilipBoatCostDescription(label: string): string {
   if (!note || note === "nabava") return "Dilip (čoln Nero)"
   if (/dilip/i.test(note)) return note.slice(0, 200)
   return `Dilip (čoln Nero) — ${note}`.slice(0, 200)
+}
+
+function namedTransportCost(base: string, label: string): string {
+  const note = (label || "").trim()
+  if (!note || note === "nabava" || note.toLowerCase() === base.toLowerCase()) return base
+  const prefix = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[—:-]\\s*`, "i")
+  if (prefix.test(note)) {
+    const rest = note.replace(prefix, "").trim()
+    if (!rest || rest === "nabava") return base
+    return `${base} — ${rest}`.slice(0, 200)
+  }
+  return `${base} — ${note}`.slice(0, 200)
+}
+
+export function transportCostDescription(refKey: string, label: string): string {
+  if (/^nabava:[^:]+:boatdriver$/.test(refKey)) return namedTransportCost("Voznik čolna", label)
+  if (/^nabava:[^:]+:porters$/.test(refKey)) return namedTransportCost("Nosači", label)
+  return dilipBoatCostDescription(label)
+}
+
+export function boatCostDraftDiffers(
+  next: BoatCostFields | null | undefined,
+  prev: BoatCostFields | null | undefined,
+): boolean {
+  const category = (next?.category || "").trim()
+  const prevCategory = (prev?.category || "").trim()
+  if (category !== prevCategory) return true
+  if (category === WIP_CAT && (next?.assetId || "").trim() !== (prev?.assetId || "").trim()) return true
+  if (category === ASSET_CAT && (Number(next?.annualRatePct) || 0) !== (Number(prev?.annualRatePct) || 0)) return true
+  if (category === LOAN_CAT) {
+    if ((next?.reservationId || "").trim() !== (prev?.reservationId || "").trim()) return true
+    if ((Number(next?.loanRate) || 0) !== (Number(prev?.loanRate) || 0)) return true
+  }
+  return false
+}
+
+/** Besedilo potrditve, ko se oznaka stroška spremeni. null = Shrani brez dodatnega vprašanja. */
+export function transportPayConfirm(opts: {
+  editing: boolean
+  changed: boolean
+  category: string
+  hadCategory: boolean
+  amountLabel: string
+  dilip: boolean
+}): string | null {
+  if (!opts.changed) return null
+  if (opts.category === WIP_CAT) {
+    const verb = opts.editing ? "Shranim" : "Zabeležim plačilo"
+    return `${verb} in dodam ${opts.amountLabel} k stroškom izbrane pogodbe?`
+  }
+  if (opts.category) {
+    return opts.editing
+      ? "Shranim in označim znesek kot strošek?"
+      : "Zabeležim plačilo in označim znesek kot strošek?"
+  }
+  if (opts.hadCategory) {
+    return opts.dilip
+      ? "Odstranim oznako stroška? Plačilo Dilipu ostane zabeleženo."
+      : "Odstranim oznako stroška? Plačilo ostane zabeleženo."
+  }
+  return null
+}
+
+export function transportPaySaveLabel(editing: boolean, saving: boolean): string {
+  if (saving) return editing ? "Shranjujem…" : "Beležim…"
+  return editing ? "Shrani" : "Zabeleži plačilo"
+}
+
+export function transportPayCancelConfirm(opts: { wip: boolean; dilip: boolean }): string {
+  if (opts.wip && opts.dilip) return "Prekličem plačilo Dilipu? Vknjižba se izbriše in strošek se umakne s pogodbe."
+  if (opts.wip) return "Prekličem plačilo? Vknjižba se izbriše in strošek se umakne s pogodbe."
+  if (opts.dilip) return "Prekličem plačilo dobavitelju? Vknjižba v blagajni/Orange Money se bo izbrisala."
+  return "Prekličem plačilo? Vknjižba v blagajni/Orange Money se bo izbrisala."
 }

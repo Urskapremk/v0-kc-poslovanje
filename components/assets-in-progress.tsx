@@ -403,7 +403,7 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
                       </div>
                     </div>
                     {c.supplierPaymentId ? (
-                      <p className="text-xs text-white/45">Znesek pripada plačilu Dilipu. Popravek tukaj popravi isto vknjižbo, ne doda nove.</p>
+                      <p className="text-xs text-white/45">Znesek pripada zabeleženemu plačilu. Popravek tukaj popravi isto vknjižbo, ne doda nove.</p>
                     ) : c.receiptId ? (
                       <p className="flex items-center gap-1 text-[10px] text-[#7fa8b8]"><Receipt className="h-3 w-3" /> račun</p>
                     ) : (
@@ -444,7 +444,7 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
                     {c.receiptId ? (
                       <span className="flex shrink-0 items-center gap-1 text-[10px] text-[#7fa8b8]"><Receipt className="h-3 w-3" /> račun</span>
                     ) : c.supplierPaymentId ? (
-                      <span className="shrink-0 text-[10px] text-[#c59b5b]">plačilo Dilipu</span>
+                      <span className="shrink-0 text-[10px] text-[#c59b5b]">zabeleženo plačilo</span>
                     ) : c.cashExpenseId ? (
                       <span className="shrink-0 text-[10px] text-[#8fae92]">gotovina Tourism</span>
                     ) : null}
@@ -463,7 +463,7 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
                         type="button"
                         onClick={() => {
                           if (confirm(c.supplierPaymentId
-                            ? 'Odstranim ta strošek s pogodbe? Plačilo Dilipu ostane zabeleženo.'
+                            ? 'Odstranim ta strošek s pogodbe? Plačilo ostane zabeleženo.'
                             : c.cashExpenseId
                               ? 'Odstraniti strošek? Gotovinski odliv se razveljavi.'
                               : 'Odstraniti strošek iz sredstva?'))

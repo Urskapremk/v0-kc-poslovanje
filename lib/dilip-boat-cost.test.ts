@@ -4,24 +4,30 @@ import {
   ASSET_CAT,
   LOAN_CAT,
   WIP_CAT,
+  boatCostDraftDiffers,
   dilipBoatCostDescription,
-  isDilipBoatPayRef,
+  isTransportCostPayRef,
   planBoatCostLink,
   resolveBoatCostMark,
+  transportCostDescription,
+  transportPayCancelConfirm,
+  transportPayConfirm,
+  transportPaySaveLabel,
   type StoredBoatCost,
 } from "./dilip-boat-cost"
 
 const empty: StoredBoatCost = { category: "", assetId: "", fixedAssetId: "", orderItemId: "" }
 
-describe("isDilipBoatPayRef", () => {
-  it("matches only the nabava boat payment", () => {
-    assert.equal(isDilipBoatPayRef("nabava:nab-1:boat"), true)
-    assert.equal(isDilipBoatPayRef("nabava:nab-1:boatdriver"), false)
-    assert.equal(isDilipBoatPayRef("nabava:nab-1:porters"), false)
-    assert.equal(isDilipBoatPayRef("nabava:nab-1:tuctuc"), false)
-    assert.equal(isDilipBoatPayRef("transfer:res:arrival:dilip"), false)
-    assert.equal(isDilipBoatPayRef("reception:ord:dilip"), false)
-    assert.equal(isDilipBoatPayRef("excursion:group:dilip"), false)
+describe("isTransportCostPayRef", () => {
+  it("matches Dilip, voznik and nosači on a nabava trip", () => {
+    assert.equal(isTransportCostPayRef("nabava:nab-1:boat"), true)
+    assert.equal(isTransportCostPayRef("nabava:nab-1:boatdriver"), true)
+    assert.equal(isTransportCostPayRef("nabava:nab-1:porters"), true)
+    assert.equal(isTransportCostPayRef("nabava:nab-1:tuctuc"), false)
+    assert.equal(isTransportCostPayRef("transfer:res:arrival:boatdriver"), false)
+    assert.equal(isTransportCostPayRef("transfer:res:arrival:porters"), false)
+    assert.equal(isTransportCostPayRef("reception:ord:porters"), false)
+    assert.equal(isTransportCostPayRef("excursion:group:dilip"), false)
   })
 })
 
@@ -101,5 +107,42 @@ describe("dilipBoatCostDescription", () => {
     assert.equal(dilipBoatCostDescription(""), "Dilip (čoln Nero)")
     assert.equal(dilipBoatCostDescription("nabava"), "Dilip (čoln Nero)")
     assert.equal(dilipBoatCostDescription("les za tla"), "Dilip (čoln Nero) — les za tla")
+  })
+})
+
+describe("transportCostDescription", () => {
+  it("names voznik and nosači without a second row title", () => {
+    assert.equal(transportCostDescription("nabava:1:boat", "nabava"), "Dilip (čoln Nero)")
+    assert.equal(transportCostDescription("nabava:1:boatdriver", "Voznik čolna — nabava"), "Voznik čolna")
+    assert.equal(transportCostDescription("nabava:1:boatdriver", "Voznik čolna — les"), "Voznik čolna — les")
+    assert.equal(transportCostDescription("nabava:1:porters", "Nosači — nabava"), "Nosači")
+    assert.equal(transportCostDescription("nabava:1:tuctuc", "Tuc tuc — nabava"), "Dilip (čoln Nero) — Tuc tuc — nabava")
+  })
+})
+
+describe("boatCostDraftDiffers", () => {
+  it("ignores a date-only edit and notices a pogodba change", () => {
+    const prev = { category: WIP_CAT, assetId: "fa-1" }
+    assert.equal(boatCostDraftDiffers(prev, prev), false)
+    assert.equal(boatCostDraftDiffers({ category: WIP_CAT, assetId: "fa-2" }, prev), true)
+    assert.equal(boatCostDraftDiffers({ category: "" }, prev), true)
+  })
+})
+
+describe("transport pay copy", () => {
+  it("uses Shrani only when correcting, and confirms a new pogodba", () => {
+    assert.equal(transportPaySaveLabel(true, false), "Shrani")
+    assert.equal(transportPaySaveLabel(true, true), "Shranjujem…")
+    assert.equal(transportPaySaveLabel(false, false), "Zabeleži plačilo")
+    assert.equal(transportPayConfirm({
+      editing: true, changed: false, category: WIP_CAT, hadCategory: true, amountLabel: "120.000 Ar", dilip: true,
+    }), null)
+    assert.equal(transportPayConfirm({
+      editing: true, changed: true, category: WIP_CAT, hadCategory: false, amountLabel: "40.000 Ar", dilip: false,
+    }), "Shranim in dodam 40.000 Ar k stroškom izbrane pogodbe?")
+    assert.equal(transportPayConfirm({
+      editing: true, changed: true, category: "", hadCategory: true, amountLabel: "1", dilip: false,
+    }), "Odstranim oznako stroška? Plačilo ostane zabeleženo.")
+    assert.equal(transportPayCancelConfirm({ wip: true, dilip: false }), "Prekličem plačilo? Vknjižba se izbriše in strošek se umakne s pogodbe.")
   })
 })

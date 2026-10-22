@@ -49,7 +49,7 @@ import { paySupplier, unpaySupplier } from "./actions/supplier-payment";
 import { getNabavaTrips, addNabavaTrip, updateNabavaTrip, deleteNabavaTrip, setNabavaBoat, setNabavaBoatOrdered, setNabavaNoBoat } from "./actions/nabava";
 import { NabavaPurchasesSection } from "@/components/nabava-purchases-section";
 import { DilipBoatCostMark, DilipBoatCostSummary, EMPTY_DILIP_BOAT_COST, dilipCostDraftFromPayment, dilipCostFieldsFromDraft } from "@/components/dilip-boat-cost-mark";
-import { boatCostMarkError, WIP_CAT } from "@/lib/dilip-boat-cost";
+import { boatCostDraftDiffers, boatCostMarkError, transportPayCancelConfirm, transportPayConfirm, transportPaySaveLabel, WIP_CAT } from "@/lib/dilip-boat-cost";
 import { NabavaRacunovodstvo } from "@/components/nabava-racunovodstvo";
 import { TaxesPanel } from "@/components/taxes-panel";
 import { GuestReplyAssistant } from "@/components/guest-reply-assistant";
@@ -1680,6 +1680,8 @@ export default function KombaCabanaApp() {
   const [supPayDate, setSupPayDate] = React.useState(() => new Date().toISOString().slice(0, 10));
   const [supPaySaving, setSupPaySaving] = React.useState(false);
   const [boatCost, setBoatCost] = React.useState(EMPTY_DILIP_BOAT_COST);
+  const [paySavedRef, setPaySavedRef] = React.useState<string | null>(null);
+  const [paySaveError, setPaySaveError] = React.useState<string | null>(null);
   // Ročni zneski za dodatna gotovinska doplačila (voznik čolna / nosači / tuc tuc), keyirano po refKey.
   const [extraAmt, setExtraAmt] = React.useState<Record<string, string>>({});
   // Schedules are always shown for the current month (view-only, no month picker).
@@ -8594,6 +8596,58 @@ function GuestCard() {
     urgent: k <= tomorrowKeyMs,
   }));
 
+  // Shrani na označenem plačilu (Dilip / voznik / nosači). Neuspeh pusti urejevalnik odprt.
+  const commitClassifiedPay = async (args: {
+    refKey: string
+    supplier: string
+    amountAr: number
+    label: string
+    paid?: { costCategory?: string | null; assetId?: string | null; annualRatePct?: number | null; reservationId?: string | null; loanRate?: number | null } | null
+    dilip: boolean
+  }) => {
+    const editing = Boolean(args.paid);
+    const costFields = dilipCostFieldsFromDraft(boatCost);
+    const costError = boatCostMarkError(costFields);
+    if (args.amountAr <= 0 || costError) {
+      setPaySavedRef(cur => cur === args.refKey ? null : cur);
+      setPaySaveError(args.amountAr <= 0 ? 'Vpiši znesek.' : null);
+      return;
+    }
+    const ask = transportPayConfirm({
+      editing,
+      changed: boatCostDraftDiffers(costFields, args.paid),
+      category: boatCost.category,
+      hadCategory: Boolean(args.paid?.costCategory),
+      amountLabel: ar(args.amountAr),
+      dilip: args.dilip,
+    });
+    if (ask && !confirm(ask)) return;
+    setPaySaveError(null);
+    setPaySavedRef(cur => cur === args.refKey ? null : cur);
+    setSupPaySaving(true);
+    try {
+      await paySupplier({
+        refKey: args.refKey,
+        supplier: args.supplier,
+        method: supPayMethod,
+        company: supPayMethod === 'cash' ? supPayCompany : undefined,
+        date: supPayDate,
+        amountAr: args.amountAr,
+        label: args.label,
+        cost: costFields,
+      });
+      setSupPayOpen(null);
+      if (editing) setPaySavedRef(args.refKey);
+      refresh();
+      await mutate("assets-in-progress");
+    } catch (e) {
+      setPaySavedRef(cur => cur === args.refKey ? null : cur);
+      setPaySaveError(e instanceof Error ? e.message : 'Plačila ni bilo mogoče shraniti.');
+    } finally {
+      setSupPaySaving(false);
+    }
+  };
+
   // Plačilo dobavitelju prevoza (Dilip/Herman) — isti vzorec kot pri Fanji, keyiran po refKey.
   // supplierLabel je npr. 'Dilip (čoln)' / 'Herman (avto)'; label gre v opis vknjižbe.
   const renderSupplierPay = (refKey: string, supplier: string, amountAr: number, supplierLabel: string, label: string, accentOverride?: string, opts?: { costMark?: boolean }) => {
@@ -8624,52 +8678,41 @@ function GuestCard() {
               ))}
             </div>
           )}
-          {opts?.costMark && <DilipBoatCostMark value={boatCost} onChange={setBoatCost} amountAr={amountAr} />}
+          {opts?.costMark && <DilipBoatCostMark value={boatCost} onChange={(next) => { setPaySaveError(null); setBoatCost(next); }} amountAr={amountAr} />}
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-[#2b2622]/55">Datum plačila:</span>
-            <input type="date" value={supPayDate} onChange={e => setSupPayDate(e.target.value)}
+            <input type="date" value={supPayDate} onChange={e => { setPaySaveError(null); setSupPayDate(e.target.value); }}
               className="flex-1 rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none" />
           </div>
+          {opts?.costMark && paySaveError && <p className="text-[10px] font-medium text-[#b0203a]">{paySaveError}</p>}
           <div className="flex gap-2">
-            <button onClick={() => setSupPayOpen(null)}
+            <button onClick={() => { setSupPayOpen(null); setPaySaveError(null); }}
               className="rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-3 py-2 text-[11px] font-medium text-[#2b2622]/70 hover:bg-[#0f2e3a]/10 transition-colors">
               Prekliči
             </button>
             <button disabled={supPaySaving || !!costError}
-              onClick={async () => {
-                if (opts?.costMark && costFields) {
-                  if (costError) { alert(costError); return }
-                  if (boatCost.category === WIP_CAT) {
-                    if (!confirm(`Zabeležim plačilo in dodam ${ar(amountAr)} k stroškom izbrane pogodbe?`)) return
-                  } else if (boatCost.category) {
-                    if (!confirm('Zabeležim plačilo in označim znesek kot strošek?')) return
-                  } else if (paid?.costCategory) {
-                    if (!confirm('Odstranim oznako stroška? Plačilo Dilipu ostane zabeleženo.')) return
-                  }
-                }
-                setSupPaySaving(true);
-                try {
-                  await paySupplier({
+              onClick={() => {
+                if (!opts?.costMark) {
+                  setSupPaySaving(true);
+                  paySupplier({
                     refKey, supplier,
                     method: supPayMethod,
                     company: supPayMethod === 'cash' ? supPayCompany : undefined,
                     date: supPayDate,
                     amountAr,
                     label,
-                    cost: costFields || undefined,
-                  });
-                  setSupPayOpen(null);
-                  refresh();
-                  if (opts?.costMark) await mutate("assets-in-progress");
-                } catch (e) {
-                  alert(e instanceof Error ? e.message : 'Plačila ni bilo mogoče zabeležiti.');
-                } finally {
-                  setSupPaySaving(false);
+                  }).then(() => { setSupPayOpen(null); refresh(); }).catch(e => {
+                    alert(e instanceof Error ? e.message : 'Plačila ni bilo mogoče zabeležiti.');
+                  }).finally(() => setSupPaySaving(false));
+                  return;
                 }
+                void commitClassifiedPay({ refKey, supplier, amountAr, label, paid, dilip: true });
               }}
               className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              style={{ backgroundColor: `${accent}22`, border: `1px solid ${accent}66`, color: accent }}>
-              {supPaySaving ? 'Beležim…' : 'Zabeleži plačilo'}
+              style={paid && opts?.costMark
+                ? { backgroundColor: '#4f7a5422', border: '1px solid #4f7a5466', color: '#4f7a54' }
+                : { backgroundColor: `${accent}22`, border: `1px solid ${accent}66`, color: accent }}>
+              {opts?.costMark ? transportPaySaveLabel(Boolean(paid), supPaySaving) : (supPaySaving ? 'Beležim…' : 'Zabeleži plačilo')}
             </button>
           </div>
         </div>
@@ -8687,9 +8730,12 @@ function GuestCard() {
               {paid.paidAt ? new Date(paid.paidAt).toLocaleDateString('sl-SI', { day: 'numeric', month: 'short', year: 'numeric' }) : ''} · {ar(paid.amountAr || amountAr)}
             </p>
             {opts?.costMark && <DilipBoatCostSummary category={paid.costCategory} assetId={paid.assetId} />}
+            {opts?.costMark && paySavedRef === refKey && <p className="text-[10px] font-semibold text-[#4f7a54]">Shranjeno.</p>}
           </div>
           <div className="flex shrink-0 gap-1.5">
             <button onClick={() => {
+              setPaySaveError(null);
+              if (paySavedRef === refKey) setPaySavedRef(null);
               setSupPayMethod(paid.method === 'orange' ? 'orange' : 'cash');
               setSupPayCompany(paid.company === 'sarl' ? 'sarl' : 'tourism');
               setSupPayDate((paid.paidAt || new Date().toISOString()).slice(0, 10));
@@ -8701,12 +8747,13 @@ function GuestCard() {
             </button>
             <button onClick={async () => {
               const dropContract = opts?.costMark && paid.costCategory === WIP_CAT;
-              if (!confirm(dropContract
-                ? 'Prekličem plačilo Dilipu? Vknjižba se izbriše in strošek se umakne s pogodbe.'
+              if (!confirm(opts?.costMark
+                ? transportPayCancelConfirm({ wip: Boolean(dropContract), dilip: true })
                 : 'Prekličem plačilo dobavitelju? Vknjižba v blagajni/Orange Money se bo izbrisala.')) return;
               await unpaySupplier({ refKey });
+              if (paySavedRef === refKey) setPaySavedRef(null);
               refresh();
-              if (dropContract) await mutate("assets-in-progress");
+              if (opts?.costMark && paid.costCategory) await mutate("assets-in-progress");
             }}
               className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70 hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40 transition-colors">
               Prekliči
@@ -8720,6 +8767,7 @@ function GuestCard() {
         setSupPayMethod('cash');
         setSupPayCompany('tourism');
         setSupPayDate(new Date().toISOString().slice(0, 10));
+        setPaySaveError(null);
         if (opts?.costMark) setBoatCost(EMPTY_DILIP_BOAT_COST);
         setSupPayOpen(refKey);
       }}
@@ -8842,29 +8890,31 @@ function GuestCard() {
 
   // Ročno plačilo pri nabavi (voznik čolna / nosači / tuc tuc) — znesek se VPIŠE, na voljo sta
   // gotovina (blagajna Tourism/SARL) IN Orange Money. Uporablja isti mehanizem supplier_payments.
-  const renderNabavaPay = (refKey: string, supplierKey: string, fieldLabel: string, descLabel: string) => {
+  const renderNabavaPay = (refKey: string, supplierKey: string, fieldLabel: string, descLabel: string, opts?: { costMark?: boolean }) => {
     const paid = supplierPayByKey[refKey];
     const accent = '#8f6d3a';
+    const costFields = opts?.costMark ? dilipCostFieldsFromDraft(boatCost) : null;
+    const costError = costFields ? boatCostMarkError(costFields) : null;
     if (supPayOpen === refKey) {
       const amt = parseInt((extraAmt[refKey] || '').replace(/[^\d]/g, ''), 10) || 0;
       return (
         <div className="mt-2 rounded-lg p-2.5 space-y-2.5" style={{ border: `1px solid ${accent}40`, backgroundColor: `${accent}0d` }}>
           <div className="flex items-center justify-between gap-2">
             <p className="text-[11px] font-semibold" style={{ color: accent }}>{paid ? 'Uredi plačilo' : 'Plačilo'} · {fieldLabel}</p>
-            <button onClick={() => setSupPayOpen(null)} aria-label="Zapri"
+            <button onClick={() => { setSupPayOpen(null); setPaySaveError(null); }} aria-label="Zapri"
               className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-[#0f2e3a]/10 hover:text-[#2b2622]">
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-[#2b2622]/55">Znesek:</span>
-            <input inputMode="numeric" value={extraAmt[refKey] || ''} onChange={e => setExtraAmt(p => ({ ...p, [refKey]: e.target.value }))} placeholder="0"
+            <input inputMode="numeric" value={extraAmt[refKey] || ''} onChange={e => { setPaySaveError(null); setExtraAmt(p => ({ ...p, [refKey]: e.target.value })); }} placeholder="0"
               className="flex-1 rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-2 py-1.5 text-[11px] text-[#0f2e3a] focus:outline-none" />
             <span className="text-[10px] text-[#2b2622]/55">Ar</span>
           </div>
           <div className="flex gap-2">
             {(['cash', 'orange'] as const).map(m => (
-              <button key={m} onClick={() => setSupPayMethod(m)}
+              <button key={m} onClick={() => { setPaySaveError(null); setSupPayMethod(m); }}
                 className={`flex-1 rounded-lg px-3 py-2 text-[11px] font-medium border transition-colors ${supPayMethod === m ? '' : 'bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10'}`}
                 style={supPayMethod === m ? { backgroundColor: `${accent}22`, borderColor: `${accent}66`, color: accent } : undefined}>
                 {m === 'cash' ? 'Gotovina' : 'Orange Money'}
@@ -8874,44 +8924,49 @@ function GuestCard() {
           {supPayMethod === 'cash' && (
             <div className="flex gap-2">
               {(['tourism', 'sarl'] as const).map(c => (
-                <button key={c} onClick={() => setSupPayCompany(c)}
+                <button key={c} onClick={() => { setPaySaveError(null); setSupPayCompany(c); }}
                   className={`flex-1 rounded-lg px-3 py-2 text-[10px] font-medium border transition-colors ${supPayCompany === c ? 'bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40' : 'bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10'}`}>
                   {c === 'tourism' ? 'KOMBA CABANA TOURISM SARL' : 'KOMBA CABANA SARL'}
                 </button>
               ))}
             </div>
           )}
+          {opts?.costMark && <DilipBoatCostMark value={boatCost} onChange={(next) => { setPaySaveError(null); setBoatCost(next); }} amountAr={amt} />}
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-[#2b2622]/55">Datum plačila:</span>
-            <input type="date" value={supPayDate} onChange={e => setSupPayDate(e.target.value)}
+            <input type="date" value={supPayDate} onChange={e => { setPaySaveError(null); setSupPayDate(e.target.value); }}
               className="flex-1 rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-2 py-1.5 text-[11px] text-[#0f2e3a] [color-scheme:light] focus:outline-none" />
           </div>
+          {opts?.costMark && paySaveError && <p className="text-[10px] font-medium text-[#b0203a]">{paySaveError}</p>}
           <div className="flex gap-2">
-            <button onClick={() => setSupPayOpen(null)}
+            <button onClick={() => { setSupPayOpen(null); setPaySaveError(null); }}
               className="rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-3 py-2 text-[11px] font-medium text-[#2b2622]/70 hover:bg-[#0f2e3a]/10 transition-colors">
               Prekliči
             </button>
-            <button disabled={supPaySaving || amt <= 0}
-              onClick={async () => {
-                setSupPaySaving(true);
-                try {
-                  await paySupplier({
+            <button disabled={supPaySaving || amt <= 0 || !!costError}
+              onClick={() => {
+                const label = `${fieldLabel} — ${descLabel}`.slice(0, 200);
+                if (!opts?.costMark) {
+                  setSupPaySaving(true);
+                  paySupplier({
                     refKey, supplier: supplierKey,
                     method: supPayMethod,
                     company: supPayMethod === 'cash' ? supPayCompany : undefined,
                     date: supPayDate,
                     amountAr: amt,
-                    label: `${fieldLabel} — ${descLabel}`.slice(0, 200),
-                  });
-                  setSupPayOpen(null);
-                  refresh();
-                } finally {
-                  setSupPaySaving(false);
+                    label,
+                  }).then(() => { setSupPayOpen(null); refresh(); }).catch(e => {
+                    alert(e instanceof Error ? e.message : 'Plačila ni bilo mogoče zabeležiti.');
+                  }).finally(() => setSupPaySaving(false));
+                  return;
                 }
+                void commitClassifiedPay({ refKey, supplier: supplierKey, amountAr: amt, label, paid, dilip: false });
               }}
               className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              style={{ backgroundColor: `${accent}22`, border: `1px solid ${accent}66`, color: accent }}>
-              {supPaySaving ? 'Beležim…' : 'Zabeleži plačilo'}
+              style={paid && opts?.costMark
+                ? { backgroundColor: '#4f7a5422', border: '1px solid #4f7a5466', color: '#4f7a54' }
+                : { backgroundColor: `${accent}22`, border: `1px solid ${accent}66`, color: accent }}>
+              {opts?.costMark ? transportPaySaveLabel(Boolean(paid), supPaySaving) : (supPaySaving ? 'Beležim…' : 'Zabeleži plačilo')}
             </button>
           </div>
         </div>
@@ -8928,22 +8983,31 @@ function GuestCard() {
             <p className="text-[10px] text-[#2b2622]/55">
               {paid.paidAt ? new Date(paid.paidAt).toLocaleDateString('sl-SI', { day: 'numeric', month: 'short', year: 'numeric' }) : ''} · {ar(paid.amountAr || 0)}
             </p>
+            {opts?.costMark && <DilipBoatCostSummary category={paid.costCategory} assetId={paid.assetId} />}
+            {opts?.costMark && paySavedRef === refKey && <p className="text-[10px] font-semibold text-[#4f7a54]">Shranjeno.</p>}
           </div>
           <div className="flex shrink-0 gap-1.5">
             <button onClick={() => {
+              setPaySaveError(null);
+              if (paySavedRef === refKey) setPaySavedRef(null);
               setSupPayMethod(paid.method === 'orange' ? 'orange' : 'cash');
               setSupPayCompany(paid.company === 'sarl' ? 'sarl' : 'tourism');
               setSupPayDate((paid.paidAt || new Date().toISOString()).slice(0, 10));
               setExtraAmt(p => ({ ...p, [refKey]: String(paid.amountAr || '') }));
+              if (opts?.costMark) setBoatCost(dilipCostDraftFromPayment(paid));
               setSupPayOpen(refKey);
             }}
               className="rounded-full border px-3 py-1.5 text-[10px] font-medium transition-colors" style={{ borderColor: `${accent}40`, backgroundColor: `${accent}1a`, color: accent }}>
               Uredi
             </button>
             <button onClick={async () => {
-              if (!confirm('Prekličem plačilo? Vknjižba v blagajni/Orange Money se bo izbrisala.')) return;
+              if (!confirm(opts?.costMark
+                ? transportPayCancelConfirm({ wip: paid.costCategory === WIP_CAT, dilip: false })
+                : 'Prekličem plačilo? Vknjižba v blagajni/Orange Money se bo izbrisala.')) return;
               await unpaySupplier({ refKey });
+              if (paySavedRef === refKey) setPaySavedRef(null);
               refresh();
+              if (opts?.costMark && paid.costCategory) await mutate("assets-in-progress");
             }}
               className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70 hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40 transition-colors">
               Prekliči
@@ -8954,9 +9018,11 @@ function GuestCard() {
     }
     return (
       <button onClick={() => {
+        setPaySaveError(null);
         setSupPayMethod('cash');
         setSupPayCompany('tourism');
         setSupPayDate(new Date().toISOString().slice(0, 10));
+        if (opts?.costMark) setBoatCost(EMPTY_DILIP_BOAT_COST);
         setSupPayOpen(refKey);
       }}
         className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border border-dashed px-4 py-2 transition-colors"
@@ -9611,8 +9677,8 @@ function GuestCard() {
                           );
                         })()}
                         <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#8f6d3a]/70">Gotovinska / Orange Money plačila</p>
-                        {renderNabavaPay(`nabava:${trip.id}:boatdriver`, 'boatdriver', 'Voznik čolna', trip.note || 'nabava')}
-                        {renderNabavaPay(`nabava:${trip.id}:porters`, 'porters', 'Nosači', trip.note || 'nabava')}
+                        {renderNabavaPay(`nabava:${trip.id}:boatdriver`, 'boatdriver', 'Voznik čolna', trip.note || 'nabava', { costMark: true })}
+                        {renderNabavaPay(`nabava:${trip.id}:porters`, 'porters', 'Nosači', trip.note || 'nabava', { costMark: true })}
                         {renderNabavaPay(`nabava:${trip.id}:tuctuc`, 'tuctuc', 'Tuc tuc', trip.note || 'nabava')}
                         <NabavaPurchasesSection tripId={trip.id} tripNote={trip.note} />
                       </div>
