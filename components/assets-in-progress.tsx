@@ -11,6 +11,7 @@ import {
   deleteAssetCost,
   activateAsset,
   deleteFixedAsset,
+  getExchangeRateValue,
   type AssetInProgress,
 } from '@/app/actions/statistics'
 
@@ -20,6 +21,22 @@ const COST_PRESETS = ['Razžaganje lesa', 'Izdelava desk', 'Montaža']
 
 function formatAr(n: number) {
   return `${new Intl.NumberFormat('sl-SI').format(Math.round(n || 0))} Ar`
+}
+
+// Tečaj se naloži prek useEurRate; shranjen tudi na ravni modula, da ga uporablja tiskanje pogodbe.
+let eurRate = 0
+function useEurRate() {
+  const { data } = useSWR('exchange-rate', getExchangeRateValue)
+  if (data && data > 0) eurRate = data
+  return data && data > 0 ? data : eurRate
+}
+function formatEur(n: number, rate = eurRate) {
+  if (!(rate > 0)) return ''
+  return new Intl.NumberFormat('sl-SI', { style: 'currency', currency: 'EUR' }).format((n || 0) / rate)
+}
+function formatArEur(n: number, rate = eurRate) {
+  const eur = formatEur(n, rate)
+  return eur ? `${formatAr(n)} (${eur})` : formatAr(n)
 }
 function formatDate(d: string | null) {
   if (!d) return '-'
@@ -126,11 +143,11 @@ function printContract(a: AssetInProgress) {
   <p><strong>Naročnik:</strong> Komba Cabana Tourism Sarl, Nosy Be<br/><strong>Izvajalec:</strong> ${esc(a.contractor || '________________')}</p>
   <h2>Predmet pogodbe</h2><p>${esc(a.contractScope || '________________').replace(/\n/g, '<br/>')}</p>
   <h2>Cena in rok</h2>
-  <p>Dogovorjena cena dela: <strong>${a.contractPrice > 0 ? formatAr(a.contractPrice) : '________________'}</strong><br/>
+  <p>Dogovorjena cena dela: <strong>${a.contractPrice > 0 ? formatArEur(a.contractPrice) : '________________'}</strong><br/>
   Rok izvedbe: <strong>${a.contractDeadline ? formatDate(a.contractDeadline) : '________________'}</strong></p>
   ${a.costs.length ? `<h2>Material in dosedanji stroški</h2><table><tr><th>Datum</th><th>Opis</th><th class="r">Znesek</th></tr>
   ${a.costs.map((c) => `<tr><td>${formatDate(c.date)}</td><td>${esc(c.description)}</td><td class="r">${formatAr(c.amountAr)}</td></tr>`).join('')}
-  <tr><th colspan="2">Skupaj</th><th class="r">${formatAr(a.totalAr)}</th></tr></table>` : ''}
+  <tr><th colspan="2">Skupaj</th><th class="r">${formatArEur(a.totalAr)}</th></tr></table>` : ''}
   <p style="margin-top:24px">Kraj in datum: Nosy Be, ${formatDate(a.contractDate || todayIso())}</p>
   <div class="sig"><div>Naročnik<br/>Borut Retelj</div><div>Izvajalec<br/>${esc(a.contractor || '')}</div></div>
   <script>window.onload=()=>window.print()</script></body></html>`)
@@ -151,6 +168,7 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
   const [err, setErr] = useState<string | null>(null)
 
   const costArNum = Number(costAr.replace(/[^\d]/g, '')) || 0
+  const rate = useEurRate()
 
   function startEdit() {
     setDraft({
@@ -259,7 +277,14 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
             </div>
             <div>
               <dt className="text-[10px] uppercase tracking-wider text-white/35">Dogovorjena cena dela</dt>
-              <dd className="text-white/80">{a.contractPrice > 0 ? formatAr(a.contractPrice) : '—'}</dd>
+              <dd className="text-white/80">
+            {a.contractPrice > 0 ? (
+              <>
+                {formatAr(a.contractPrice)}
+                {rate > 0 && <span className="ml-1.5 text-white/50">({formatEur(a.contractPrice, rate)})</span>}
+              </>
+            ) : '—'}
+          </dd>
             </div>
             <div>
               <dt className="text-[10px] uppercase tracking-wider text-white/35">Rok izvedbe</dt>
@@ -279,6 +304,7 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
           <span>Stroški izdelave</span>
           <span className="text-sm normal-case tracking-normal text-white/80">
             Skupaj <strong className="text-[#c59b5b]">{formatAr(a.totalAr)}</strong>
+            {rate > 0 && <span className="ml-1.5 text-white/50">({formatEur(a.totalAr, rate)})</span>}
           </span>
         </div>
         {a.costs.length === 0 ? (
@@ -363,7 +389,7 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
               <input inputMode="decimal" value={actRate} onChange={(e) => setActRate(e.target.value)} className={`${inputCls} text-right`} />
             </div>
             <p className="pb-2 text-xs text-white/50">
-              Nabavna vrednost {formatAr(a.totalAr)}{lifeMonths > 0 ? ` · doba ${lifeMonths} mes.` : ''}
+              Nabavna vrednost {formatArEur(a.totalAr, rate)}{lifeMonths > 0 ? ` · doba ${lifeMonths} mes.` : ''}
             </p>
             <button
               disabled={busy || a.totalAr <= 0 || rateNum <= 0}
@@ -407,6 +433,7 @@ export function ReceiptToAssetPanel({
 }) {
   const { mutate } = useSWRConfig()
   const { data: list = [] } = useSWR(ASSETS_IN_PROGRESS_KEY, getAssetsInProgress)
+  const rate = useEurRate()
   const [target, setTarget] = useState<string>('')
   const [draft, setDraft] = useState<ContractDraft>(() => ({ ...emptyContractDraft(), contractDate: receipt.date || todayIso() }))
   const [costDesc, setCostDesc] = useState(receipt.description || 'Material')
@@ -457,7 +484,7 @@ export function ReceiptToAssetPanel({
           <select value={mode} onChange={(e) => setTarget(e.target.value)} className={inputCls}>
             {list.map((a) => (
               <option key={a.id} value={a.id} className="bg-[#1a1410]">
-                {a.name}{a.contractor ? ` — ${a.contractor}` : ''} ({formatAr(a.totalAr)})
+                {a.name}{a.contractor ? ` — ${a.contractor}` : ''} ({formatArEur(a.totalAr, rate)})
               </option>
             ))}
             <option value="new" className="bg-[#1a1410]">+ Odpri novo pogodbo</option>
@@ -469,7 +496,7 @@ export function ReceiptToAssetPanel({
         </div>
         <div>
           <label className={labelCls}>Znesek</label>
-          <span className="block py-2 text-sm font-semibold tabular-nums text-white/80">{formatAr(receipt.amountAr)}</span>
+          <span className="block py-2 text-sm font-semibold tabular-nums text-white/80">{formatArEur(receipt.amountAr, rate)}</span>
         </div>
       </div>
       {mode === 'new' && <ContractForm draft={draft} onChange={setDraft} />}
