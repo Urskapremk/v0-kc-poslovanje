@@ -7,6 +7,25 @@ import { nanoid } from 'nanoid'
 import { revalidatePath } from 'next/cache'
 import { mealPayFactor, childBand } from '@/lib/meal-plan'
 
+async function syncMassageCash(itemId: string) {
+  try {
+    const { syncMassageWorkerCash } = await import('./nabava')
+    await syncMassageWorkerCash(itemId)
+  } catch (e) {
+    console.log('[v0] syncMassageWorkerCash (delivery) failed:', (e as Error).message)
+  }
+}
+
+async function requireActiveStaff(staffId: string) {
+  const member = await db.query.staff.findFirst({
+    where: and(eq(staff.id, staffId), eq(staff.active, true)),
+  })
+  if (!member) {
+    throw new Error('Dostop do bara je zaprt.')
+  }
+  return member
+}
+
 // Get all products from database
 export async function getProducts() {
   const allProducts = await db.query.products.findMany({
@@ -168,6 +187,7 @@ export async function addItemToDeliveryNote(
   staffName: string,
   childBandId?: string | null
 ) {
+  await requireActiveStaff(staffId)
   const product = await db.query.products.findFirst({
     where: eq(products.id, productId)
   })
@@ -252,7 +272,8 @@ export async function addItemToDeliveryNote(
       ]
 
   await db.insert(deliveryNoteItems).values(rows)
-  
+  for (const row of rows) await syncMassageCash(row.id)
+
   // Update delivery note total
   if (note) {
     await db.update(deliveryNotes)
@@ -277,7 +298,8 @@ export async function removeItemFromDeliveryNote(itemId: string, deliveryNoteId:
   if (!item) throw new Error('Item not found')
   
   await db.delete(deliveryNoteItems).where(eq(deliveryNoteItems.id, itemId))
-  
+  await syncMassageCash(itemId)
+
   // Update delivery note total
   const note = await db.query.deliveryNotes.findFirst({
     where: eq(deliveryNotes.id, deliveryNoteId)
@@ -316,6 +338,7 @@ export async function updateDeliveryNoteItemQuantity(itemId: string, quantity: n
   await db.update(deliveryNoteItems)
     .set({ quantity: qty, totalAr: newTotalAr })
     .where(eq(deliveryNoteItems.id, itemId))
+  await syncMassageCash(itemId)
 
   const note = await db.query.deliveryNotes.findFirst({
     where: eq(deliveryNotes.id, item.deliveryNoteId)
@@ -413,6 +436,7 @@ export async function toggleItemMealPlanCovered(itemId: string, deliveryNoteId: 
 
 // Close delivery note (end of day) and create new one for next day
 export async function closeDeliveryNote(deliveryNoteId: string, staffId?: string) {
+  if (staffId) await requireActiveStaff(staffId)
   // Get the note to close
   const noteToClose = await db.query.deliveryNotes.findFirst({
     where: eq(deliveryNotes.id, deliveryNoteId)
@@ -500,6 +524,7 @@ export async function createInvoiceForReservation(
   staffId: string,
   exchangeRate?: number
 ) {
+  await requireActiveStaff(staffId)
   // Get reservation details
   const reservation = await db.query.reservations.findFirst({
     where: eq(reservations.id, reservationId)

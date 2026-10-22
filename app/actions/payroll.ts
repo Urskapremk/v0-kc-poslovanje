@@ -923,6 +923,7 @@ export async function getSignedLeaveDays(
     sql`SELECT "staffId", "startDate", "endDate"
         FROM leave_requests
         WHERE "signedAt" IS NOT NULL
+          AND COALESCE("leaveType", '') <> 'sick'
           AND "startDate" <= make_date(${year}, ${month}, ${daysInMonthSql(year, month)})
           AND "endDate" >= make_date(${year}, ${month}, 1)`
   )

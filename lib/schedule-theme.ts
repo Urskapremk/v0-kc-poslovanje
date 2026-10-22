@@ -32,8 +32,12 @@ export type ScheduleTheme = {
   todayLabel: string
   /** Leave badge that replaces a shift cell. */
   leaveBadge: string
+  /** Sick-leave badge. Distinct from annual leave. */
+  sickBadge: string
   /** Leave styling applied to an inline cell (sobarice). */
   leaveCell: string
+  /** Sick-leave styling on an inline cell (sobarice). */
+  sickCell: string
   /** Dimming for an empty "Prosto" cell. */
   offDim: string
   /** Text-only "off" cell (vrtnarji, kuhinja, bar). */
@@ -57,7 +61,9 @@ export const TABLE_THEME: { navy: ScheduleTheme; sand: ScheduleTheme } = {
     todayBar: 'border-l-[#c59b5b]',
     todayLabel: 'text-[#c59b5b]',
     leaveBadge: 'border-[#cc8e77]/40 bg-[#cc8e77]/15 text-[#cc8e77]',
+    sickBadge: 'border-[#b7a0d4]/50 bg-[#b7a0d4]/20 text-[#d4c4ea]',
     leaveCell: 'border-[#cc8e77]/40 bg-[#cc8e77]/10 text-[#cc8e77]',
+    sickCell: 'border-[#b7a0d4]/50 bg-[#b7a0d4]/15 text-[#d4c4ea]',
     offDim: 'opacity-40',
     offText: 'text-white/25',
     empty: 'text-white/40 bg-white/[0.03] border-white/10',
@@ -77,7 +83,9 @@ export const TABLE_THEME: { navy: ScheduleTheme; sand: ScheduleTheme } = {
     todayBar: 'border-l-[#8f6d3a]',
     todayLabel: 'text-[#8f6d3a]',
     leaveBadge: 'border-[#a15a3f]/40 bg-[#a15a3f]/[0.12] text-[#a15a3f]',
+    sickBadge: 'border-[#6d4f8a]/40 bg-[#6d4f8a]/[0.12] text-[#5c3d78]',
     leaveCell: 'border-[#a15a3f]/40 bg-[#a15a3f]/[0.10] text-[#a15a3f]',
+    sickCell: 'border-[#6d4f8a]/40 bg-[#6d4f8a]/[0.10] text-[#5c3d78]',
     // The white "Prosto" panel would nearly vanish at 40% on sand.
     offDim: 'opacity-70',
     offText: 'text-[#2b2622]/40',

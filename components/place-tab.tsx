@@ -1760,6 +1760,12 @@ export default function PlaceTab({
                         <Row label="Stanje pred mesecem" value={`${(leave?.balanceBefore ?? 0).toFixed(1)} dni`} muted />
                         <Row label="Priraslo ta mesec" value={`+ ${(leave?.earnedThisMonth ?? 0).toFixed(1)} dni`} />
                         <Row label="Izkoriščeno ta mesec" value={`− ${(leave?.takenThisMonth ?? 0).toFixed(1)} dni`} />
+                        {(leave?.sickDaysThisMonth ?? 0) > 0 && (
+                          <Row
+                            label={`Bolniška (${leave?.sickDaysThisMonth} ${leave?.sickDaysThisMonth === 1 ? 'dan' : 'dni'}) — 100 % plačano`}
+                            value="plača se ne zmanjša"
+                          />
+                        )}
                         <Row label="PREOSTALO STANJE" value={`${(leave?.remaining ?? 0).toFixed(1)} dni`} strong accent />
                         <Row label="Referenca (1/12 zadnjih 12 mes)" value={formatAr(leave?.referenceAmount ?? 0)} muted />
                       </div>
@@ -2128,6 +2134,12 @@ export default function PlaceTab({
                       </>
                     )}
                     <tr className="pay-total"><td>CONGÉ DISPONIBLE (mois suivants)</td><td className="pay-amount">{printStaff.leave.remaining.toFixed(1)} j</td></tr>
+                    {printStaff.leave.sickDaysThisMonth > 0 && (
+                      <tr>
+                        <td>Congé de maladie — indemnité 100 % (salaire maintenu, ne réduit pas le congé)</td>
+                        <td className="pay-amount">{printStaff.leave.sickDaysThisMonth} j</td>
+                      </tr>
+                    )}
                     {printPayslip.unusedLeaveCompensation > 0 && (
                       <tr><td>Indemnité de congé non pris</td><td className="pay-amount">{formatAr(printPayslip.unusedLeaveCompensation)}</td></tr>
                     )}

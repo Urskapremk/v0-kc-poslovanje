@@ -6,10 +6,11 @@ import Link from "next/link";
 import useSWR, { mutate } from "swr";
   import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart } from "lucide-react";
   import { bungalowDisplayName } from "@/lib/bungalow";
+  import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
-  import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, type ChildrenAges } from "@/lib/meal-plan";
+  import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
   import { TimelineCalendar } from "@/components/timeline-calendar";
   import { DailyReminder, type ReminderSection } from "@/components/daily-reminder";
   import BankBalanceCard from "@/components/bank-balance-card";
@@ -47,6 +48,7 @@ import { payFanja, unpayFanja } from "./actions/fanja-payment";
 import { paySupplier, unpaySupplier } from "./actions/supplier-payment";
 import { getNabavaTrips, addNabavaTrip, updateNabavaTrip, deleteNabavaTrip, setNabavaBoat, setNabavaBoatOrdered, setNabavaNoBoat } from "./actions/nabava";
 import { NabavaPurchasesSection } from "@/components/nabava-purchases-section";
+import { NabavaRacunovodstvo } from "@/components/nabava-racunovodstvo";
 import { TaxesPanel } from "@/components/taxes-panel";
 import { GuestReplyAssistant } from "@/components/guest-reply-assistant";
   import { SentEmailsBox } from "@/components/sent-emails-box";
@@ -121,6 +123,24 @@ const CHECKIN_EXTRA_FIELDS: { key: CheckinGuestField; label: string; type: "text
 ];
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+// Same trip keeps the same colour on every card, so two bookings on one
+// bungalow never share a hue. The palm inherits the colour of its line.
+function excursionColor(name: string): string {
+  const n = name.toLowerCase();
+  if (/iranja/.test(n)) return "#6d4c86";
+  if (/tanikely/.test(n) && /sakatia/.test(n)) return "#9a3f5c";
+  if (/sakatia/.test(n)) return "#2a6494";
+  if (/tanikely/.test(n)) return "#0f7a72";
+  if (/maki/.test(n)) return "#3d4f9a";
+  if (/lokobe/.test(n)) return "#7a4a28";
+  if (/mangrove/.test(n)) return "#5c6824";
+  if (/fahily/.test(n)) return "#8a3d78";
+  if (/komba|boabab|baobab/.test(n)) return "#e23b2a";
+  let hash = 0;
+  for (let i = 0; i < n.length; i++) hash = (hash * 31 + n.charCodeAt(i)) >>> 0;
+  return ["#6d4c86", "#2a6494", "#0f7a72", "#9a3f5c", "#e23b2a", "#3d4f9a"][hash % 6];
+}
 const num = (value: unknown) => (Number.isFinite(Number(value)) ? Number(value) : 0);
 const eur = (value: unknown) => `${num(value).toFixed(2)} EUR`;
 const ar = (value: unknown) => `${Math.round(num(value)).toLocaleString("de-DE")} Ar`;
@@ -267,7 +287,7 @@ interface Reservation {
   mealPlanPax?: number | null; // Za koliko oseb velja penzion (prazno = za vse)
   mealPlanPaymentStatus?: string | null; // PAID, UNPAID
   mealPlanSnack?: boolean | null; // Gost ima poleg penziona naročen tudi snack (kuhinja)
-  childrenAges?: Record<string, number> | null; // (opuščeno) nadomeščeno z guestBand/secondGuestBand/...
+  childrenAges?: ({ years?: number[] } & Record<string, number>) | null; // years = starosti na kartici; ostalo = prehrana
   checkedInAt?: string | null; // When guest checked in
   checkedOutAt?: string | null; // When guest checked out
   excludeFromBar?: boolean | null; // Skrij iz bar dobavnic (fakturira se na drug bungalov)
@@ -336,7 +356,7 @@ function SectionHeader({ eyebrow, title, subtitle }: { eyebrow?: string; title: 
   );
 }
 
-function LuxuryBadge({ children, variant = "default", light = false }: { children: React.ReactNode; variant?: "default" | "petrol" | "ocean" | "danger" | "gold"; light?: boolean }) {
+function LuxuryBadge({ children, variant = "default", light = false, title }: { children: React.ReactNode; variant?: "default" | "petrol" | "ocean" | "danger" | "gold"; light?: boolean; title?: string }) {
   const styles = {
     default: "bg-white/5 border-white/10 text-[#c9d1cf]",
     petrol: "bg-[#8fae92]/15 border-[#8fae92]/25 text-[#8fae92]",
@@ -353,7 +373,7 @@ function LuxuryBadge({ children, variant = "default", light = false }: { childre
     gold: "bg-[#8f6d3a]/10 border-[#8f6d3a]/30 text-[#7a5c2f]",
   };
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${(light ? lightStyles : styles)[variant]}`}>
+    <span title={title} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] ${(light ? lightStyles : styles)[variant]}`}>
       {children}
     </span>
   );
@@ -902,6 +922,7 @@ const PAYMENT_METHODS = [
   { value: 'transfer', label: 'Bancni transfer' },
   { value: 'orange_money', label: 'Orange Money' },
   { value: 'cash', label: 'Gotovina' },
+  { value: 'kompenzacija', label: 'Kompenzacija' },
   ];
   
   // Police Registration Form Modal
@@ -1388,6 +1409,47 @@ function isPaidPlanMeal(
   return false;
 }
 
+/** Full guest invoice total (stay + unpaid bar/services + separately-paid excursions). Matches /racun. */
+function computeGuestInvoiceTotalEur(
+  reservation: {
+    totalAmount?: number | null;
+    bookingSource?: string | null;
+    orderItems?: { paymentStatus?: string; category?: string; priceAr?: number; refPriceAr?: number | null; isFree?: boolean }[];
+    barItems?: { priceAr?: number; quantity?: number; coveredByMealPlan?: boolean; isFree?: boolean }[];
+    invoiceDiscounts?: { amountAr?: number }[];
+  },
+  exchangeRate: number,
+  discounts?: { amountAr?: number }[],
+): number {
+  const isAgency = reservation.bookingSource === 'Agency';
+  const orderItems = reservation.orderItems || [];
+  const barItems = reservation.barItems || [];
+  const discountRows = discounts ?? reservation.invoiceDiscounts ?? [];
+  const unpaidServicesInvAr = orderItems
+    .filter((i) => i.paymentStatus === 'UNPAID' && i.category !== 'Bivanje')
+    .reduce((s, i) => s + Number(i.priceAr || 0), 0);
+  const barChargeInvAr = barItems.reduce(
+    (s, i) => s + ((i.coveredByMealPlan || i.isFree) ? 0 : Number(i.priceAr || 0) * Number(i.quantity || 1)),
+    0,
+  );
+  const invDiscountAr = discountRows.reduce((s, d) => s + (d.amountAr || 0), 0);
+  const sepPaidAr = orderItems
+    .filter(
+      (i) =>
+        !isAgency &&
+        i.paymentStatus === 'PAID' &&
+        !i.isFree &&
+        i.category === 'Izlet' &&
+        Number(i.refPriceAr || 0) > 0,
+    )
+    .reduce((s, i) => s + Number(i.refPriceAr || 0), 0);
+  return (
+    Number(reservation.totalAmount || 0) +
+    arToEur(unpaidServicesInvAr + barChargeInvAr - invDiscountAr, exchangeRate) +
+    arToEur(sepPaidAr, exchangeRate)
+  );
+}
+
 function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange, separatePaidItems = [], onRemainingChange }: { 
   reservationId: string; totalAmount: string; currency: string; onPaymentChange?: () => void;
   // Reports the real remaining (TOTAL − everything paid) back to the parent so the
@@ -1525,6 +1587,13 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
               />
             </div>
             {/* Samo pri Orange Money: koliko Ar je dejansko prišlo na OM denarnico → priliv v kalkulacije */}
+            {newPayment.method === 'kompenzacija' && (
+              <div className="col-span-2">
+                <p className="text-[11px] leading-relaxed text-[#c59b5b]">
+                  Račun se poravna s kontra stroškom Reklama (reklamni material). Denar ne gre v blagajno, banko ali Orange Money.
+                </p>
+              </div>
+            )}
             {newPayment.method === 'orange_money' && (
               <div className="col-span-2">
                 <label className="block text-xs text-[#c59b5b] mb-1">Znesek na Orange Money (Ar)</label>
@@ -1884,7 +1953,7 @@ export default function KombaCabanaApp() {
     const payments = res.payments || [];
     const paymentInfoParts = payments.map((p: { amount: number | string; method: string; paidAt: string }) => {
       const amt = Number(p.amount);
-      const method = p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method;
+      const method = p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method === 'kompenzacija' ? 'Kompenzacija' : p.method;
       const date = new Date(p.paidAt).toLocaleDateString('sl-SI');
       return `${amt.toFixed(2)} EUR (${method}, ${date})`;
     });
@@ -2225,6 +2294,7 @@ async function handleCreateReservation() {
   await addOrderItem(reservation.id, orderDraft);
   setOrderDraft(prev => ({ name: "", category: prev.category, qty: 1, priceAr: 0, eventDate: prev.eventDate }));
     refresh();
+    await mutate((key) => key === "nabava-trips" || (Array.isArray(key) && key[0] === "nabava-purchases"));
     setSaving(false);
   }
 
@@ -2240,6 +2310,7 @@ async function handleCreateReservation() {
         }
       } else {
         await deleteOrderItem(item.id);
+        await mutate((key) => key === "nabava-trips" || (Array.isArray(key) && key[0] === "nabava-purchases"));
       }
       refresh();
     } catch {
@@ -2317,6 +2388,7 @@ async function handleCreateReservation() {
     setSaving(true);
     try {
       await updateOrderItemDate(itemId, dateEditVal);
+      await mutate((key) => key === "nabava-trips" || (Array.isArray(key) && key[0] === "nabava-purchases"));
       setDateEditItem(null);
       setDateEditVal("");
       refresh();
@@ -2521,54 +2593,8 @@ async function handleCreateReservation() {
             };
           })();
 
-          // Children's ages, derived from the police-form birth dates so nothing is typed
-          // twice. Measured at ARRIVAL, not today: that is the age that matters for the
-          // stay and it does not tick over while the card is on screen. Date parts are
-          // compared numerically �� parsing to Date would shift the day in our timezone.
-          const childAgeInfo = (() => {
-            if (!paxSrc) return null;
-            const isDay = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
-            const ref = paxSrc.arrival ? String(paxSrc.arrival).slice(0, 10) : "";
-            if (!isDay(ref)) return null;
-            const [ry, rm, rd] = ref.split("-").map(Number);
-            const people = [
-              { dob: paxSrc.dateOfBirth, name: paxSrc.guestName },
-              { dob: paxSrc.secondDateOfBirth, name: paxSrc.secondGuestName },
-              { dob: paxSrc.thirdDateOfBirth, name: paxSrc.thirdGuestName },
-              { dob: paxSrc.fourthDateOfBirth, name: paxSrc.fourthGuestName },
-            ];
-            const kids: { age: number; name: string }[] = [];
-            for (const p of people) {
-              const dob = p.dob ? String(p.dob).slice(0, 10) : "";
-              if (!isDay(dob)) continue;
-              const [by, bm, bd] = dob.split("-").map(Number);
-              let age = ry - by;
-              if (rm < bm || (rm === bm && rd < bd)) age -= 1;
-              if (age < 0 || age >= 18) continue;
-              kids.push({ age, name: (p.name || "").trim() });
-            }
-            if (!kids.length) return null;
-            kids.sort((a, b) => a.age - b.age);
-            const label = kids.length === 1 ? "Otrok" : kids.length === 2 ? "Otroka" : "Otroci";
-            // The unit agrees with the last number listed: 1 leto, 2 leti, 3 leta, 5 let.
-            const last = kids[kids.length - 1].age;
-            const m10 = last % 10;
-            const m100 = last % 100;
-            const unit =
-              m100 !== 11 && m10 === 1
-                ? "leto"
-                : m100 !== 12 && m10 === 2
-                  ? "leti"
-                  : m100 !== 13 && m100 !== 14 && (m10 === 3 || m10 === 4)
-                    ? "leta"
-                    : "let";
-            return {
-              ages: kids.map(k => k.age).join(" · "),
-              label,
-              unit,
-              why: `${kids.map(k => `${k.name || "Otrok"} — ${k.age}`).join(" · ")} (starost ob prihodu, iz rojstnih datumov)`,
-            };
-          })();
+          // Children's ages on the card: explicit years on the reservation, else DOBs.
+          const childAgeInfo = paxSrc ? buildChildAgeCardInfo(paxSrc) : null;
 
           // Transport / excursion markers (boat, Herman's car, excursion palm) for the
           // current or next guest. Built once: they sit in the header row while the card
@@ -2580,14 +2606,34 @@ async function handleCreateReservation() {
             const noTransferNeeded = (src as { noTransferNeeded?: boolean }).noTransferNeeded;
             const arrivalHasCar = !!src.transfers?.arrival?.hermanRouteId;
             const hasHerman = src.transfers?.departure?.hermanRouteId || (arrivalHasCar && !src.transfers?.arrival?.route);
-            const hasExcursion = (src.excursions?.length || 0) > 0;
-            // Same rule as the boat and the arrival hour: a booked excursion is quiet
-            // reference, today's excursion is the job in front of reception. The column
-            // is a plain `date`, so the day is compared as text — never via new Date(),
-            // which would shift the day in our timezone.
-            const excursionToday = (src.excursions || []).some(
-              e => String(e.date || "").slice(0, 10) === today()
-            );
+            // Booked excursions for this guest. Cancelled ones are gone. Upcoming and
+            // today's trips are what reception still has to run; if every trip is already
+            // past, the latest one still labels the palm so the marker is never nameless.
+            // The date column is plain text — compared as text, never via new Date().
+            const excursionNameOf = (id: string) =>
+              (dbExcursions as { id: string; name: string }[]).find(e => e.id === id)?.name?.trim() || "Izlet";
+            const excursionDayLabel = (iso?: string | null) => {
+              const day = String(iso || "").slice(0, 10);
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "";
+              return new Date(`${day}T00:00:00Z`).toLocaleDateString("sl-SI", {
+                day: "numeric",
+                month: "short",
+                timeZone: "UTC",
+              });
+            };
+            const todayStr = today();
+            const activeExcursions = (src.excursions || []).filter(e => e.status !== "CANCELLED");
+            const upcomingExcursions = activeExcursions
+              .filter(e => {
+                const day = String(e.date || "").slice(0, 10);
+                return !day || day >= todayStr;
+              })
+              .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+            const shownExcursions = (upcomingExcursions.length > 0
+              ? upcomingExcursions
+              : [...activeExcursions].sort((a, b) => String(b.date || "").localeCompare(String(a.date || ""))).slice(0, 1)
+            ).slice(0, 3);
+            const hasExcursion = shownExcursions.length > 0;
             // Nothing left to collect for the transfer? Say so in words before the boat,
             // so it reads at a glance without opening the card.
             const bookedTransfers = [src.transfers?.arrival, src.transfers?.departure].filter(
@@ -2601,13 +2647,21 @@ async function handleCreateReservation() {
                   : "Plačano"
                 : null;
 
-            // The boat follows the stay, exactly like the calendar bar: before check-in
-            // the arrival is the open task and sits on the left, after check-in it is
-            // done and the departure takes over on the right. Never both at once.
+            // Arrival stays on the left until check-in. The departure boat stays on
+            // the right as soon as that leg is booked, so the next-guest card shows
+            // both. After check-in the arrival is done and only the departure remains.
             const inHouse = !!src.checkedInAt && !src.checkedOutAt;
             const beforeArrival = !src.checkedInAt && !src.checkedOutAt;
+            // Marked as arranged by the guest. Only shown when that leg has no booked
+            // route, so the flag can never hide a boat we actually owe.
+            const ownArrival = !!(src as { ownArrivalTransfer?: boolean }).ownArrivalTransfer && !hasArrivalTransfer;
+            const ownDeparture =
+              !!(src as { ownDepartureTransfer?: boolean }).ownDepartureTransfer && !hasDepartureTransfer;
             const showArrival = beforeArrival && !noTransferNeeded;
-            const showDeparture = inHouse && !noTransferNeeded;
+            const departureHasCar = !!src.transfers?.departure?.hermanRouteId;
+            const showDeparture =
+              !noTransferNeeded &&
+              (inHouse || (beforeArrival && (!!hasDepartureTransfer || ownDeparture)));
             // The boat only rides the swell on the day the crossing actually happens —
             // same rule as the blinking arrival hour. A boat bobbing for a guest due in
             // four days is decoration; today it is the job in front of reception.
@@ -2615,12 +2669,6 @@ async function handleCreateReservation() {
             const departingToday = inHouse && String(src.departure || "").slice(0, 10) === today();
             const sail = (moving: boolean) => (moving ? " animate-sail" : "");
             const legClass = "flex items-center gap-1.5 whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.16em]";
-
-            // Marked as arranged by the guest. Only shown when that leg has no booked
-            // route, so the flag can never hide a boat we actually owe.
-            const ownArrival = !!(src as { ownArrivalTransfer?: boolean }).ownArrivalTransfer && !hasArrivalTransfer;
-            const ownDeparture =
-              !!(src as { ownDepartureTransfer?: boolean }).ownDepartureTransfer && !hasDepartureTransfer;
 
             // Arrival on the left: boat first, then the word. No entry and no flag means
             // the guest arranges it themselves anyway, so it is not an open task — show
@@ -2657,7 +2705,19 @@ async function handleCreateReservation() {
               hasDepartureTransfer ? (
                 <span className={`${legClass} text-[#4f7a54]`} title="Prevoz ob odhodu je urejen">
                   Odhod
-                  <Ship className={`h-3.5 w-3.5${sail(departingToday)}`} />
+                  <span className="flex items-center gap-1 rounded-full bg-[#4f7a54]/10 px-1.5 py-0.5" title="Čoln">
+                    <Ship className={`h-4 w-4${sail(departingToday)}`} />
+                    Čoln
+                  </span>
+                  {departureHasCar && (
+                    <>
+                      <span aria-hidden className="text-[#2b2622]/35">→</span>
+                      <span className="flex items-center gap-1 rounded-full bg-[#2b2622]/[0.06] px-1.5 py-0.5 text-[#2b2622]/70" title="Avto (taksi) iz porta">
+                        <Car className="h-4 w-4" />
+                        Avto
+                      </span>
+                    </>
+                  )}
                 </span>
               ) : ownDeparture ? (
                 <span className={`${legClass} text-[#2b2622]/55`} title="Gost odhod organizira sam">
@@ -2675,36 +2735,61 @@ async function handleCreateReservation() {
               )
             ) : null;
 
+            const excursionMarks = hasExcursion ? (
+              <span className="flex flex-col items-end gap-0.5">
+                {shownExcursions.map(ex => {
+                  const day = String(ex.date || "").slice(0, 10);
+                  const isToday = day === todayStr;
+                  const name = excursionNameOf(ex.excursionId);
+                  const dateLabel = excursionDayLabel(ex.date);
+                  const color = excursionColor(name);
+                  return (
+                    <span
+                      key={ex.id}
+                      className="flex items-center gap-1 whitespace-nowrap text-[9px] font-medium tracking-[0.06em]"
+                      style={{ color }}
+                      title={isToday ? `${name} je danes` : name}
+                    >
+                      <span className="max-w-[9rem] truncate">{name}</span>
+                      {dateLabel && (
+                        <span className="font-normal tabular-nums opacity-75">{dateLabel}</span>
+                      )}
+                      <Palmtree className={`h-3.5 w-3.5 shrink-0${isToday ? " animate-palm-sway" : ""}`} />
+                    </span>
+                  );
+                })}
+              </span>
+            ) : null;
+
+            // Excursion sits above the departure. The boat and the "Odhod" hour stay
+            // underneath the palm, on the right.
             const right =
               settledLabel || noTransferNeeded || departure || hasHerman || hasExcursion ? (
-                <>
-                  {settledLabel && (
-                    <span
-                      className="whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.16em] text-[#4f7a54]"
-                      title="Prevoz je poravnan"
-                    >
-                      {settledLabel}
+                <span className="flex flex-col items-end">
+                  {excursionMarks}
+                  {(settledLabel || noTransferNeeded || departure || hasHerman) && (
+                    <span className={`flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1${hasExcursion ? " mt-2.5" : ""}`}>
+                      {settledLabel && (
+                        <span
+                          className="whitespace-nowrap text-[9px] font-medium uppercase tracking-[0.16em] text-[#4f7a54]"
+                          title="Prevoz je poravnan"
+                        >
+                          {settledLabel}
+                        </span>
+                      )}
+                      {noTransferNeeded && (
+                        <div className="relative" title="Ne potrebuje prevoza">
+                          <Ship className="h-4 w-4 text-[#2b2622]/55" />
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-5 h-0.5 bg-[#2b2622]/70 rotate-[-45deg]" />
+                          </div>
+                        </div>
+                      )}
+                      {departure}
+                      {hasHerman && !departureHasCar && <Car className="h-3.5 w-3.5 text-[#2b2622]/40" title="Prevoz s Hermanom (avto do Porta)" />}
                     </span>
                   )}
-                  {noTransferNeeded && (
-                    <div className="relative" title="Ne potrebuje prevoza">
-                      <Ship className="h-4 w-4 text-[#2b2622]/55" />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="w-5 h-0.5 bg-[#2b2622]/70 rotate-[-45deg]" />
-                      </div>
-                    </div>
-                  )}
-                  {departure}
-                  {hasHerman && <Car className="h-3.5 w-3.5 text-[#2b2622]/40" title="Prevoz s Hermanom (avto do Porta)" />}
-                  {/* Darker blue on request. Deepened but kept saturated: the muted
-                      navy tint reads grey-teal next to the sage ship at this size. */}
-                  {hasExcursion && (
-                    <Palmtree
-                      className={`h-3.5 w-3.5 text-[#14567a]${excursionToday ? " animate-palm-sway" : ""}`}
-                      title={excursionToday ? "Izlet je danes" : "Naročen izlet"}
-                    />
-                  )}
-                </>
+                </span>
               ) : null;
 
             // Pickup location for the arrival leg — origin of the route name (before " - "),
@@ -2721,6 +2806,11 @@ async function handleCreateReservation() {
             const pickup = pickupPointField || arrivalRouteName.split(' - ')[0]?.trim() || '';
             // Arrival time ("Ura prihoda" = flightTime), shown next to the pickup place.
             const pickupTime = showArrival && hasArrivalTransfer ? (src.transfers?.arrival?.flightTime || '') : '';
+            // "Odhod iz Kombe" — the hour the boat leaves the lodge. Same quiet line as
+            // pickup, sitting under the ship. Once the guest is in house the departure
+            // ship is on the right, so the hour follows it there.
+            const departureTime = hasDepartureTransfer ? (src.transfers?.departure?.time || '').trim() : '';
+            const departureOnRight = !!(showDeparture && departureTime);
             // Day before arrival and the arrival day: the guide's phone and the
             // pickup place/time blink blue, so reception sees who to call and where
             // the boat is without opening the note.
@@ -2728,8 +2818,8 @@ async function handleCreateReservation() {
             const arrivalSoon = showArrival && isDayBeforeOrArrival(arrivalDay, today());
             const guidePhone = arrivalSoon ? guidePhoneFromNotes(src.notes) : null;
 
-            if (!left && !right && !guidePhone && !pickup) return null;
-            return { left, right, pickup, pickupTime, guidePhone, arrivalSoon };
+            if (!left && !right && !guidePhone && !pickup && !departureTime) return null;
+            return { left, right, pickup, pickupTime, guidePhone, arrivalSoon, departureTime, departureOnRight };
           };
           const renderArrivalCallout = (
             indicators: { pickup?: string; pickupTime?: string; guidePhone?: string | null; arrivalSoon?: boolean } | null,
@@ -2760,6 +2850,25 @@ async function handleCreateReservation() {
               <p className="mt-1 pl-[1.25rem] text-[10px] tracking-[0.06em] text-[#2b2622]/60">
                 <span className="text-[#2b2622]/45">Pick up:</span> {indicators.pickup}
                 {indicators.pickupTime && <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{indicators.pickupTime}</span>}
+              </p>
+            );
+          };
+          // Departure hour from the lodge ("Odhod iz Kombe"), same small colour as Pick up.
+          const renderDepartureTime = (
+            indicators: { departureTime?: string } | null,
+            align: 'left' | 'right',
+          ) => {
+            const time = indicators?.departureTime?.trim();
+            if (!time) return null;
+            return (
+              <p
+                className={`mt-1 whitespace-nowrap text-[10px] tracking-[0.06em] text-[#2b2622]/60 ${
+                  align === 'right' ? 'text-right' : 'pl-[1.25rem]'
+                }`}
+                title="Odhod iz Kombe"
+              >
+                <span className="text-[#2b2622]/45">Odhod:</span>
+                <span className="ml-1.5 font-medium text-[#0f2e3a]/70">{time}</span>
               </p>
             );
           };
@@ -2834,17 +2943,26 @@ async function handleCreateReservation() {
                       </LuxuryBadge>
                     )}
                     {guest.honeymoon && <LuxuryBadge light variant="gold"><Heart className="h-3 w-3" /></LuxuryBadge>}
-                    {guest.allergies && <LuxuryBadge light variant="danger"><Leaf className="h-3 w-3" /></LuxuryBadge>}
+                    {String(guest.allergies || "").trim() && (
+                      <LuxuryBadge light variant="danger" title={`Alergija: ${String(guest.allergies).trim()}`}>
+                        <Leaf className="h-3 w-3" />
+                        {String(guest.allergies).trim()}
+                      </LuxuryBadge>
+                    )}
                   </div>
                   {indicators && (
                     <>
-                      <div className="mt-2 flex items-center gap-2.5" aria-label="Oznake prevozov in izletov naslednjega gosta">
+                      <div className="mt-2 flex items-start gap-2.5" aria-label="Oznake prevozov in izletov naslednjega gosta">
                         {indicators.left}
                         {indicators.right && (
-                          <div className="ml-auto flex items-center gap-2.5">{indicators.right}</div>
+                          <div className="ml-auto flex flex-col items-end">
+                            <div className="flex flex-wrap items-start justify-end gap-x-2.5 gap-y-1">{indicators.right}</div>
+                            {indicators.departureOnRight ? renderDepartureTime(indicators, 'right') : null}
+                          </div>
                         )}
                       </div>
                       {renderArrivalCallout(indicators)}
+                      {!indicators.departureOnRight ? renderDepartureTime(indicators, 'left') : null}
                     </>
                   )}
                   {/* Reservation notes — same rules as the collapsed NOW row, so notes typed on
@@ -2976,7 +3094,8 @@ async function handleCreateReservation() {
                       const mealPaid = mealBadge && String(src.mealPlanPaymentStatus || '').toUpperCase() === 'PAID';
                       // Snack is ordered on top of the board, so it gets its own badge
                       const snack = !!src.mealPlanSnack;
-                      if (!source && !mealBadge && !snack) return null;
+                      const allergy = String(src.allergies || "").trim();
+                      if (!source && !mealBadge && !snack && !allergy) return null;
                       return (
                         <span className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1">
                           {source && (
@@ -3015,6 +3134,15 @@ async function handleCreateReservation() {
                               >
                                 Plačano
                               </span>
+                            </span>
+                          )}
+                          {allergy && (
+                            <span className="flex items-center gap-2.5">
+                              {(source || mealBadge || snack || mealPaid) && <span aria-hidden className="h-2.5 w-px bg-[#0f2e3a]/15" />}
+                              <LuxuryBadge light variant="danger" title={`Alergija: ${allergy}`}>
+                                <Leaf className="h-3 w-3" />
+                                {allergy}
+                              </LuxuryBadge>
                             </span>
                           )}
                         </span>
@@ -3145,13 +3273,17 @@ async function handleCreateReservation() {
                     When expanded they move down to the action row instead. */}
                 {!isExpanded && transportIndicators && (
                   <>
-                    <div className="mt-2 flex items-center gap-2.5" aria-label="Oznake prevozov in izletov">
+                    <div className="mt-2 flex items-start gap-2.5" aria-label="Oznake prevozov in izletov">
                       {transportIndicators.left}
                       {transportIndicators.right && (
-                        <div className="ml-auto flex items-center gap-2.5">{transportIndicators.right}</div>
+                        <div className="ml-auto flex flex-col items-end">
+                          <div className="flex flex-wrap items-start justify-end gap-x-2.5 gap-y-1">{transportIndicators.right}</div>
+                          {transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'right') : null}
+                        </div>
                       )}
                     </div>
                     {renderArrivalCallout(transportIndicators)}
+                    {!transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'left') : null}
                   </>
                 )}
               </button>
@@ -3176,10 +3308,14 @@ async function handleCreateReservation() {
                       <>
                         {transportIndicators.left}
                         {transportIndicators.right && (
-                          <div className="ml-auto flex items-center gap-2.5" aria-label="Oznake prevozov in izletov">
-                            {transportIndicators.right}
+                          <div className="ml-auto flex flex-col items-end" aria-label="Oznake prevozov in izletov">
+                            <div className="flex flex-wrap items-start justify-end gap-x-2.5 gap-y-1">{transportIndicators.right}</div>
+                            {transportIndicators.departureOnRight ? renderDepartureTime(transportIndicators, 'right') : null}
                           </div>
                         )}
+                        {!transportIndicators.right && !transportIndicators.departureOnRight
+                          ? renderDepartureTime(transportIndicators, 'left')
+                          : null}
                       </>
                     )}
                   </div>
@@ -5837,7 +5973,11 @@ function GuestCard() {
   {/* Payment Section */}
   <PaymentSection
     reservationId={reservation.id}
-    totalAmount={reservation.totalAmount || '0'}
+    totalAmount={
+      reservation.checkedInAt
+        ? computeGuestInvoiceTotalEur(reservation, exchangeRate).toFixed(2)
+        : String(reservation.totalAmount || '0')
+    }
     currency={reservation.currency || 'EUR'}
     onPaymentChange={refresh}
   />
@@ -7139,7 +7279,8 @@ function GuestCard() {
 
     // ===== Invoice TOTAL (matches /racun and the reservation-row balance) =====
     // TOTAL = accommodation + unpaid services/bar (minus discounts) + separately-paid
-    // excursions/transfers. Those separately-paid items also count toward "Placano",
+    // excursions. A paid transfer is not charged again. Unpaid transfers stay via their
+    // UNPAID order item. Separately-paid excursions also count toward "Placano",
     // so the remaining stays correct. Uses raw order_items (incl. the Transfer mirror).
     const isAgency = reservation.bookingSource === 'Agency';
     const unpaidServicesInvAr = (orderItems as any[])
@@ -7149,18 +7290,18 @@ function GuestCard() {
       .reduce((s, i) => s + ((i.coveredByMealPlan || i.isFree) ? 0 : Number(i.priceAr || 0) * Number(i.quantity || 1)), 0);
     const invDiscountAr = discounts.reduce((s, d) => s + (d.amountAr || 0), 0);
     const sepPaidRaw = (orderItems as any[])
-      .filter(i => !isAgency && i.paymentStatus === 'PAID' && !i.isFree && (i.category === 'Izlet' || i.category === 'Transfer') && Number(i.refPriceAr || 0) > 0);
+      .filter(i => !isAgency && i.paymentStatus === 'PAID' && !i.isFree && i.category === 'Izlet' && Number(i.refPriceAr || 0) > 0);
     const sepPaidItems = isAgency ? [] : sepPaidRaw.map(i => ({
       label: toEnglishItemName(i.name),
       eur: arToEur(Number(i.refPriceAr || 0), exchangeRate),
       method: i.paidMethod || 'card',
       date: i.paidDate ? formatDateSlo(i.paidDate) : '',
     }));
-    const sepPaidInvEur = arToEur(sepPaidRaw.reduce((s, i) => s + Number(i.refPriceAr || 0), 0), exchangeRate);
-    const invoiceTotalEur =
-      Number(reservation.totalAmount || 0) +
-      arToEur(unpaidServicesInvAr + barChargeInvAr - invDiscountAr, exchangeRate) +
-      sepPaidInvEur;
+    const invoiceTotalEur = computeGuestInvoiceTotalEur(
+      { ...reservation, orderItems: orderItems as typeof reservation.orderItems, barItems: barItems as typeof reservation.barItems },
+      exchangeRate,
+      discounts,
+    );
     // Show the guest's real remaining once payments have loaded; before that fall back to
     // the full invoice total so the box is never blank.
     const balanceEur = Math.max(0, balanceDueEur ?? invoiceTotalEur);
@@ -8307,7 +8448,7 @@ function GuestCard() {
     createdAt ? new Date(new Date(createdAt).getTime() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10) : "";
   const nabavaOnTile = (t: { date: string; createdAt: string }) =>
     !t.date || t.date >= nabavaToday || nabavaCreatedDay(t.createdAt) === nabavaToday;
-  const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && nabavaOnTile(t));
+  const nabavaHvList = nabavaList.filter((t) => t.site !== "komba" && t.note !== "Računovodstvo" && nabavaOnTile(t));
   // Komba: a past date does not stay among today's trips. It only shows while that
   // past day is selected in the form, so the current list does not mix with back-dating.
   const nabavaKombaCurrent = nabavaList.filter((t) => t.site === "komba" && (!t.date || t.date >= nabavaToday));
@@ -9369,6 +9510,8 @@ function GuestCard() {
                 </div>
               </div>
 
+              <NabavaRacunovodstvo />
+
               {nabavaHvList.length === 0 ? (
                 <p className="text-white/30 text-xs">Ni vnosov nabave. Dodaj prvo nabavo zgoraj.</p>
               ) : (
@@ -9490,7 +9633,7 @@ function GuestCard() {
               ) : (
                 <div className="space-y-3">
                   {nabavaKombaList.map((trip) => (
-                    <div key={trip.id} className="rounded-xl border border-[#8fae92]/15 bg-[#f7f2e7] p-3">
+                    <div key={trip.id} className={`rounded-xl border p-3 ${trip.note === "Masaže" ? "border-[#7a4ea3]/50 bg-[#f4eef8]" : "border-[#8fae92]/15 bg-[#f7f2e7]"}`}>
                       {nabavaEditId === trip.id ? (
                         <div className="mb-1 flex flex-col gap-2 sm:flex-row sm:items-center">
                           <input type="date" value={nabavaEditDate} onChange={e => setNabavaEditDate(e.target.value)}
@@ -9510,7 +9653,14 @@ function GuestCard() {
                             <p className="text-[11px] font-semibold text-[#4f7a54]">
                               {trip.date ? new Date(trip.date + 'T00:00:00').toLocaleDateString('sl-SI', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : ''}
                             </p>
-                            {trip.note && <p className="text-[11px] text-[#2b2622]/70">{trip.note}</p>}
+                            {trip.note && (
+                              <p className={`text-[11px] ${trip.note === "Masaže" ? "font-semibold text-[#7a4ea3]" : "text-[#2b2622]/70"}`}>
+                                {trip.note}
+                                {trip.note === "Masaže" && (
+                                  <span className="ml-1.5 rounded-full bg-[#7a4ea3]/15 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#7a4ea3]">Samodejno</span>
+                                )}
+                              </p>
+                            )}
                           </div>
                           <div className="flex shrink-0 gap-1.5">
                             <button onClick={() => { setNabavaEditId(trip.id); setNabavaEditDate(trip.date); setNabavaEditNote(trip.note); }}
@@ -9574,13 +9724,18 @@ function GuestCard() {
                   const boatNet = Math.max(0, boatCompletePrice - guidePrice);
                   // Top of Nosy Komba: čoln FIKSNO 80.000 Ar + vodič (guidePriceAr, npr. 50.000)
                   const dilipOverride = members.map(m => (m.excursion as { dilipOverrideAr?: number | null }).dilipOverrideAr).find(v => v != null);
+                  // Nosy Tanikely and trip around Nosy Komba + Dilip: polna cena čolna, brez vodiča in brez 10 %.
+                  const dilipPaysFullBoat = dilipOverride == null && dilipOwesFullBoatPrice(item.excursionName, exc.boatId);
                   const dilipPayment = dilipOverride != null
                     ? Number(dilipOverride)
+                    : dilipPaysFullBoat
+                    ? dilipFullBoatAr(boatCompletePrice)
                     : isFixedDilipExcursion
                     ? 80000 + guidePrice
                     : isDirectBoatExcursion
                       ? boatCompletePrice + guidePrice
                       : (boatNet > 0 ? Math.round(boatNet * 0.9) + guidePrice : 0);
+                  const dilipPayLabel = dilipPaysFullBoat ? 'Dilipu (čoln)' : 'Dilipu (čoln + vodič)';
                   // Vstopnina (skiper jo plača na licu mesta) = vstopnina/os × SKUPNO število oseb
                   const entranceTotalAr = Math.round((excType?.entranceFeeAr || 0) * totalPax);
                   // Dodatna vstopnina (npr. Maki park), vpisana na posamezni booking (znesek v Ar za celo rezervacijo)
@@ -9646,7 +9801,7 @@ function GuestCard() {
                           {/* Zneski za plačilo */}
                           <div className="mt-2 space-y-1 border-t border-[#0f2e3a]/12 pt-2">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-[#2b2622]/55">{isFanjaExcursion ? 'Plačilo Fanji' : 'Dilipu (čoln + vodič)'}</span>
+                              <span className="text-[10px] text-[#2b2622]/55">{isFanjaExcursion ? 'Plačilo Fanji' : dilipPayLabel}</span>
                               <span className="text-[11px] font-semibold text-[#3f6b7d] whitespace-nowrap">
                                 {isFanjaExcursion
                                   ? (fanjaPayment > 0 ? ar(fanjaPayment) : '—')
@@ -9835,7 +9990,7 @@ function GuestCard() {
                             if (!hasAny) return null;
                             return (
                               <div className="mt-2 space-y-1.5">
-                                {dilipPayment > 0 && renderSupplierPay(`excursion:${groupKey}:dilip`, 'dilip', dilipPayment, 'Dilipu (čoln + vodič)', excLabel('Dilip'), '#3f6b7d')}
+                                {dilipPayment > 0 && renderSupplierPay(`excursion:${groupKey}:dilip`, 'dilip', dilipPayment, dilipPayLabel, excLabel('Dilip'), '#3f6b7d')}
                                 {lunchTotal > 0 && renderSupplierPay(`excursion:${groupKey}:lunch`, 'lunch', lunchTotal, 'Vodiču za kosilo', excLabel('kosilo'), '#8f6d3a')}
                                 {entranceTotalAr > 0 && renderSupplierPay(`excursion:${groupKey}:entrance`, 'entrance', entranceTotalAr, `Skiperju za vstopnino (${totalPax} os)`, excLabel('vstopnina'), '#a8543a')}
                               </div>

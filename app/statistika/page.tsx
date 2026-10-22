@@ -25,6 +25,7 @@ import {
 } from '@/app/actions/statistics'
 import { isoDate, periodCovers, periodLabel, salaryHistory, salaryOn, slDate } from '@/lib/employment'
 import RazporedTab from '@/components/razpored-tab'
+import { WcCleaningSection } from '@/components/wc-cleaning-section'
 import VrtnarjiTab from '@/components/vrtnarji-tab'
 import KuhinjaTab from '@/components/kuhinja-tab'
 import BarTab from '@/components/bar-tab'
@@ -42,7 +43,7 @@ import MarketingTab from '@/components/marketing-tab'
 import BankaTab from '@/components/banka-tab'
 import OrangeMoneyTab from '@/components/orange-money-tab'
 import BlagajniskiDnevnik from '@/components/blagajniski-dnevnik'
-import MarketingOverviewRow from '@/components/marketing-overview-row'
+import KuhinjaRacuniRow, { type KuhinjaRacunLine } from '@/components/kuhinja-racuni-row'
 import LeaveDocument from '@/components/leave-document'
 import PayrollSettingsPanel from '@/components/payroll-settings'
 import { getUpcomingContributionAlerts } from '@/app/actions/payroll'
@@ -66,6 +67,10 @@ const STAFF_TYPES = [
 
 function formatEur(value: number) {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value)
+}
+
+function costItems(stats: { costLines?: Record<string, KuhinjaRacunLine[]> }, key: string): KuhinjaRacunLine[] {
+  return stats.costLines?.[key] || []
 }
 
 type StaffKind = 'all' | 'regular' | 'contract' | 'stagiaire'
@@ -130,6 +135,7 @@ function StatistikaContent() {
     activeMonths: [1,2,3,4,5,6,7,8,9,10,11,12],
     startDate: ''
   })
+  const [barArtikliOpen, setBarArtikliOpen] = useState(true)
 
   const { data: stats, mutate } = useSWR(
     ['statistics', year, month],
@@ -466,27 +472,18 @@ function StatistikaContent() {
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
                     <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Plače (vrtnar, sobarica)</span>
-                        <span className="text-white">{formatEur((stats.salaryBreakdown as { accommodation?: number })?.accommodation || 0)}</span>
-                      </div>
-                      <MarketingOverviewRow year={year} month={month} category="marketing" label="Marketing" amount={(stats.costs as { marketing?: number }).marketing || 0} />
+                      <KuhinjaRacuniRow label="Plače (vrtnar, sobarica)" listId="place-nocitve" amount={(stats.salaryBreakdown as { accommodation?: number })?.accommodation || 0} items={costItems(stats, 'salariesAccommodation')} />
+                      <KuhinjaRacuniRow label="Marketing" listId="marketing" amount={(stats.costs as { marketing?: number }).marketing || 0} items={costItems(stats, 'marketing')} />
                       {/* Provizija prodajnih platform: Booking + Optima plus */}
                       <div className="pt-1">
                         <p className="text-[11px] uppercase tracking-wider text-white/35 mb-1">Provizija prodajnih platform</p>
                         <div className="ml-1 space-y-2">
-                          <MarketingOverviewRow year={year} month={month} category="booking" label="Booking" amount={(stats.costs as { booking?: number }).booking || 0} />
-                          <MarketingOverviewRow year={year} month={month} category="optimaplus" label="Optima plus" amount={(stats.costs as { optimaplus?: number }).optimaplus || 0} />
+                          <KuhinjaRacuniRow label="Booking" listId="booking" amount={(stats.costs as { booking?: number }).booking || 0} items={costItems(stats, 'booking')} />
+                          <KuhinjaRacuniRow label="Optima plus" listId="optimaplus" amount={(stats.costs as { optimaplus?: number }).optimaplus || 0} items={costItems(stats, 'optimaplus')} />
                         </div>
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Starlink</span>
-                        <span className="text-white">{formatEur((stats.costs as { starlink?: number }).starlink || 0)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Nočitve</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsNocitve?: number }).receiptsNocitve || 0)}</span>
-                      </div>
+                      <KuhinjaRacuniRow label="Starlink" listId="starlink" amount={(stats.costs as { starlink?: number }).starlink || 0} items={costItems(stats, 'starlink')} />
+                      <KuhinjaRacuniRow label="Računi nabava Nočitve" listId="racuni-nocitve" amount={(stats.costs as { receiptsNocitve?: number }).receiptsNocitve || 0} items={costItems(stats, 'receiptsNocitve')} />
                     </div>
                   </div>
                 </div>
@@ -507,18 +504,14 @@ function StatistikaContent() {
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
                     <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Nabava pijača ({stats.costSettings?.find(c => c.category === 'bar_pijaca')?.value || 0}%)</span>
-                        <span className="text-white">{formatEur(stats.costs.barPijaca)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Plače (barman)</span>
-                        <span className="text-white">{formatEur((stats.salaryBreakdown as { bar?: number })?.bar || 0)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Bar</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsBar?: number }).receiptsBar || 0)}</span>
-                      </div>
+                      <KuhinjaRacuniRow label={`Nabava pijača (${stats.costSettings?.find(c => c.category === 'bar_pijaca')?.value || 0}%)`} listId="nabava-pijaca" amount={stats.costs.barPijaca} items={[]} />
+                      <KuhinjaRacuniRow label="Plače (barman)" listId="place-bar" amount={(stats.salaryBreakdown as { bar?: number })?.bar || 0} items={costItems(stats, 'salariesBar')} />
+                      <KuhinjaRacuniRow
+                        label="Računi nabava Bar"
+                        listId="bar-racuni-seznam"
+                        amount={(stats.costs as { receiptsBar?: number }).receiptsBar || 0}
+                        items={(stats.costs as { receiptsBarItems?: KuhinjaRacunLine[] }).receiptsBarItems || []}
+                      />
                     </div>
                   </div>
                 </div>
@@ -545,38 +538,51 @@ function StatistikaContent() {
                 const totalFree = sales.reduce((s, i) => s + i.freeQuantity, 0)
                 return (
                   <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
-                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-                      <h2 className="text-base sm:text-lg font-bold text-[#c59b5b]">PRODAJA BAR — PO ARTIKLIH</h2>
+                    <button
+                      type="button"
+                      onClick={() => setBarArtikliOpen((open) => !open)}
+                      aria-expanded={barArtikliOpen}
+                      aria-controls="prodaja-bar-po-artiklih"
+                      className="flex w-full cursor-pointer flex-wrap items-center justify-between gap-2 rounded-xl px-1 py-2 text-left transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#c59b5b]/60"
+                    >
+                      <h2 className="flex min-w-0 items-center gap-2 text-base font-bold text-[#c59b5b] sm:text-lg">
+                        <ChevronDown className={`h-4 w-4 shrink-0 text-[#c59b5b] transition-transform ${barArtikliOpen ? '' : '-rotate-90'}`} />
+                        PRODAJA BAR — PO ARTIKLIH
+                      </h2>
                       <div className="text-sm text-white/50">Skupaj <span className="text-white font-semibold tabular-nums">{totalQty}</span> kos · <span className="text-[#7fa8b8] font-semibold tabular-nums">{formatEur(totalRev)}</span></div>
-                    </div>
-                    <div className="space-y-5">
-                      {groups.map(g => {
-                        const gQty = g.items.reduce((s, i) => s + i.quantity, 0)
-                        const gRev = g.items.reduce((s, i) => s + i.revenueEur, 0)
-                        return (
-                          <div key={g.cc}>
-                            <div className="flex justify-between items-baseline mb-2">
-                              <span className="text-xs uppercase tracking-wider text-[#c59b5b]/80 font-semibold">{catLabels[g.cc] || 'Ostalo'}</span>
-                              <span className="text-xs text-white/40 tabular-nums">{gQty} kos · {formatEur(gRev)}</span>
-                            </div>
-                            <div className="rounded-xl overflow-hidden border border-white/5">
-                              {g.items.map((it, idx) => (
-                                <div key={it.name + idx} className={`flex items-center gap-3 px-3 py-2 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
-                                  <span className="text-sm font-bold text-white tabular-nums w-10 text-right shrink-0">{it.quantity}×</span>
-                                  <span className="text-sm text-white/80 truncate flex-1 min-w-0">
-                                    {it.name}
-                                    {it.freeQuantity > 0 && <span className="ml-2 text-xs text-[#8fae92] whitespace-nowrap">{it.freeQuantity} On House</span>}
-                                  </span>
-                                  <span className="text-sm text-[#7fa8b8] font-medium tabular-nums whitespace-nowrap shrink-0">{formatEur(it.revenueEur)}</span>
+                    </button>
+                    {barArtikliOpen && (
+                      <div id="prodaja-bar-po-artiklih" className="mt-4">
+                        <div className="space-y-5">
+                          {groups.map(g => {
+                            const gQty = g.items.reduce((s, i) => s + i.quantity, 0)
+                            const gRev = g.items.reduce((s, i) => s + i.revenueEur, 0)
+                            return (
+                              <div key={g.cc}>
+                                <div className="flex justify-between items-baseline mb-2">
+                                  <span className="text-xs uppercase tracking-wider text-[#c59b5b]/80 font-semibold">{catLabels[g.cc] || 'Ostalo'}</span>
+                                  <span className="text-xs text-white/40 tabular-nums">{gQty} kos · {formatEur(gRev)}</span>
                                 </div>
-                              ))}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                    {totalFree > 0 && (
-                      <p className="mt-4 text-xs text-white/40 text-pretty">Časne (On House) postavke so vštete v količino &quot;prodano&quot;, a ne prinašajo prihodka.</p>
+                                <div className="rounded-xl overflow-hidden border border-white/5">
+                                  {g.items.map((it, idx) => (
+                                    <div key={it.name + idx} className={`flex items-center gap-3 px-3 py-2 ${idx % 2 === 0 ? 'bg-white/[0.02]' : ''}`}>
+                                      <span className="text-sm font-bold text-white tabular-nums w-10 text-right shrink-0">{it.quantity}×</span>
+                                      <span className="text-sm text-white/80 truncate flex-1 min-w-0">
+                                        {it.name}
+                                        {it.freeQuantity > 0 && <span className="ml-2 text-xs text-[#8fae92] whitespace-nowrap">{it.freeQuantity} On House</span>}
+                                      </span>
+                                      <span className="text-sm text-[#7fa8b8] font-medium tabular-nums whitespace-nowrap shrink-0">{formatEur(it.revenueEur)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        {totalFree > 0 && (
+                          <p className="mt-4 text-xs text-white/40 text-pretty">Časne (On House) postavke so vštete v količino &quot;prodano&quot;, a ne prinašajo prihodka.</p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )
@@ -603,18 +609,12 @@ function StatistikaContent() {
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
                     <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Nabava hrana ({stats.costSettings?.find(c => c.category === 'bar_prehrana')?.value || 0}%)</span>
-                        <span className="text-white">{formatEur(stats.costs.barPrehrana + ((stats.costs as { mealPlan?: number }).mealPlan || 0))}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi nabava Kuhinja</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsKuhinja?: number }).receiptsKuhinja || 0)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Plače (kuhinja)</span>
-                        <span className="text-white">{formatEur((stats.salaryBreakdown as { kuhinja?: number })?.kuhinja || 0)}</span>
-                      </div>
+                      <KuhinjaRacuniRow label={`Nabava hrana (${stats.costSettings?.find(c => c.category === 'bar_prehrana')?.value || 0}%)`} listId="nabava-hrana" amount={stats.costs.barPrehrana + ((stats.costs as { mealPlan?: number }).mealPlan || 0)} items={[]} />
+                      <KuhinjaRacuniRow
+                        amount={(stats.costs as { receiptsKuhinja?: number }).receiptsKuhinja || 0}
+                        items={(stats.costs as { receiptsKuhinjaItems?: KuhinjaRacunLine[] }).receiptsKuhinjaItems || []}
+                      />
+                      <KuhinjaRacuniRow label="Plače (kuhinja)" listId="place-kuhinja" amount={(stats.salaryBreakdown as { kuhinja?: number })?.kuhinja || 0} items={costItems(stats, 'salariesKuhinja')} />
                     </div>
                   </div>
                 </div>
@@ -641,10 +641,7 @@ function StatistikaContent() {
                   </div>
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-white/50">Dobavitelj prevozov</span>
-                      <span className="text-white">{formatEur(totalCost)}</span>
-                    </div>
+                    <KuhinjaRacuniRow label="Dobavitelj prevozov" listId="prevozi" amount={totalCost} items={costItems(stats, 'transfers')} />
                   </div>
                 </div>
 
@@ -655,13 +652,13 @@ function StatistikaContent() {
                     <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
                       <p className="text-white/70 text-sm font-medium mb-2">Dilip (čoln)</p>
                       <div className="flex justify-between text-xs text-white/50"><span>Prihodki</span><span className="text-white/80">{formatEur(dilip.revenue)}</span></div>
-                      <div className="flex justify-between text-xs text-white/50"><span>Stroški</span><span className="text-white/80">{formatEur(dilip.cost)}</span></div>
+                      <KuhinjaRacuniRow label="Stroški" listId="prevozi-dilip" amount={dilip.cost} items={costItems(stats, 'transfersDilip')} amountClassName="text-white/80" />
                       <div className="flex justify-between text-sm font-semibold mt-1 pt-1 border-t border-white/10"><span className="text-white/70">Dobiček</span><span className="text-[#8fae92]">{formatEur(dilip.profit)}</span></div>
                     </div>
                     <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10">
                       <p className="text-white/70 text-sm font-medium mb-2">Herman (avto)</p>
                       <div className="flex justify-between text-xs text-white/50"><span>Prihodki</span><span className="text-white/80">{formatEur(herman.revenue)}</span></div>
-                      <div className="flex justify-between text-xs text-white/50"><span>Stroški</span><span className="text-white/80">{formatEur(herman.cost)}</span></div>
+                      <KuhinjaRacuniRow label="Stroški" listId="prevozi-herman" amount={herman.cost} items={costItems(stats, 'transfersHerman')} amountClassName="text-white/80" />
                       <div className="flex justify-between text-sm font-semibold mt-1 pt-1 border-t border-white/10"><span className="text-white/70">Dobiček</span><span className="text-[#8fae92]">{formatEur(herman.profit)}</span></div>
                     </div>
                   </div>
@@ -728,16 +725,12 @@ function StatistikaContent() {
                   </div>
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-white/50">Najem čolnov + vodič + vstop + kosilo</span>
-                      <span className="text-white">{formatEur(((stats.costs as { excursions?: number }).excursions || 0) - ((stats.costs as { izletGotovina?: number }).izletGotovina || 0))}</span>
+                    <div className="space-y-2">
+                      <KuhinjaRacuniRow label="Najem čolnov + vodič + vstop + kosilo" listId="izleti" amount={((stats.costs as { excursions?: number }).excursions || 0) - ((stats.costs as { izletGotovina?: number }).izletGotovina || 0)} items={costItems(stats, 'excursions')} />
+                      {((stats.costs as { izletGotovina?: number }).izletGotovina || 0) > 0 && (
+                        <KuhinjaRacuniRow label="Plačilo dobavitelju (gotovina)" listId="izlet-gotovina" amount={(stats.costs as { izletGotovina?: number }).izletGotovina || 0} items={costItems(stats, 'izletGotovina')} />
+                      )}
                     </div>
-                    {((stats.costs as { izletGotovina?: number }).izletGotovina || 0) > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Plačilo dobavitelju (gotovina)</span>
-                        <span className="text-white">{formatEur((stats.costs as { izletGotovina?: number }).izletGotovina || 0)}</span>
-                      </div>
-                    )}
                   </div>
                 </div>
                 {(() => {
@@ -800,14 +793,8 @@ function StatistikaContent() {
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
                     <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Maserke ({stats.costSettings?.find(c => c.category === 'wellness')?.value || 0} EUR/kos)</span>
-                        <span className="text-white">{formatEur(stats.costs.wellness)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Plačilo maserki (gotovina)</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsWellness?: number }).receiptsWellness || 0)}</span>
-                      </div>
+                      <KuhinjaRacuniRow label={`Maserke (${stats.costSettings?.find(c => c.category === 'wellness')?.value || 0} EUR/kos)`} listId="maserke" amount={stats.costs.wellness} items={costItems(stats, 'wellness')} />
+                      <KuhinjaRacuniRow label="Plačilo maserki (gotovina)" listId="racuni-wellness" amount={(stats.costs as { receiptsWellness?: number }).receiptsWellness || 0} items={costItems(stats, 'receiptsWellness')} />
                     </div>
                   </div>
                 </div>
@@ -874,14 +861,8 @@ function StatistikaContent() {
                   <div>
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-2">Stroški</p>
                     <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Nabavna cena + pranje ({stats.costSettings?.find(c => c.category === 'ostalo')?.value || 0}%)</span>
-                        <span className="text-white">{formatEur(stats.costs.ostalo)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-white/50">Računi ostalo</span>
-                        <span className="text-white">{formatEur((stats.costs as { receiptsOstalo?: number }).receiptsOstalo || 0)}</span>
-                      </div>
+                      <KuhinjaRacuniRow label={`Nabavna cena + pranje (${stats.costSettings?.find(c => c.category === 'ostalo')?.value || 0}%)`} listId="ostalo-nabava" amount={stats.costs.ostalo} items={costItems(stats, 'ostalo')} />
+                      <KuhinjaRacuniRow label="Računi ostalo" listId="racuni-ostalo" amount={(stats.costs as { receiptsOstalo?: number }).receiptsOstalo || 0} items={costItems(stats, 'receiptsOstalo')} />
                     </div>
                   </div>
                 </div>
@@ -903,9 +884,8 @@ function StatistikaContent() {
                       </div>
                     ))}
                   </div>
-                  <div className="mt-4 pt-4 border-t border-white/10 flex flex-col sm:flex-row sm:justify-between gap-1">
-                    <span className="text-white/70 font-medium">Mesečna amortizacija skupaj</span>
-                    <span className="text-[#c8846b] font-bold">{formatEur((stats.costs as { depreciation?: number }).depreciation || 0)}</span>
+                  <div className="mt-4 pt-4 border-t border-white/10">
+                    <KuhinjaRacuniRow label="Mesečna amortizacija skupaj" listId="amortizacija" amount={(stats.costs as { depreciation?: number }).depreciation || 0} items={costItems(stats, 'depreciation')} amountClassName="text-[#c8846b] font-bold" />
                   </div>
                 </div>
               )}
@@ -915,10 +895,7 @@ function StatistikaContent() {
                 <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
                   <h2 className="text-base sm:text-lg font-bold text-[#c8846b] mb-4">REPREZENTANCA (kava, pijača v lokalu)</h2>
                   <p className="text-white/40 text-xs mb-3">Samostojen strošek podjetja — ne bremeni oddelkov, znižuje skupni dobiček.</p>
-                  <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                    <span className="text-white/50">Računi reprezentanca</span>
-          <span className="text-[#c8846b] font-bold">{formatEur((stats.costs as { receiptsReprezentanca?: number }).receiptsReprezentanca || 0)}</span>
-              </div>
+                  <KuhinjaRacuniRow label="Računi reprezentanca" listId="reprezentanca" amount={(stats.costs as { receiptsReprezentanca?: number }).receiptsReprezentanca || 0} items={costItems(stats, 'receiptsReprezentanca')} amountClassName="text-[#c8846b] font-bold" />
             </div>
           )}
 
@@ -927,10 +904,7 @@ function StatistikaContent() {
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
               <h2 className="text-base sm:text-lg font-bold text-[#a3a36b] mb-4">TEKOČE VZDRŽEVANJE NEPREMIČNIN</h2>
               <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni oddelkov, znižuje skupni poslovni rezultat.</p>
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Računi vzdrževanje nepremičnin</span>
-                <span className="text-[#a3a36b] font-bold">{formatEur((stats.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0)}</span>
-              </div>
+              <KuhinjaRacuniRow label="Računi vzdrževanje nepremičnin" listId="vzdrzevanje" amount={(stats.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0} items={costItems(stats, 'receiptsVzdrzevanje')} amountClassName="text-[#a3a36b] font-bold" />
             </div>
           )}
 
@@ -939,10 +913,7 @@ function StatistikaContent() {
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
               <h2 className="text-base sm:text-lg font-bold text-[#b07a9a] mb-4">NAJEMNINA HIŠA</h2>
               <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni oddelkov, znižuje skupni poslovni rezultat.</p>
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Najemnina hiša (gotovina, Nabava Komba)</span>
-                <span className="text-[#b07a9a] font-bold">{formatEur((stats.costs as { najemninaHisa?: number }).najemninaHisa || 0)}</span>
-              </div>
+              <KuhinjaRacuniRow label="Najemnina hiša (gotovina, Nabava Komba)" listId="najemnina" amount={(stats.costs as { najemninaHisa?: number }).najemninaHisa || 0} items={costItems(stats, 'najemnina')} amountClassName="text-[#b07a9a] font-bold" />
             </div>
           )}
 
@@ -951,10 +922,41 @@ function StatistikaContent() {
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
               <h2 className="text-base sm:text-lg font-bold text-[#6d5a8a] mb-4">ŠTIPENDIJA</h2>
               <p className="text-white/40 text-xs mb-3">Šolnina. Samostojen strošek — ne bremeni oddelkov, znižuje skupni poslovni rezultat.</p>
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Štipendija (gotovina)</span>
-                <span className="text-[#6d5a8a] font-bold">{formatEur((stats.costs as { stipendija?: number }).stipendija || 0)}</span>
-              </div>
+              <KuhinjaRacuniRow label="Štipendija (gotovina)" listId="stipendija" amount={(stats.costs as { stipendija?: number }).stipendija || 0} items={costItems(stats, 'stipendija')} amountClassName="text-[#6d5a8a] font-bold" />
+            </div>
+          )}
+
+          {/* REKLAMA — kontra strošek kompenzacije, lasten kot računovodstvo */}
+          {((stats.costs as { reklama?: number }).reklama || 0) > 0 && (
+            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+              <h2 className="text-base sm:text-lg font-bold text-[#c59b5b] mb-4">REKLAMA</h2>
+              <p className="text-white/40 text-xs mb-3">Kontra strošek (reklamni material). Ne premakne blagajne, banke ali Orange Money.</p>
+              <KuhinjaRacuniRow label="Reklama" listId="reklama" amount={(stats.costs as { reklama?: number }).reklama || 0} items={costItems(stats, 'reklama')} amountClassName="text-[#c59b5b] font-bold" />
+            </div>
+          )}
+
+          {/* RAČUNOVODSTVO — samostojen strošek z Nabave HV */}
+          {((stats.costs as { racunovodstvo?: number }).racunovodstvo || 0) > 0 && (
+            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+              <h2 className="text-base sm:text-lg font-bold text-[#3d5c78] mb-4">RAČUNOVODSTVO</h2>
+              <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni oddelkov, znižuje skupni poslovni rezultat.</p>
+              <KuhinjaRacuniRow label="Računovodstvo (gotovina ali Orange Money)" listId="racunovodstvo" amount={(stats.costs as { racunovodstvo?: number }).racunovodstvo || 0} items={costItems(stats, 'racunovodstvo')} amountClassName="text-[#3d5c78] font-bold" />
+            </div>
+          )}
+
+          {/* PREVOZNIKI — samostojen strošek gotovinske nabave, viden tudi pri 0 */}
+          <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+            <h2 className="text-base sm:text-lg font-bold text-[#1d6b63] mb-4">PREVOZNIKI</h2>
+            <p className="text-white/40 text-xs mb-3">Samostojen strošek — gotovina iz blagajne ali Orange Money. Banka se ne premakne.</p>
+            <KuhinjaRacuniRow label="Prevozniki (gotovina ali Orange Money)" listId="prevozniki" amount={(stats.costs as { prevozniki?: number }).prevozniki || 0} items={costItems(stats, 'prevozniki')} amountClassName="text-[#1d6b63] font-bold" />
+          </div>
+
+          {/* HRANA ZA ŠTUDENTE — samostojen strošek, ne kuhinja */}
+          {((stats.costs as { hranaStudenti?: number }).hranaStudenti || 0) > 0 && (
+            <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
+              <h2 className="text-base sm:text-lg font-bold text-[#c46a3a] mb-4">HRANA ZA ŠTUDENTE</h2>
+              <p className="text-white/40 text-xs mb-3">Samostojen strošek — ne bremeni kuhinje ali drugih oddelkov, znižuje skupni poslovni rezultat.</p>
+              <KuhinjaRacuniRow label="Hrana za študente (gotovina)" listId="hrana-studenti" amount={(stats.costs as { hranaStudenti?: number }).hranaStudenti || 0} items={costItems(stats, 'hranaStudenti')} amountClassName="text-[#c46a3a] font-bold" />
             </div>
           )}
 
@@ -963,13 +965,9 @@ function StatistikaContent() {
             <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
               <h2 className="text-base sm:text-lg font-bold text-[#8fae92] mb-4">NOSAČI IN TUC TUC</h2>
               <p className="text-white/40 text-xs mb-3">Vsak svoj strošek — zmanjšuje skupni dobiček, ne bremeni oddelkov.</p>
-              <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Nosači</span>
-                <span className="text-[#8fae92] font-bold">{formatEur((stats.costs as { porters?: number }).porters || 0)}</span>
-              </div>
-              <div className="mt-1 flex flex-col sm:flex-row sm:justify-between gap-1">
-                <span className="text-white/50">Tuc tuc</span>
-                <span className="text-[#8fae92] font-bold">{formatEur((stats.costs as { tuctuc?: number }).tuctuc || 0)}</span>
+              <KuhinjaRacuniRow label="Nosači" listId="nosaci" amount={(stats.costs as { porters?: number }).porters || 0} items={costItems(stats, 'porters')} amountClassName="text-[#8fae92] font-bold" />
+              <div className="mt-1">
+                <KuhinjaRacuniRow label="Tuc tuc" listId="tuctuc" amount={(stats.costs as { tuctuc?: number }).tuctuc || 0} items={costItems(stats, 'tuctuc')} amountClassName="text-[#8fae92] font-bold" />
               </div>
             </div>
           )}
@@ -978,10 +976,7 @@ function StatistikaContent() {
               {(stats.salaryBreakdown?.management || 0) > 0 && (
                 <div className="p-4 sm:p-6 rounded-2xl bg-white/[0.03] border border-white/10">
                   <h2 className="text-base sm:text-lg font-bold text-[#c8846b] mb-4">MANAGEMENT PLAČE</h2>
-                  <div className="flex flex-col sm:flex-row sm:justify-between gap-1">
-                    <span className="text-white/50">Vodstvo (recepcija, vzdrževanje)</span>
-                    <span className="text-white font-medium">{formatEur(stats.salaryBreakdown?.management || 0)}</span>
-                  </div>
+                  <KuhinjaRacuniRow label="Vodstvo (recepcija, vzdrževanje)" listId="place-management" amount={stats.salaryBreakdown?.management || 0} items={costItems(stats, 'salariesManagement')} amountClassName="text-white font-medium" />
                 </div>
               )}
 
@@ -993,10 +988,7 @@ function StatistikaContent() {
                     <p className="text-white/40 text-[10px] sm:text-xs uppercase tracking-wider mb-1 sm:mb-2">Prihodki</p>
                     <p className="text-base sm:text-2xl font-bold text-[#7fa8b8]">{formatEur(stats.revenue.total)}</p>
                   </div>
-                  <div>
-                    <p className="text-white/40 text-[10px] sm:text-xs uppercase tracking-wider mb-1 sm:mb-2">Stroški</p>
-                    <p className="text-base sm:text-2xl font-bold text-[#c8846b]">{formatEur(stats.costs.total)}</p>
-                  </div>
+                  <KuhinjaRacuniRow variant="total" label="Stroški" listId="skupaj-stroski" amount={stats.costs.total} items={costItems(stats, 'skupaj')} amountClassName="text-[#c8846b]" />
                   <div>
                     <p className="text-white/40 text-[10px] sm:text-xs uppercase tracking-wider mb-1 sm:mb-2">Dobiček</p>
                     <p className={`text-base sm:text-2xl font-bold ${profitColor}`}>{formatEur(stats.profit)}</p>
@@ -1346,7 +1338,8 @@ function StatistikaContent() {
 
         {kadriView === 'razpored' && (
           <div className="space-y-4">
-            {/* Sub-toggle: Sobarice / Vrtnarji / Kuhinja */}
+            <WcCleaningSection year={year} month={month} />
+            {/* Sub-toggle: Sobarice / Vrtnarji / Kuhinja / Bar */}
             <div className="no-print flex gap-2 overflow-x-auto pb-1">
               <button
                 onClick={() => setRazporedView('sobarice')}

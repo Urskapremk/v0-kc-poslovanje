@@ -5,6 +5,7 @@ import { boats, routes, supplierPricing, excursions, excursionPricing, sellingPr
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
+import { dilipOwesFullBoatPrice, standardDilipSupplierAr } from '@/lib/dilip-excursion'
 
 // ============ BOATS ============
 export async function getBoats() {
@@ -184,8 +185,11 @@ export async function updateExcursionPricing(excursionId: string, boatId: string
     where: eq(excursions.id, excursionId)
   })
   const guidePriceAr = excursion?.guidePriceAr || 0
-  // Supplier price = (boat price - guide fee) * 0.9 + guide fee
-  const supplierPriceAr = Math.round((priceAr - guidePriceAr) * 0.9) + guidePriceAr
+  // Navadno: (cena čolna − vodič) × 0,90 + vodič.
+  // Izjema Nosy Tanikely and trip around Nosy Komba pri Dilipu: polna cena čolna, brez provizije.
+  const supplierPriceAr = dilipOwesFullBoatPrice(excursion?.name, boatId)
+    ? priceAr
+    : standardDilipSupplierAr(priceAr, guidePriceAr)
 
   const existing = await db.query.excursionPricing.findFirst({
     where: and(

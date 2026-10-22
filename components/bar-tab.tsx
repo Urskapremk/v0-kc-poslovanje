@@ -16,7 +16,7 @@ import {
 } from '@/lib/bar'
 import { getLeaveRequests } from '@/app/actions/leave'
 import { getAllStaffMembers } from '@/app/actions/statistics'
-import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
+import { leaveDaysForStaff, LEAVE_TYPES, scheduleLeaveLabel, scheduleLeaveShort, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
@@ -131,7 +131,8 @@ export default function BarTab({
     for (const p of roster) {
       const entries = schedule.map((day, i) => {
         const away = !employedOn(endByName[p], day.date)
-        return { day: i + 1, hours: away ? 0 : barDayHours(day, p), onLeave: !away && !!leaveByStaff[p]?.[i + 1] }
+        const info = leaveByStaff[p]?.[i + 1]
+        return { day: i + 1, hours: away ? 0 : barDayHours(day, p), onLeave: !away && !!info, leaveType: info?.type }
       })
       map[p] = summarizeMonthHours(year, month, entries)
     }
@@ -211,6 +212,8 @@ export default function BarTab({
           .bar-color-print .bc-off { color: #aaa !important; }
           .bar-color-print .bc-leave { background: #f0e0da !important; color: #975b45 !important; }
           .bar-color-print .bc-leave small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
+          .bar-color-print .bc-sick { background: #ebe4f4 !important; color: #5c3d78 !important; }
+          .bar-color-print .bc-sick small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
           .bar-color-print .g-total td { font-weight: 700; background: #f8f5ef !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .bar-color-print .doc-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; margin-top: 10px; }
           .bar-color-print .doc-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
@@ -334,8 +337,8 @@ export default function BarTab({
       <div className="no-print flex items-start gap-2 rounded-xl border border-[#c59b5b]/30 bg-[#c59b5b]/10 px-3 py-2 text-xs text-[#c59b5b]">
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <span>
-          Razpored se samodejno izračuna: 3 izmene (jutro 6-12:30, opoldne 11-17, večer 15:30-22), vsak dan ena oseba prosta.
-          Fransia je vedno opoldanska izmena, večerno izmeno dela vedno fant (Alex ali Walas), da nobeno dekle ne dela zvečer samo.
+          Razpored se samodejno izračuna: 3 izmene (jutro 6-12:30, opoldne 11-17, večer 15:30-22).
+          Od 8. oktobra 2026 Alex ne dela več. Kjer so zvečer tri osebe, gre ena študentka opoldne, izmenično.
         </span>
       </div>
       )}
@@ -481,10 +484,10 @@ export default function BarTab({
                       <td key={p} className="py-1.5 px-2">
                         {leave ? (
                           <span
-                            className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-0.5 text-xs ${t.leaveBadge}`}
+                            className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-0.5 text-xs ${leave.type === 'sick' ? t.sickBadge : t.leaveBadge}`}
                             title={LEAVE_TYPES[leave.type as LeaveType]?.sl}
                           >
-                            <span className="font-semibold">DOPUST</span>
+                            <span className="font-semibold">{scheduleLeaveLabel(leave.type)}</span>
                             <span className="text-[10px] opacity-70">{SHIFT_LABELS[shift]}</span>
                           </span>
                         ) : (
@@ -552,16 +555,17 @@ export default function BarTab({
                     <span className={readOnly ? 'text-[#2b2622]/30' : 'text-white/25'}>—</span>
                   ) : (
                     groups[shift].map((p) => {
-                      const onLeave = !!leaveByStaff[p]?.[dayNum]
+                      const leaveInfo = leaveByStaff[p]?.[dayNum]
+                      const onLeave = !!leaveInfo
                       return (
                         <span
                           key={p}
                           className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${
-                            onLeave ? t.leaveBadge : shiftClasses(shift, pill, t.offText)
+                            onLeave ? (leaveInfo?.type === 'sick' ? t.sickBadge : t.leaveBadge) : shiftClasses(shift, pill, t.offText)
                           }`}
-                          title={onLeave ? 'Na dopustu' : undefined}
+                          title={onLeave ? (leaveInfo?.type === 'sick' ? 'Na bolniški' : 'Na dopustu') : undefined}
                         >
-                          {displayName(p)}{onLeave && <span className="opacity-60">(dopust)</span>}
+                          {displayName(p)}{onLeave && <span className="opacity-60">{scheduleLeaveShort(leaveInfo?.type)}</span>}
                         </span>
                       )
                     })
@@ -644,8 +648,8 @@ export default function BarTab({
                     const leave = leaveByStaff[p]?.[dayNum]
                     if (leave) {
                       return (
-                        <td key={p} className="bc-cell bc-leave">
-                          DOPUST
+                        <td key={p} className={`bc-cell ${leave.type === 'sick' ? 'bc-sick' : 'bc-leave'}`}>
+                          {scheduleLeaveLabel(leave.type)}
                           <small>{SHIFT_LABELS[shift]}</small>
                         </td>
                       )

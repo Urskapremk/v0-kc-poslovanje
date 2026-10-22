@@ -23,14 +23,22 @@ const WIP_CAT = "sredstvo_v_izdelavi"
 const RENT_CAT = "najemnina"
 const IZLET_CAT = "izlet"
 const STIPEND_CAT = "stipendija"
+const STUDENT_FOOD_CAT = "hrana_studenti"
+const ACCOUNTING_CAT = "racunovodstvo"
+const PREVOZNIKI_CAT = "prevozniki"
+const STUDENT_FOOD_NAME = "Hrana za študente"
+const PREVOZNIKI_NAME = "Prevozniki"
 const RENT_NAME = "Najemnina hiša"
-type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT | typeof IZLET_CAT | typeof STIPEND_CAT
+type NabavaCategory = StrosekCategory | typeof ASSET_CAT | typeof LOAN_CAT | typeof WIP_CAT | typeof RENT_CAT | typeof IZLET_CAT | typeof STIPEND_CAT | typeof STUDENT_FOOD_CAT | typeof ACCOUNTING_CAT | typeof PREVOZNIKI_CAT
 const ASSET_COLOR = "#c9a86a"
 const LOAN_COLOR = "#3f6b7d"
 const WIP_COLOR = "#a0662f"
 const RENT_COLOR = "#8a4f72"
 const IZLET_COLOR = "#c59b5b"
 const STIPEND_COLOR = "#6d5a8a"
+const STUDENT_FOOD_COLOR = "#c46a3a"
+const ACCOUNTING_COLOR = "#3d5c78"
+const PREVOZNIKI_COLOR = "#1d6b63"
 
 const CAT_COLORS: Record<StrosekCategory, string> = {
   bar: "#3f6b7d",
@@ -42,7 +50,7 @@ const CAT_COLORS: Record<StrosekCategory, string> = {
   ostalo: "#6b6b6b",
 }
 const catColor = (c: NabavaCategory) =>
-  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : c === IZLET_CAT ? IZLET_COLOR : c === STIPEND_CAT ? STIPEND_COLOR : CAT_COLORS[c]
+  c === ASSET_CAT ? ASSET_COLOR : c === LOAN_CAT ? LOAN_COLOR : c === WIP_CAT ? WIP_COLOR : c === RENT_CAT ? RENT_COLOR : c === IZLET_CAT ? IZLET_COLOR : c === STIPEND_CAT ? STIPEND_COLOR : c === STUDENT_FOOD_CAT ? STUDENT_FOOD_COLOR : c === ACCOUNTING_CAT ? ACCOUNTING_COLOR : c === PREVOZNIKI_CAT ? PREVOZNIKI_COLOR : CAT_COLORS[c]
 const catLabel = (c: NabavaCategory) =>
   c === ASSET_CAT
     ? "Osnovno sredstvo"
@@ -56,7 +64,13 @@ const catLabel = (c: NabavaCategory) =>
             ? "Izlet"
             : c === STIPEND_CAT
               ? "Štipendija"
-              : CATEGORY_LABELS[c]
+              : c === STUDENT_FOOD_CAT
+                ? STUDENT_FOOD_NAME
+                : c === ACCOUNTING_CAT
+                  ? "Računovodstvo"
+                  : c === PREVOZNIKI_CAT
+                    ? PREVOZNIKI_NAME
+                    : CATEGORY_LABELS[c]
 
 function RentButton({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
@@ -69,6 +83,90 @@ function RentButton({ active, onClick }: { active: boolean; onClick: () => void 
     >
       <Home className="h-3 w-3" /> Najemnina
     </button>
+  )
+}
+
+type PayPot = "tourism" | "sarl" | "orange"
+
+function PayPotButtons({ value, onChange }: { value: PayPot; onChange: (v: PayPot) => void }) {
+  const items: { id: PayPot; label: string }[] = [
+    { id: "tourism", label: "Blagajna Tourism" },
+    { id: "sarl", label: "Blagajna SARL" },
+    { id: "orange", label: "Orange Money" },
+  ]
+  return (
+    <div className="flex flex-wrap gap-2">
+      {items.map((c) => {
+        const active = value === c.id
+        const orange = c.id === "orange"
+        return (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => onChange(c.id)}
+            className={`min-w-[30%] flex-1 rounded-lg px-2 py-1.5 text-[10px] font-medium border transition-colors ${
+              active
+                ? orange
+                  ? "bg-[#c4741f]/15 text-[#c4741f] border-[#c4741f]/40"
+                  : "bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40"
+                : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15"
+            }`}
+          >
+            {c.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function potWhere(pot: PayPot) {
+  return pot === "orange" ? "Orange Money" : `blagajne ${pot === "sarl" ? "SARL" : "Tourism"}`
+}
+
+function AccountingChip({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg px-2 py-1 text-[10px] font-medium border transition-colors ${
+        active ? "" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10"
+      }`}
+      style={active ? { backgroundColor: `${ACCOUNTING_COLOR}22`, borderColor: `${ACCOUNTING_COLOR}66`, color: ACCOUNTING_COLOR } : undefined}
+    >
+      Računovodstvo
+    </button>
+  )
+}
+
+function AccountingNote() {
+  return (
+    <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${ACCOUNTING_COLOR}55`, backgroundColor: `${ACCOUNTING_COLOR}10`, color: ACCOUNTING_COLOR }}>
+      Knjiži se na strošek „Računovodstvo“ — ločeno od oddelkov. Denar gre iz izbrane blagajne ali iz Orange Money.
+    </p>
+  )
+}
+
+function PrevoznikiChip({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg px-2 py-1 text-[10px] font-medium border transition-colors ${
+        active ? "" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15 hover:bg-[#0f2e3a]/10"
+      }`}
+      style={active ? { backgroundColor: `${PREVOZNIKI_COLOR}22`, borderColor: `${PREVOZNIKI_COLOR}66`, color: PREVOZNIKI_COLOR } : undefined}
+    >
+      Prevozniki
+    </button>
+  )
+}
+
+function PrevoznikiNote() {
+  return (
+    <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${PREVOZNIKI_COLOR}55`, backgroundColor: `${PREVOZNIKI_COLOR}10`, color: PREVOZNIKI_COLOR }}>
+      Knjiži se na strošek „Prevozniki“ — ločeno od oddelkov. Denar gre iz izbrane blagajne ali iz Orange Money.
+    </p>
   )
 }
 
@@ -213,7 +311,7 @@ export function NabavaPurchasesSection({
   const [name, setName] = useState("")
   const [amount, setAmount] = useState("")
   const [category, setCategory] = useState<NabavaCategory>("kuhinja")
-  const [company, setCompany] = useState<"tourism" | "sarl">("tourism")
+  const [pot, setPot] = useState<PayPot>("tourism")
   const [date, setDate] = useState(today)
   const [rate, setRate] = useState("")
   const [saving, setSaving] = useState(false)
@@ -222,7 +320,7 @@ export function NabavaPurchasesSection({
   const [eName, setEName] = useState("")
   const [eAmount, setEAmount] = useState("")
   const [eCategory, setECategory] = useState<NabavaCategory>("kuhinja")
-  const [eCompany, setECompany] = useState<"tourism" | "sarl">("tourism")
+  const [ePot, setEPot] = useState<PayPot>("tourism")
   const [eDate, setEDate] = useState(today)
   const [eRate, setERate] = useState("")
 
@@ -233,7 +331,7 @@ export function NabavaPurchasesSection({
     setName("")
     setAmount("")
     setCategory("kuhinja")
-    setCompany("tourism")
+    setPot("tourism")
     setDate(today)
     setRate("")
     setGuestId("")
@@ -252,34 +350,42 @@ export function NabavaPurchasesSection({
     const amt = parseAmt(amount)
     const isLoan = category === LOAN_CAT
     const isRent = category === RENT_CAT
-    if ((!isLoan && !isRent && !name.trim()) || amt <= 0) return
+    const isAccounting = category === ACCOUNTING_CAT
+    const isCarriers = category === PREVOZNIKI_CAT
+    if ((!isLoan && !isRent && !isAccounting && !isCarriers && !name.trim()) || amt <= 0) return
     const rt = parseRate(rate)
     if (category === ASSET_CAT && rt <= 0) return
     if (isLoan && !guestId) return
     const lr = parseRate(loanRate)
     if (isLoan && lr <= 0) return
     if (category === WIP_CAT && !assetId) return
+    const where = potWhere(pot)
     const msg = isLoan
-      ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} kot posojilo ${loanGuestLabel(guestId)} in dodam na njegov račun ${(amt / (lr || 1)).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € (tečaj ${lr})?`
+      ? `Odštejem ${ar(amt)} iz ${where} kot posojilo ${loanGuestLabel(guestId)} in dodam na njegov račun ${(amt / (lr || 1)).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} € (tečaj ${lr})?`
       : category === WIP_CAT
-        ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} in dodam strošek na pogodbo „${wipLabel(assetId)}“?`
+        ? `Odštejem ${ar(amt)} iz ${where} in dodam strošek na pogodbo „${wipLabel(assetId)}“?`
         : isRent
-          ? `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"} in poknjižim na strošek „${RENT_NAME}“?`
-          : `Odštejem ${ar(amt)} iz blagajne ${company === "sarl" ? "SARL" : "Tourism"}?`
+          ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „${RENT_NAME}“?`
+          : isAccounting
+            ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „Računovodstvo“?`
+            : isCarriers
+              ? `Odštejem ${ar(amt)} iz ${where} in poknjižim na strošek „Prevozniki“?`
+              : `Odštejem ${ar(amt)} iz ${where}?`
     if (!confirm(msg)) return
     setSaving(true)
     try {
       await addNabavaPurchase({
         tripId,
-        name: name.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : ""),
+        name: name.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : isCarriers ? PREVOZNIKI_NAME : ""),
         category,
         amountAr: amt,
-        company,
+        company: pot === "sarl" ? "sarl" : "tourism",
         date,
         annualRatePct: rt,
         reservationId: isLoan ? guestId : undefined,
         loanRate: isLoan ? lr : undefined,
         assetId: category === WIP_CAT ? assetId : undefined,
+        payMethod: pot === "orange" ? "orange" : "cash",
       })
       resetAdd()
       await Promise.all([mutate(), mutateWip()])
@@ -293,7 +399,7 @@ export function NabavaPurchasesSection({
     setEName(p.name)
     setEAmount(String(p.amountAr || ""))
     setECategory(p.category)
-    setECompany(p.company === "sarl" ? "sarl" : "tourism")
+    setEPot(p.payMethod === "orange" ? "orange" : p.company === "sarl" ? "sarl" : "tourism")
     setEDate((p.date || today).slice(0, 10))
     setERate(p.annualRatePct ? String(p.annualRatePct) : "")
     setEGuestId(p.reservationId || "")
@@ -306,7 +412,9 @@ export function NabavaPurchasesSection({
     const amt = parseAmt(eAmount)
     const isLoan = eCategory === LOAN_CAT
     const isRent = eCategory === RENT_CAT
-    if ((!isLoan && !isRent && !eName.trim()) || amt <= 0) return
+    const isAccounting = eCategory === ACCOUNTING_CAT
+    const isCarriers = eCategory === PREVOZNIKI_CAT
+    if ((!isLoan && !isRent && !isAccounting && !isCarriers && !eName.trim()) || amt <= 0) return
     const rt = parseRate(eRate)
     if (eCategory === ASSET_CAT && rt <= 0) return
     if (isLoan && !eGuestId) return
@@ -317,15 +425,16 @@ export function NabavaPurchasesSection({
     try {
       await updateNabavaPurchase({
         id: editId,
-        name: eName.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : ""),
+        name: eName.trim() || (isLoan ? "Posojilo gotovine" : isRent ? RENT_NAME : isAccounting ? "Računovodstvo" : isCarriers ? PREVOZNIKI_NAME : ""),
         category: eCategory,
         amountAr: amt,
-        company: eCompany,
+        company: ePot === "sarl" ? "sarl" : "tourism",
         date: eDate,
         annualRatePct: rt,
         reservationId: isLoan ? eGuestId : undefined,
         loanRate: isLoan ? lr : undefined,
         assetId: eCategory === WIP_CAT ? eAssetId : undefined,
+        payMethod: ePot === "orange" ? "orange" : "cash",
       })
       setEditId(null)
       await Promise.all([mutate(), mutateWip()])
@@ -334,9 +443,10 @@ export function NabavaPurchasesSection({
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Izbrišem nakup? Odliv iz blagajne se bo razveljavil.")) return
-    await deleteNabavaPurchase(id)
+  const handleDelete = async (p: (typeof purchases)[number]) => {
+    const where = p.payMethod === "orange" ? "Orange Money" : "blagajne"
+    if (!confirm(`Izbrišem nakup? Odliv iz ${where} se bo razveljavil.`)) return
+    await deleteNabavaPurchase(p.id)
     await Promise.all([mutate(), mutateWip()])
   }
 
@@ -404,11 +514,42 @@ export function NabavaPurchasesSection({
                   >
                     Štipendija
                   </button>
+                  <button
+                    onClick={() => {
+                      setECategory(STUDENT_FOOD_CAT)
+                      if (!eName.trim()) setEName(STUDENT_FOOD_NAME)
+                    }}
+                    className={catBtnClass(eCategory === STUDENT_FOOD_CAT)}
+                    style={eCategory === STUDENT_FOOD_CAT ? { backgroundColor: `${STUDENT_FOOD_COLOR}22`, borderColor: `${STUDENT_FOOD_COLOR}66`, color: STUDENT_FOOD_COLOR } : undefined}
+                  >
+                    Hrana za študente
+                  </button>
+                  <AccountingChip
+                    active={eCategory === ACCOUNTING_CAT}
+                    onClick={() => {
+                      setECategory(ACCOUNTING_CAT)
+                      if (!eName.trim()) setEName("Računovodstvo")
+                    }}
+                  />
+                  <PrevoznikiChip
+                    active={eCategory === PREVOZNIKI_CAT}
+                    onClick={() => {
+                      setECategory(PREVOZNIKI_CAT)
+                      if (!eName.trim()) setEName(PREVOZNIKI_NAME)
+                    }}
+                  />
                 </div>
                 {eCategory === RENT_CAT && <RentNote />}
+                {eCategory === ACCOUNTING_CAT && <AccountingNote />}
+                {eCategory === PREVOZNIKI_CAT && <PrevoznikiNote />}
                 {eCategory === STIPEND_CAT && (
                   <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
                     Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
+                  </p>
+                )}
+                {eCategory === STUDENT_FOOD_CAT && (
+                  <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STUDENT_FOOD_COLOR}55`, backgroundColor: `${STUDENT_FOOD_COLOR}10`, color: STUDENT_FOOD_COLOR }}>
+                    Knjiži se na strošek „Hrana za študente“ — ločeno od kuhinje in ostalih oddelkov.
                   </p>
                 )}
                 {eCategory === WIP_CAT && <WipAssetPicker assets={wipAssets} value={eAssetId} onChange={setEAssetId} />}
@@ -454,19 +595,7 @@ export function NabavaPurchasesSection({
                     )}
                   </div>
                 )}
-                <div className="flex gap-2">
-                  {(["tourism", "sarl"] as const).map((c) => (
-                    <button
-                      key={c}
-                      onClick={() => setECompany(c)}
-                      className={`flex-1 rounded-lg px-2 py-1.5 text-[10px] font-medium border transition-colors ${
-                        eCompany === c ? "bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15"
-                      }`}
-                    >
-                      {c === "tourism" ? "Tourism" : "SARL"}
-                    </button>
-                  ))}
-                </div>
+                <PayPotButtons value={ePot} onChange={setEPot} />
                 <input
                   type="date"
                   value={eDate}
@@ -490,7 +619,7 @@ export function NabavaPurchasesSection({
                 </div>
               </div>
             ) : (
-              <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg border border-[#0f2e3a]/10 bg-white/50 px-2.5 py-1.5">
+              <div key={p.id} className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${p.autoMassage ? "border-[#7a4ea3]/55 bg-[#f6f0fa]" : "border-[#0f2e3a]/10 bg-white/50"}`}>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="truncate text-[11px] font-semibold text-[#0f2e3a]">{p.name}</span>
@@ -500,6 +629,11 @@ export function NabavaPurchasesSection({
                     >
                       {catLabel(p.category)}
                     </span>
+                    {p.autoMassage && (
+                      <span className="shrink-0 rounded-full bg-[#7a4ea3]/15 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#7a4ea3]">
+                        Samodejno
+                      </span>
+                    )}
                   </div>
                   {p.category === LOAN_CAT && (
                     <p className="flex items-center gap-1 text-[10px] font-medium" style={{ color: LOAN_COLOR }}>
@@ -516,7 +650,7 @@ export function NabavaPurchasesSection({
                     </p>
                   )}
                   <p className="text-[10px] text-[#2b2622]/55">
-                    {ar(p.amountAr)} · Gotovina ({p.company === "sarl" ? "SARL" : "Tourism"})
+                    {ar(p.amountAr)} · {p.payMethod === "orange" ? <span className="font-medium text-[#c4741f]">Orange Money</span> : <>Gotovina ({p.company === "sarl" ? "SARL" : "Tourism"})</>}
                     {p.date ? ` · ${new Date(p.date + "T00:00:00").toLocaleDateString("sl-SI", { day: "numeric", month: "short" })}` : ""}
                   </p>
                 </div>
@@ -532,7 +666,7 @@ export function NabavaPurchasesSection({
                     <Pencil className="h-3.5 w-3.5" />
                   </button>
                   <button
-                    onClick={() => handleDelete(p.id)}
+                    onClick={() => handleDelete(p)}
                     className="flex h-7 w-7 items-center justify-center rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 text-[#2b2622]/60 transition-colors hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40"
                     aria-label="Izbriši nakup"
                   >
@@ -604,11 +738,42 @@ export function NabavaPurchasesSection({
             >
               Štipendija
             </button>
+            <button
+              onClick={() => {
+                setCategory(STUDENT_FOOD_CAT)
+                if (!name.trim()) setName(STUDENT_FOOD_NAME)
+              }}
+              className={catBtnClass(category === STUDENT_FOOD_CAT)}
+              style={category === STUDENT_FOOD_CAT ? { backgroundColor: `${STUDENT_FOOD_COLOR}22`, borderColor: `${STUDENT_FOOD_COLOR}66`, color: STUDENT_FOOD_COLOR } : undefined}
+            >
+              Hrana za študente
+            </button>
+            <AccountingChip
+              active={category === ACCOUNTING_CAT}
+              onClick={() => {
+                setCategory(ACCOUNTING_CAT)
+                if (!name.trim()) setName("Računovodstvo")
+              }}
+            />
+            <PrevoznikiChip
+              active={category === PREVOZNIKI_CAT}
+              onClick={() => {
+                setCategory(PREVOZNIKI_CAT)
+                if (!name.trim()) setName(PREVOZNIKI_NAME)
+              }}
+            />
           </div>
           {category === RENT_CAT && <RentNote />}
+          {category === ACCOUNTING_CAT && <AccountingNote />}
+          {category === PREVOZNIKI_CAT && <PrevoznikiNote />}
           {category === STIPEND_CAT && (
             <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STIPEND_COLOR}55`, backgroundColor: `${STIPEND_COLOR}10`, color: STIPEND_COLOR }}>
               Knjiži se na strošek „Štipendija“ — ločeno od oddelkov, znižuje skupni dobiček.
+            </p>
+          )}
+          {category === STUDENT_FOOD_CAT && (
+            <p className="rounded-lg border px-2 py-1.5 text-[9px]" style={{ borderColor: `${STUDENT_FOOD_COLOR}55`, backgroundColor: `${STUDENT_FOOD_COLOR}10`, color: STUDENT_FOOD_COLOR }}>
+              Knjiži se na strošek „Hrana za študente“ — ločeno od kuhinje in ostalih oddelkov.
             </p>
           )}
           {category === WIP_CAT && <WipAssetPicker assets={wipAssets} value={assetId} onChange={setAssetId} />}
@@ -646,19 +811,7 @@ export function NabavaPurchasesSection({
               <p className="text-[9px] text-[#2b2622]/45">Ne bremeni oddelka takoj — knjiži se kot amortizacija čez dobo.</p>
             </div>
           )}
-          <div className="flex gap-2">
-            {(["tourism", "sarl"] as const).map((c) => (
-              <button
-                key={c}
-                onClick={() => setCompany(c)}
-                className={`flex-1 rounded-lg px-2 py-1.5 text-[10px] font-medium border transition-colors ${
-                  company === c ? "bg-[#4f7a54]/15 text-[#4f7a54] border-[#4f7a54]/40" : "bg-[#0f2e3a]/5 text-[#2b2622]/60 border-[#0f2e3a]/15"
-                }`}
-              >
-                Blagajna {c === "tourism" ? "Tourism" : "SARL"}
-              </button>
-            ))}
-          </div>
+          <PayPotButtons value={pot} onChange={setPot} />
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-[#2b2622]/55">Datum:</span>
             <input
@@ -673,14 +826,14 @@ export function NabavaPurchasesSection({
               disabled={
                 saving ||
                 parseAmt(amount) <= 0 ||
-                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : category === RENT_CAT ? false : !name.trim()) ||
+                (category === LOAN_CAT ? !guestId || parseRate(loanRate) <= 0 : category === RENT_CAT || category === ACCOUNTING_CAT || category === PREVOZNIKI_CAT ? false : !name.trim()) ||
                 (category === WIP_CAT && !assetId)
               }
               onClick={handleAdd}
               className="flex-1 rounded-lg px-3 py-2 text-[11px] font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               style={{ backgroundColor: `${ACCENT}22`, border: `1px solid ${ACCENT}66`, color: ACCENT }}
             >
-              {saving ? "Beležim…" : "Dodaj nakup (odštej iz blagajne)"}
+              {saving ? "Beležim…" : pot === "orange" ? "Dodaj nakup (odštej iz Orange Money)" : "Dodaj nakup (odštej iz blagajne)"}
             </button>
             <button
               onClick={resetAdd}

@@ -19,7 +19,7 @@ import {
 } from '@/lib/kitchen'
 import { getLeaveRequests } from '@/app/actions/leave'
 import { getAllStaffMembers } from '@/app/actions/statistics'
-import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
+import { leaveDaysForStaff, LEAVE_TYPES, scheduleLeaveLabel, scheduleLeaveShort, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
@@ -145,7 +145,9 @@ export default function KuhinjaTab({
     for (const p of roster) {
       const entries = schedule.map((day, i) => {
         const shift = employedOn(endByName[p], day.date) ? ((day.assignments[p] || 'OFF') as KitchenShift) : null
-        return { day: i + 1, hours: shift ? (SHIFT_HOURS[shift] ?? 0) : 0, onLeave: !!shift && shift !== 'OFF' && !!leaveByStaff[p]?.[i + 1] }
+        const info = leaveByStaff[p]?.[i + 1]
+        const sick = info?.type === 'sick'
+        return { day: i + 1, hours: shift ? (SHIFT_HOURS[shift] ?? 0) : 0, onLeave: sick || (!!shift && shift !== 'OFF' && !!info), leaveType: info?.type }
       })
       map[p] = summarizeMonthHours(year, month, entries)
     }
@@ -238,6 +240,8 @@ export default function KuhinjaTab({
           .kitchen-color-print .kc-off { color: #aaa !important; }
           .kitchen-color-print .kc-leave { background: #f0e0da !important; color: #975b45 !important; }
           .kitchen-color-print .kc-leave small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
+          .kitchen-color-print .kc-sick { background: #ebe4f4 !important; color: #5c3d78 !important; }
+          .kitchen-color-print .kc-sick small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
           .kitchen-color-print .g-total td { font-weight: 700; background: #f8f5ef !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .kitchen-color-print .doc-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; margin-top: 10px; }
           .kitchen-color-print .doc-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
@@ -508,15 +512,16 @@ export default function KuhinjaTab({
                       return <td key={p} className="py-1.5 px-2 text-white/25">—</td>
                     }
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
-                    const leave = shift !== 'OFF' ? leaveByStaff[p]?.[dayNum] : undefined
+                    const rawLeave = leaveByStaff[p]?.[dayNum]
+                    const leave = rawLeave && (rawLeave.type === 'sick' || shift !== 'OFF') ? rawLeave : undefined
                     return (
                       <td key={p} className="py-1.5 px-2">
                         {leave ? (
                           <span
-                            className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-0.5 text-xs ${t.leaveBadge}`}
+                            className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-0.5 text-xs ${leave.type === 'sick' ? t.sickBadge : t.leaveBadge}`}
                             title={LEAVE_TYPES[leave.type as LeaveType]?.sl}
                           >
-                            <span className="font-semibold">DOPUST</span>
+                            <span className="font-semibold">{scheduleLeaveLabel(leave.type)}</span>
                           </span>
                         ) : (
                           <span className={`inline-block rounded-md px-2 py-0.5 text-xs ${shiftClasses(shift, pill, t.offText)}`}>
@@ -543,7 +548,7 @@ export default function KuhinjaTab({
               {usedShifts.map((s) => (
                 <th key={s} className="text-left py-2 px-2 font-semibold"><span className="inline-flex items-center gap-1.5"><span className={`inline-block h-3 w-3 rounded-sm border ${swatch[SHIFT_SWATCH_KEY[s]]}`} /> {SHIFT_LABELS[s]}</span></th>
               ))}
-              <th className="text-left py-2 px-2 font-semibold"><span className={`inline-flex items-center gap-1.5 ${readOnly ? 'text-[#2b2622]/45' : 'text-white/40'}`}>Prosto / dopust</span></th>
+              <th className="text-left py-2 px-2 font-semibold"><span className={`inline-flex items-center gap-1.5 ${readOnly ? 'text-[#2b2622]/45' : 'text-white/40'}`}>Prosto / dopust / bolniška</span></th>
             </tr>
           </thead>
           <tbody>
@@ -558,7 +563,8 @@ export default function KuhinjaTab({
               for (const p of roster) {
                 if (!employedOn(endByName[p], day.date)) continue
                 const shift = (day.assignments[p] || 'OFF') as KitchenShift
-                const onLeave = shift !== 'OFF' && !!leaveByStaff[p]?.[dayNum]
+                const marked = leaveByStaff[p]?.[dayNum]
+                const onLeave = (marked?.type === 'sick') || (shift !== 'OFF' && !!marked)
                 groups[onLeave ? 'OFF' : shift].push(p)
               }
               const renderCell = (shift: KitchenShift) => (
@@ -568,16 +574,17 @@ export default function KuhinjaTab({
                   ) : (
                     groups[shift].map((p) => {
                       const ownShift = (day.assignments[p] || 'OFF') as KitchenShift
-                      const onLeave = ownShift !== 'OFF' && !!leaveByStaff[p]?.[dayNum]
+                      const leaveInfo = leaveByStaff[p]?.[dayNum]
+                      const onLeave = (leaveInfo?.type === 'sick') || (ownShift !== 'OFF' && !!leaveInfo)
                       return (
                         <span
                           key={p}
                           className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs ${
-                            onLeave ? t.leaveBadge : shiftClasses(shift, pill, t.offText)
+                            onLeave ? (leaveInfo?.type === 'sick' ? t.sickBadge : t.leaveBadge) : shiftClasses(shift, pill, t.offText)
                           }`}
-                          title={onLeave ? 'Na dopustu' : undefined}
+                          title={onLeave ? (leaveInfo?.type === 'sick' ? 'Na bolniški' : 'Na dopustu') : undefined}
                         >
-                          {displayName(p)}{onLeave && <span className="opacity-60">(dopust)</span>}
+                          {displayName(p)}{onLeave && <span className="opacity-60">{scheduleLeaveShort(leaveInfo?.type)}</span>}
                         </span>
                       )
                     })
@@ -657,11 +664,12 @@ export default function KuhinjaTab({
                   {visibleStaff.map((p) => {
                     if (!employedOn(endByName[p], day.date)) return <td key={p} className="kc-cell" />
                     const shift = (day.assignments[p] || 'OFF') as KitchenShift
-                    const leave = shift !== 'OFF' ? leaveByStaff[p]?.[dayNum] : undefined
+                    const rawLeave = leaveByStaff[p]?.[dayNum]
+                    const leave = rawLeave && (rawLeave.type === 'sick' || shift !== 'OFF') ? rawLeave : undefined
                     if (leave) {
                       return (
-                        <td key={p} className="kc-cell kc-leave">
-                          DOPUST
+                        <td key={p} className={`kc-cell ${leave.type === 'sick' ? 'kc-sick' : 'kc-leave'}`}>
+                          {scheduleLeaveLabel(leave.type)}
                         </td>
                       )
                     }

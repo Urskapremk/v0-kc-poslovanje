@@ -3,14 +3,86 @@
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
-import { daysBetween } from '@/lib/leave'
+import {
+  daysBetween,
+  exceptionalLeaveOverQuotaMessage,
+  exceptionalLeaveRemaining,
+  type LeaveRequest,
+} from '@/lib/leave'
 
-async function ensureAdvancePayColumn() {
+async function staffLeaveRequestsForYear(staffId: string, year: number): Promise<LeaveRequest[]> {
+  const result = await db.execute(
+    sql`SELECT id, "staffId", "staffName", department, company, "leaveType",
+               "startDate", "endDate", days, reason, status, "signedAt", "createdAt"
+        FROM leave_requests
+        WHERE "staffId" = ${staffId}
+          AND EXTRACT(YEAR FROM "startDate") = ${year}`,
+  )
+  return result.rows.map(r => ({
+    id: r.id as string,
+    staffId: r.staffId as string,
+    staffName: r.staffName as string,
+    department: r.department as string,
+    company: r.company as string,
+    leaveType: r.leaveType as string,
+    startDate: r.startDate as string,
+    endDate: r.endDate as string,
+    days: Number(r.days) || 0,
+    reason: (r.reason as string | null) ?? '',
+    status: r.status as string,
+    signedAt: r.signedAt as string | null,
+    createdAt: r.createdAt as string,
+  }))
+}
+
+async function assertExceptionalLeaveQuota(args: {
+  staffId: string
+  leaveType: string
+  startDate: string
+  days: number
+  excludeId?: string | null
+}) {
+  if (args.leaveType !== 'exceptional') return
+  const year = new Date(args.startDate + 'T00:00:00').getFullYear()
+  const requests = await staffLeaveRequestsForYear(args.staffId, year)
+  const remaining = exceptionalLeaveRemaining(requests, year, args.excludeId ?? null)
+  if (args.days > remaining) {
+    throw new Error(exceptionalLeaveOverQuotaMessage(remaining, year))
+  }
+}
+
+async function ensureLeaveColumns() {
   await db.execute(sql`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS "advancePayAr" integer`)
+  await db.execute(sql`ALTER TABLE leave_requests ADD COLUMN IF NOT EXISTS "doctorCertificatePath" text`)
+}
+
+export async function getAllLeaveRequests() {
+  await ensureLeaveColumns()
+  const result = await db.execute(
+    sql`SELECT * FROM leave_requests WHERE status != 'rejected' ORDER BY "startDate" DESC`,
+  )
+  return result.rows.map(r => ({
+    id: r.id as string,
+    staffId: r.staffId as string,
+    staffName: r.staffName as string,
+    department: r.department as string,
+    company: r.company as string,
+    leaveType: r.leaveType as string,
+    startDate: r.startDate as string,
+    endDate: r.endDate as string,
+    days: r.days as number,
+    reason: (r.reason as string | null) ?? '',
+    status: r.status as string,
+    signedAt: r.signedAt as string | null,
+    signedDocumentPath: (r.signedDocumentPath as string | null) ?? null,
+    doctorCertificatePath: (r.doctorCertificatePath as string | null) ?? null,
+    advancePayAr: r.advancePayAr == null ? null : Number(r.advancePayAr),
+    createdAt: r.createdAt as string,
+  }))
 }
 
 export async function getLeaveRequests(department: string) {
-  await ensureAdvancePayColumn()
+  await ensureLeaveColumns()
   const result = await db.execute(
     sql`SELECT * FROM leave_requests WHERE department = ${department} ORDER BY "startDate" DESC`
   )
@@ -28,13 +100,14 @@ export async function getLeaveRequests(department: string) {
     status: r.status as string,
     signedAt: r.signedAt as string | null,
     signedDocumentPath: (r.signedDocumentPath as string | null) ?? null,
+    doctorCertificatePath: (r.doctorCertificatePath as string | null) ?? null,
     advancePayAr: r.advancePayAr == null ? null : Number(r.advancePayAr),
     createdAt: r.createdAt as string,
   }))
 }
 
 export async function setLeaveAdvancePay(id: string, amountAr: number) {
-  await ensureAdvancePayColumn()
+  await ensureLeaveColumns()
   const amount = Math.max(0, Math.round(amountAr || 0))
   await db.execute(
     sql`UPDATE leave_requests SET "advancePayAr" = ${amount > 0 ? amount : null} WHERE id = ${id}`
@@ -56,6 +129,12 @@ export async function createLeaveRequest(data: {
   const id = `leave-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const counted = daysBetween(data.startDate, data.endDate)
   const days = data.days && data.days > 0 ? Math.round(data.days * 2) / 2 : counted
+  await assertExceptionalLeaveQuota({
+    staffId: data.staffId,
+    leaveType: data.leaveType,
+    startDate: data.startDate,
+    days,
+  })
   await db.execute(
     sql`INSERT INTO leave_requests (id, "staffId", "staffName", department, company, "leaveType", "startDate", "endDate", days, reason)
         VALUES (${id}, ${data.staffId}, ${data.staffName}, ${data.department}, ${data.company}, ${data.leaveType}, ${data.startDate}, ${data.endDate}, ${days}, ${data.reason ?? ''})`
@@ -77,6 +156,13 @@ export async function updateLeaveRequest(id: string, data: {
 }) {
   const counted = daysBetween(data.startDate, data.endDate)
   const days = data.days > 0 ? Math.round(data.days * 2) / 2 : counted
+  await assertExceptionalLeaveQuota({
+    staffId: data.staffId,
+    leaveType: data.leaveType,
+    startDate: data.startDate,
+    days,
+    excludeId: id,
+  })
   await db.execute(
     sql`UPDATE leave_requests SET
       "staffId" = ${data.staffId},
@@ -103,6 +189,15 @@ export async function setLeaveSigned(id: string) {
 export async function setLeaveSignedDocument(id: string, pathname: string) {
   await db.execute(
     sql`UPDATE leave_requests SET "signedDocumentPath" = ${pathname}, "signedAt" = COALESCE("signedAt", now()) WHERE id = ${id}`
+  )
+  revalidatePath('/statistika')
+}
+
+// Potrdilo zdravnika. Ne nastavi podpisa in ne šteje kot redni dopust.
+export async function setLeaveDoctorCertificate(id: string, pathname: string) {
+  await ensureLeaveColumns()
+  await db.execute(
+    sql`UPDATE leave_requests SET "doctorCertificatePath" = ${pathname} WHERE id = ${id}`
   )
   revalidatePath('/statistika')
 }

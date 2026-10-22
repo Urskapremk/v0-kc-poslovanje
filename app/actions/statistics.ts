@@ -1,7 +1,7 @@
 'use server'
 
 import { db } from '@/lib/db'
-import { boardPax } from '@/lib/meal-plan'
+import { boardPax, isCheckInPensionLump, isMealPlanPaid, paidPensionCoversMeal } from '@/lib/meal-plan'
 import { 
   reservations, 
   orderItems, 
@@ -24,8 +24,58 @@ import {
 import { eq, and, gte, lte, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
-import { getNabavaPurchasesForMonth } from './nabava'
+import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
+
+type KuhinjaRacunLine = {
+  id: string
+  date: string
+  name: string
+  amountEur: number
+  source: string
+}
+
+function isoDay(v: unknown): string {
+  if (!v) return ''
+  if (v instanceof Date) return v.toISOString().slice(0, 10)
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v))
+  return m ? m[1] : ''
+}
+
+// Posamezne postavke zaokroži na cent. Če se vsota centov razlikuje od zneska
+// na vrstici, cent premaknemo na postavko, ki je zaokrožitvi najbližje
+// (običajno gotovino iz ariaryjev), da arhivski račun ostane na svojem znesku.
+function roundKuhinjaLines(raw: KuhinjaRacunLine[], totalEur: number): KuhinjaRacunLine[] {
+  const sorted = [...raw].sort((a, b) =>
+    a.date.localeCompare(b.date) || a.name.localeCompare(b.name, 'sl') || a.id.localeCompare(b.id)
+  )
+  const exact = sorted.map((l) => l.amountEur * 100)
+  const cents = exact.map((c) => Math.round(c))
+  let drift = Math.round(totalEur * 100) - cents.reduce((sum, c) => sum + c, 0)
+  let steps = 0
+  while (drift !== 0 && sorted.length > 0 && steps < Math.abs(drift) + sorted.length) {
+    const step = drift > 0 ? 1 : -1
+    let best = 0
+    let bestScore = -Infinity
+    for (let i = 0; i < cents.length; i++) {
+      const improvement = Math.abs(cents[i] - exact[i]) - Math.abs(cents[i] + step - exact[i])
+      const score = improvement + (sorted[i].source === 'gotovina' ? 0.001 : 0)
+      if (score > bestScore) {
+        bestScore = score
+        best = i
+      }
+    }
+    cents[best] += step
+    drift -= step
+    steps++
+  }
+  return sorted.map((l, i) => ({ ...l, amountEur: cents[i] / 100 }))
+}
+
+async function ensureKompenzacijaColumns() {
+  await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS "contraExpenseId" text`)
+  await db.execute(sql`ALTER TABLE marketing_expenses ADD COLUMN IF NOT EXISTS "compensationPaymentId" text`)
+}
 
 // Get exchange rate from settings
 async function getExchangeRate(): Promise<number> {
@@ -50,6 +100,7 @@ export async function updateCostSetting(id: string, value: number) {
 // --- Marketing expenses / Stroški marketinga ---
 // Get marketing expenses for a month
 export async function getMarketingExpenses(year: number, month: number, category: string = 'marketing') {
+  await ensureKompenzacijaColumns()
   return await db.select().from(marketingExpenses)
     .where(and(
       eq(marketingExpenses.year, year),
@@ -61,6 +112,7 @@ export async function getMarketingExpenses(year: number, month: number, category
 
 // Get all marketing expenses for a whole year (for listing, grouped by month)
 export async function getMarketingExpensesYear(year: number, category: string = 'marketing') {
+  await ensureKompenzacijaColumns()
   return await db.select().from(marketingExpenses)
     .where(and(
       eq(marketingExpenses.year, year),
@@ -72,6 +124,7 @@ export async function getMarketingExpensesYear(year: number, category: string = 
 // Get all expenses (across all categories) paid via Hnatura d.o.o. (paymentMethod = 'in_kind')
 // for a whole year — used for the "Vračilo Hnatura d.o.o." tab (amount to be repaid).
 export async function getHnaturaExpensesYear(year: number) {
+  await ensureKompenzacijaColumns()
   return await db.select().from(marketingExpenses)
     .where(and(
       eq(marketingExpenses.year, year),
@@ -690,6 +743,7 @@ export async function getFixedAssetRegister(year: number, month: number): Promis
 
 // Add a marketing expense (date determines the booking month)
 export async function addMarketingExpense(date: string, description: string, amount: number, category: string = 'marketing', paymentMethod?: string) {
+  await ensureKompenzacijaColumns()
   const d = new Date(date)
   const year = d.getFullYear()
   const month = d.getMonth() + 1
@@ -702,6 +756,7 @@ export async function addMarketingExpense(date: string, description: string, amo
 
 // Update a marketing expense (date determines the booking month)
 export async function updateMarketingExpense(id: string, date: string, description: string, amount: number, paymentMethod?: string) {
+  await ensureKompenzacijaColumns()
   const d = new Date(date)
   const year = d.getFullYear()
   const month = d.getMonth() + 1
@@ -711,10 +766,25 @@ export async function updateMarketingExpense(id: string, date: string, descripti
   revalidatePath('/statistika')
 }
 
-// Delete a marketing expense
+// Delete a marketing expense. A reklama contra line linked to a Kompenzacija
+// payment removes that payment too. The pair never moves cash, the bank, or Orange Money.
 export async function deleteMarketingExpense(id: string) {
+  await ensureKompenzacijaColumns()
+  const [row] = await db
+    .select({ paymentId: marketingExpenses.compensationPaymentId })
+    .from(marketingExpenses)
+    .where(eq(marketingExpenses.id, id))
+  const paymentId = row?.paymentId || null
+  if (paymentId) {
+    await db.execute(sql`UPDATE payments SET "contraExpenseId" = NULL WHERE id = ${paymentId}`)
+  }
   await db.delete(marketingExpenses).where(eq(marketingExpenses.id, id))
+  if (paymentId) {
+    const { deletePayment } = await import('./komba')
+    await deletePayment(paymentId)
+  }
   revalidatePath('/statistika')
+  revalidatePath('/')
 }
 
 // Get staff salaries for a month
@@ -769,6 +839,7 @@ export async function deleteStaffSalary(id: string) {
 // Get statistics for a month
 export async function getMonthlyStatistics(year: number, month: number) {
   await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
+  await ensureKompenzacijaColumns()
   const startDate = new Date(year, month - 1, 1)
   const endDate = new Date(year, month, 0) // Last day of month
   
@@ -844,6 +915,10 @@ export async function getMonthlyStatistics(year: number, month: number) {
   })
   const mealPlanValueEur = (
     mealPlan: string | null | undefined,
+    // Only a prepaid pension ("Plačano") is food money already inside the stay rate.
+    // "Za plačilo" is invoiced as the meals the bar types, so carving the same
+    // 50/80 € out of the room would count that food twice against the invoice.
+    paymentStatus: string | null | undefined,
     pax: number,
     nights: number,
     capEur: number,
@@ -853,6 +928,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     // whole party here would book the same food twice.
     mealPlanPax?: number | null,
   ) => {
+    if (!isMealPlanPaid(paymentStatus)) return 0
     const perPaxNightAr = mealPlanPriceArByPlan[(mealPlan as string) || ''] || 0
     if (perPaxNightAr <= 0 || nights <= 0) return 0
     const covered = boardPax(pax > 0 ? pax : 1, mealPlanPax)
@@ -881,6 +957,62 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // checkout status (consistent with excursions/bar: revenue counts by actual date,
   // not by guest checkout). Includes guests who are still staying.
   const allReservationsForNights = await db.select().from(reservations)
+  const resById = new Map(allReservationsForNights.map(r => [r.id, r]))
+  const dnReservationId = new Map(monthDeliveryNotes.map(dn => [dn.id, dn.reservationId]))
+
+  // A bar meal the invoice does not charge, because a paid pension covers it,
+  // adds nothing to kitchen revenue. The stored euro amount on the note stays
+  // as the guest was charged (or not) — this is the kalkulacije view only.
+  const pensionCoversDeliveryItem = (i: {
+    deliveryNoteId: string
+    productId?: string | null
+    productName?: string | null
+    coveredByMealPlan?: boolean | null
+  }) => {
+    if (i.coveredByMealPlan) return true
+    const resId = dnReservationId.get(i.deliveryNoteId)
+    const r = resId ? resById.get(resId) : undefined
+    if (!r) return false
+    return paidPensionCoversMeal({
+      mealPlan: r.mealPlan,
+      mealPlanPaymentStatus: r.mealPlanPaymentStatus,
+      productId: i.productId,
+      productName: i.productName,
+    })
+  }
+  const deliveryFoodRevenueAr = (i: {
+    deliveryNoteId: string
+    totalAr?: number | null
+    productId?: string | null
+    productName?: string | null
+    coveredByMealPlan?: boolean | null
+    costCategory?: string | null
+  }) => {
+    if ((i.costCategory || '') !== 'prehrana') return Number(i.totalAr || 0)
+    if (pensionCoversDeliveryItem(i)) return 0
+    return Number(i.totalAr || 0)
+  }
+  // Check-in also writes one Prehrana lump for the whole prepaid stay, dated on
+  // arrival. The nightly split above is the same money, placed in the month of
+  // each night, so the lump must not be added again. A meal the invoice then
+  // marks included is not extra food revenue either.
+  const prehranaOrderRevenueAr = (o: {
+    reservationId?: string | null
+    name?: string | null
+    priceAr?: number | null
+  }) => {
+    const price = Number(o.priceAr || 0)
+    if (!price) return 0
+    const r = o.reservationId ? resById.get(o.reservationId) : undefined
+    if (!r) return price
+    if (isMealPlanPaid(r.mealPlanPaymentStatus) && isCheckInPensionLump(o.name)) return 0
+    if (paidPensionCoversMeal({
+      mealPlan: r.mealPlan,
+      mealPlanPaymentStatus: r.mealPlanPaymentStatus,
+      productName: o.name,
+    })) return 0
+    return price
+  }
   
   // Filter to reservations that have nights in this month
   const reservationsWithNightsInMonth = allReservationsForNights.filter(r => {
@@ -892,8 +1024,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
   })
   
   // Calculate accommodation revenue proportionally based on nights in this month.
-  // The board (meal plan) portion is prepaid inside totalAmount, so we split it out and
-  // attribute it to kitchen (mealPlanPrepaidRevenue) instead of accommodation.
+  // A prepaid board is inside totalAmount, so that nightly amount moves to the kitchen
+  // once. An unpaid board stays inside the room rate: the guest is invoiced for the
+  // meals themselves, and those are the kitchen food.
   let accommodationRevenue = 0
   let totalNightsInMonth = 0
   let mealPlanPrepaidRevenue = 0
@@ -915,7 +1048,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     // Proportional revenue for this month
     const pricePerNight = Number(r.totalAmount || 0) / totalNights
     const grossAccMonth = pricePerNight * nightsInMonth
-    const mealMonth = mealPlanValueEur(r.mealPlan, Number(r.pax || 1), nightsInMonth, grossAccMonth, r.mealPlanPax)
+    const mealMonth = mealPlanValueEur(r.mealPlan, r.mealPlanPaymentStatus, Number(r.pax || 1), nightsInMonth, grossAccMonth, r.mealPlanPax)
     accommodationRevenue += grossAccMonth - mealMonth
     mealPlanPrepaidRevenue += mealMonth
     totalNightsInMonth += nightsInMonth
@@ -1076,10 +1209,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   const excursionCost = excursionBoatCost + excursionBaseCost + excursionManualCost
   
-  // Meal Plan (Prehrana). Prepaid board split out of accommodation (mealPlanPrepaidRevenue) plus any
-  // explicit Prehrana order_items (these usually store priceAr=0 since board is prepaid).
+  // Predplačilo: the prepaid pension once (nightly, in the month of each night),
+  // plus Prehrana order items that are real invoiced meals. The check-in lump for
+  // the same prepaid nights is left out.
   const mealPlanItems = monthOrderItems.filter(o => o.category === 'Prehrana')
-  const mealPlanRevenue = mealPlanItems.reduce((sum, o) => sum + (o.priceAr || 0), 0) / rate + mealPlanPrepaidRevenue
+  const mealPlanRevenue = mealPlanItems.reduce((sum, o) => sum + prehranaOrderRevenueAr(o), 0) / rate + mealPlanPrepaidRevenue
   
   // Meal plan cost (use same percentage as bar_prehrana for food cost)
   // Will be calculated after costMap is created
@@ -1095,9 +1229,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
   
   const pijacaRevenue = pijacaDeliveryRevenue + pijacaOrderRevenue
   
-  // Prehrana from delivery_note_items (bar daily orders)
+  // Prehrana from delivery_note_items (bar daily orders).
+  // Meals a paid pension already covers contribute quantity only — revenue 0 —
+  // because the invoice does not charge them. Lunch on half board stays.
   const barPrehranaDeliveryItems = allDeliveryItems.filter(i => (i as { costCategory?: string }).costCategory === 'prehrana')
-  const barPrehranaDeliveryRevenue = barPrehranaDeliveryItems.reduce((sum, i) => sum + (i.totalAr || 0), 0) / rate
+  const barPrehranaDeliveryRevenue = barPrehranaDeliveryItems.reduce((sum, i) => sum + deliveryFoodRevenueAr(i), 0) / rate
   
   // Note: Prehrana from order_items is counted separately as mealPlanRevenue (prepaid meal plans)
   const barPrehranaRevenue = barPrehranaDeliveryRevenue
@@ -1114,6 +1250,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
   
   const wellnessRevenue = wellnessDeliveryRevenue + wellnessOrderRevenue
   const wellnessCount = wellnessDeliveryCount + wellnessOrderCount
+  // Od 7. 10. 2026 je strošek maserke prava gotovina v nabavi. Teh masaž ne štej
+  // še enkrat po oceni 13 € — ne na računu recepcije in ne na dobavnici bara.
+  // Prihodek od gosta ostane cel.
+  const autoMassageIds = new Set(await getAutoMassageOrderItemIds())
+  const formulaWellnessOrders = wellnessOrderItems.filter(o => !autoMassageIds.has(o.id))
+  const formulaWellnessDelivery = wellnessDeliveryItems.filter(i => !autoMassageIds.has(i.id))
   
   const ostaloItems = allDeliveryItems.filter(i => (i as { costCategory?: string }).costCategory === 'ostalo')
   const ostaloDeliveryRevenue = ostaloItems.reduce((sum, i) => sum + (i.totalAr || 0), 0) / rate
@@ -1144,8 +1286,10 @@ export async function getMonthlyStatistics(year: number, month: number) {
     ? (costMap.bar_prehrana.type === 'percentage' ? barPrehranaRevenue * costMap.bar_prehrana.value / 100 : costMap.bar_prehrana.value)
     : 0
   
+  const wellnessCountForCost = formulaWellnessDelivery.reduce((sum, i) => sum + (i.quantity || 0), 0) + formulaWellnessOrders.length
+  const wellnessRevenueForCost = formulaWellnessDelivery.reduce((sum, i) => sum + (i.totalAr || 0), 0) / rate + formulaWellnessOrders.reduce((sum, o) => sum + (o.priceAr || 0), 0) / rate
   const wellnessCost = costMap.wellness
-    ? (costMap.wellness.type === 'fixed' ? wellnessCount * costMap.wellness.value : wellnessRevenue * costMap.wellness.value / 100)
+    ? (costMap.wellness.type === 'fixed' ? wellnessCountForCost * costMap.wellness.value : wellnessRevenueForCost * costMap.wellness.value / 100)
     : 0
   
   // Ostalo cost: use exact per-product purchase cost (costAr) where the product defines one
@@ -1214,6 +1358,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const monthExpenses = await db.select().from(marketingExpenses)
     .where(and(eq(marketingExpenses.year, year), eq(marketingExpenses.month, month)))
   const marketingCost = monthExpenses.filter(e => (e.category || 'marketing') === 'marketing').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
+  // Reklama je lasten kontra strošek (kompenzacija), ne Ostalo in ne Marketing.
+  const reklamaCost = monthExpenses.filter(e => e.category === 'reklama').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
   const bookingCost = monthExpenses.filter(e => e.category === 'booking').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
   const optimaplusCost = monthExpenses.filter(e => e.category === 'optimaplus').reduce((sum, e) => sum + Number(e.amount), 0) // EUR
   const platformCommissionCost = bookingCost + optimaplusCost
@@ -1225,14 +1371,36 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Računi, dodani k sredstvu v izdelavi, niso tekoči strošek (gredo v nabavno vrednost sredstva).
   await ensureAssetSchema()
   const monthReceipts = await db.execute(
-    sql`SELECT categories FROM stroski_receipts WHERE year = ${year} AND month = ${month}
+    sql`SELECT id, date, description, categories, "cashLedgerId", "omLedgerId"
+        FROM stroski_receipts WHERE year = ${year} AND month = ${month}
         AND id NOT IN (SELECT "receiptId" FROM fixed_asset_costs WHERE "receiptId" IS NOT NULL)`
   )
   const receiptsByCategory: Record<string, number> = {}
+  // Isti odliv (gotovina ali Orange Money), ki je že račun v arhivu, se ne šteje še enkrat.
+  const archiveLedgerIds = new Set<string>()
+  const deptLines: Record<string, KuhinjaRacunLine[]> = {
+    kuhinja: [], bar: [], nocitve: [], wellness: [], ostalo: [], reprezentanca: [], vzdrzevanje: [],
+  }
+  const pushDeptLine = (category: string, line: KuhinjaRacunLine) => {
+    deptLines[category]?.push(line)
+  }
   for (const r of monthReceipts.rows) {
-    for (const c of parseCategories(r.categories)) {
+    const cashId = r.cashLedgerId ? String(r.cashLedgerId) : ''
+    const omId = r.omLedgerId ? String(r.omLedgerId) : ''
+    if (cashId) archiveLedgerIds.add(cashId)
+    if (omId) archiveLedgerIds.add(omId)
+    parseCategories(r.categories).forEach((c, idx) => {
       receiptsByCategory[c.category] = (receiptsByCategory[c.category] || 0) + c.amountEur
-    }
+      if (c.amountEur !== 0) {
+        pushDeptLine(c.category, {
+          id: `arhiv-${String(r.id)}-${idx}`,
+          date: r.date ? String(r.date) : '',
+          name: (r.description ? String(r.description) : '').trim() || 'Brez imena',
+          amountEur: c.amountEur,
+          source: 'arhiv',
+        })
+      }
+    })
   }
   // Gotovinski nakupi na Borutovih nabavnih poteh (kalamari, riba, pijača …): ista logika
   // razvrščanja kot arhiv računov — hrana bremeni kuhinjo, pijača bar itd. Zneski so v Ar → EUR.
@@ -1240,20 +1408,54 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Najemnina hiše (Borut plača gotovino v Nabavi Komba) = samostojen strošek, ločen od ostalih kategorij.
   let najemninaHisaAr = 0
   let stipendijaAr = 0
+  let hranaStudentiAr = 0
   let izletNabavaAr = 0
+  let racunovodstvoAr = 0
+  let prevoznikiAr = 0
+  const nabavaExtra: Record<string, KuhinjaRacunLine[]> = {
+    najemnina: [], racunovodstvo: [], prevozniki: [], stipendija: [], hrana_studenti: [], izlet: [],
+  }
+  const nabavaLine = (p: { id: string; date: string; name: string; amountAr: number; payMethod: string }): KuhinjaRacunLine => ({
+    id: `nabava-${p.id}`,
+    date: p.date || '',
+    name: (p.name || '').trim() || 'Brez imena',
+    amountEur: p.amountAr / rate,
+    source: p.payMethod === 'orange' ? 'Orange' : 'gotovina',
+  })
   for (const p of nabavaPurchases) {
   if (p.category === "najemnina") {
     najemninaHisaAr += p.amountAr
+    if (p.amountAr) nabavaExtra.najemnina.push(nabavaLine(p))
+    continue
+  }
+  // Računovodstvo (gotovina ali Orange Money z Nabave HV) je samostojen strošek.
+  if (p.category === "racunovodstvo") {
+    racunovodstvoAr += p.amountAr
+    if (p.amountAr) nabavaExtra.racunovodstvo.push(nabavaLine(p))
+    continue
+  }
+  // Prevozniki (gotovina ali Orange Money z nabave) so samostojen strošek, ne Ostalo.
+  if (p.category === "prevozniki") {
+    prevoznikiAr += p.amountAr
+    if (p.amountAr) nabavaExtra.prevozniki.push(nabavaLine(p))
     continue
   }
   // Štipendija (šolnina) je samostojen strošek, ne bremeni oddelkov.
   if (p.category === "stipendija") {
     stipendijaAr += p.amountAr
+    if (p.amountAr) nabavaExtra.stipendija.push(nabavaLine(p))
+    continue
+  }
+  // Hrana za študente je samostojen strošek, ne bremeni kuhinje.
+  if (p.category === "hrana_studenti") {
+    hranaStudentiAr += p.amountAr
+    if (p.amountAr) nabavaExtra.hrana_studenti.push(nabavaLine(p))
     continue
   }
   // Gotovinsko plačilo dobavitelju za izlet (npr. gosta na vrh Kombe) gre v strošek izletov.
   if (p.category === "izlet") {
     izletNabavaAr += p.amountAr
+    if (p.amountAr) nabavaExtra.izlet.push(nabavaLine(p))
     continue
   }
   // Osnovno sredstvo se NE knjiži kot takojšen strošek oddelka — amortizira se prek fixed_assets.
@@ -1261,10 +1463,23 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Posojilo gostu ni strošek — gost ga vrne prek računa (postavka "Cash advance").
   if (p.category === "posojilo_gostu") continue
   if (p.category === "sredstvo_v_izdelavi") continue
-  receiptsByCategory[p.category] = (receiptsByCategory[p.category] || 0) + p.amountAr / rate
+  if ((p.cashExpenseId && archiveLedgerIds.has(p.cashExpenseId)) || (p.omLedgerId && archiveLedgerIds.has(p.omLedgerId))) continue
+  const purchaseEur = p.amountAr / rate
+  receiptsByCategory[p.category] = (receiptsByCategory[p.category] || 0) + purchaseEur
+  if (purchaseEur !== 0) {
+    pushDeptLine(p.category, {
+      id: `gotovina-${p.id}`,
+      date: p.date || '',
+      name: (p.name || '').trim() || 'Brez imena',
+      amountEur: purchaseEur,
+      source: 'gotovina',
+    })
+  }
   }
   const receiptsKuhinjaCost = receiptsByCategory.kuhinja || 0
+  const receiptsKuhinjaItems = roundKuhinjaLines(deptLines.kuhinja, receiptsKuhinjaCost)
   const receiptsBarCost = receiptsByCategory.bar || 0
+  const receiptsBarItems = roundKuhinjaLines(deptLines.bar, receiptsBarCost)
   const receiptsNocitveCost = receiptsByCategory.nocitve || 0
   const receiptsWellnessCost = receiptsByCategory.wellness || 0
   const receiptsOstaloCost = receiptsByCategory.ostalo || 0
@@ -1274,6 +1489,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const receiptsVzdrzevanjeCost = receiptsByCategory.vzdrzevanje || 0
   const najemninaHisaCost = najemninaHisaAr / rate
   const stipendijaCost = stipendijaAr / rate
+  const hranaStudentiCost = hranaStudentiAr / rate
+  const racunovodstvoCost = racunovodstvoAr / rate
+  const prevoznikiCost = prevoznikiAr / rate
   const izletGotovinaCost = izletNabavaAr / rate
 
   // Nosači in Tuc tuc = vsak SVOJ samostojen strošek (npr. Borutove nabave HV/Komba). Vir so gotovinski odlivi
@@ -1301,13 +1519,49 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const tuctucAr = Number(cashExtra.tuctuc || 0) + Number(omExtra.tuctuc || 0)
   const portersCost = portersAr / rate
   const tuctucCost = tuctucAr / rate
+  const cashDetailRows = await db.execute(sql`
+    SELECT id, date, purpose AS name, amount
+    FROM bank_cash_expenses
+    WHERE date >= ${monthStart} AND date < ${nextMonthStart}
+      AND (
+        purpose ILIKE '%nosač%' OR purpose ILIKE '%nosac%'
+        OR purpose ILIKE '%tuc tuc%' OR purpose ILIKE '%tuctuc%' OR purpose ILIKE '%tuk tuk%'
+      )
+  `)
+  const omDetailRows = await db.execute(sql`
+    SELECT id, date, description AS name, amount
+    FROM orange_money_transactions
+    WHERE direction = 'out' AND date >= ${monthStart} AND date < ${nextMonthStart}
+      AND (
+        description ILIKE '%nosač%' OR description ILIKE '%nosac%'
+        OR description ILIKE '%tuc tuc%' OR description ILIKE '%tuctuc%' OR description ILIKE '%tuk tuk%'
+      )
+  `)
+  const porterLinesRaw: KuhinjaRacunLine[] = []
+  const tucLinesRaw: KuhinjaRacunLine[] = []
+  const pushCarry = (row: Record<string, unknown>, source: string) => {
+    const name = String(row.name || '')
+    const amountEur = Number(row.amount || 0) / rate
+    if (!amountEur) return
+    const line: KuhinjaRacunLine = {
+      id: `${source}-${String(row.id)}`,
+      date: isoDay(row.date),
+      name: name.trim() || 'Brez imena',
+      amountEur,
+      source,
+    }
+    if (/nosač|nosac/i.test(name)) porterLinesRaw.push({ ...line, id: `porter-${line.id}` })
+    if (/tuc tuc|tuctuc|tuk tuk/i.test(name)) tucLinesRaw.push({ ...line, id: `tuc-${line.id}` })
+  }
+  for (const row of cashDetailRows.rows as Record<string, unknown>[]) pushCarry(row, 'gotovina')
+  for (const row of omDetailRows.rows as Record<string, unknown>[]) pushCarry(row, 'Orange')
 
   // Osnovna sredstva: mesečna amortizacija (v EUR) — knjiži se kot ločen strošek.
   const depreciation = await getFixedAssetsDepreciation(year, month)
   const depreciationCost = depreciation.total
 
   const totalSalaryCost = accommodationSalaryCost + barSalaryCost + kuhinjaSalaryCost + managementSalaryCost
-  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + stipendijaCost + portersCost + tuctucCost + depreciationCost
+  const totalCosts = barPijacaCost + barPrehranaCost + wellnessCost + ostaloCost + excursionCost + izletGotovinaCost + transferCostTotal + mealPlanCost + totalSalaryCost + platformCommissionCost + fixedAccommodationCosts + receiptsKuhinjaCost + receiptsBarCost + receiptsNocitveCost + receiptsWellnessCost + receiptsOstaloCost + receiptsReprezentancaCost + receiptsVzdrzevanjeCost + najemninaHisaCost + stipendijaCost + hranaStudentiCost + racunovodstvoCost + prevoznikiCost + reklamaCost + portersCost + tuctucCost + depreciationCost
 
   // ===== PER-GUEST BREAKDOWN (analytics) =====
   // Attribute revenue and costs to each reservation/guest. Salaries are allocated
@@ -1326,6 +1580,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
     mealPlan: number
     wellness: number
     wellnessCount: number
+    wellnessFormulaCount: number
+    wellnessFormulaRevenue: number
     ostalo: number
     excursions: number
     transfers: number
@@ -1337,9 +1593,6 @@ export async function getMonthlyStatistics(year: number, month: number) {
     ostaloFallbackRevenue: number
   }
   const guestMap = new Map<string, GuestAgg>()
-  const resById = new Map(allReservationsForNights.map(r => [r.id, r]))
-  const dnToReservation: Record<string, string | null> = {}
-  monthDeliveryNotes.forEach(dn => { dnToReservation[dn.id] = dn.reservationId })
 
   const getGuest = (id: string, name?: string | null, bungalow?: string | null, arrival?: string | null, departure?: string | null): GuestAgg => {
     let g = guestMap.get(id)
@@ -1348,7 +1601,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
         reservationId: id, guestName: name || 'Neznano', bungalow: bungalow || '',
         arrival: arrival ?? null, departure: departure ?? null,
         nightsInMonth: 0, accommodation: 0, pijaca: 0, prehrana: 0, mealPlan: 0,
-        wellness: 0, wellnessCount: 0, ostalo: 0, excursions: 0, transfers: 0,
+        wellness: 0, wellnessCount: 0, wellnessFormulaCount: 0, wellnessFormulaRevenue: 0, ostalo: 0, excursions: 0, transfers: 0,
         agencyCommission: 0, optimaplusCommission: 0, excursionCost: 0, transferCost: 0,
         ostaloProductCost: 0, ostaloFallbackRevenue: 0,
       }
@@ -1373,7 +1626,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const g = getGuest(r.id, r.guestName, r.bungalow, r.arrival, r.departure)
     g.nightsInMonth += nIn
     const grossAccMonthG = (Number(r.totalAmount || 0) / totalN) * nIn
-    const mealMonthG = mealPlanValueEur(r.mealPlan, Number(r.pax || 1), nIn, grossAccMonthG, r.mealPlanPax)
+    const mealMonthG = mealPlanValueEur(r.mealPlan, r.mealPlanPaymentStatus, Number(r.pax || 1), nIn, grossAccMonthG, r.mealPlanPax)
     g.accommodation += grossAccMonthG - mealMonthG
     g.mealPlan += mealMonthG
     g.agencyCommission += Number(r.agencyCommission || 0) * prop
@@ -1384,7 +1637,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   // Helper: resolve guest from a delivery note
   const guestFromDeliveryItem = (deliveryNoteId: string): GuestAgg | null => {
-    const resId = dnToReservation[deliveryNoteId]
+    const resId = dnReservationId.get(deliveryNoteId)
     if (!resId) return null
     const dn = monthDeliveryNotes.find(d => d.id === deliveryNoteId)
     const r = resById.get(resId)
@@ -1393,14 +1646,14 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   // Bar / wellness / ostalo from delivery note items
   pijacaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.pijaca += (i.totalAr || 0) / rate })
-  barPrehranaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.prehrana += (i.totalAr || 0) / rate })
-  wellnessDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { g.wellness += (i.totalAr || 0) / rate; g.wellnessCount += (i.quantity || 0) } })
+  barPrehranaDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) g.prehrana += deliveryFoodRevenueAr(i) / rate })
+  wellnessDeliveryItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { const eur = (i.totalAr || 0) / rate; g.wellness += eur; g.wellnessCount += (i.quantity || 0); if (!autoMassageIds.has(i.id)) { g.wellnessFormulaCount += (i.quantity || 0); g.wellnessFormulaRevenue += eur } } })
   ostaloItems.forEach(i => { const g = guestFromDeliveryItem(i.deliveryNoteId); if (g) { g.ostalo += (i.totalAr || 0) / rate; const c = i.productId ? productCostArById.get(i.productId) : undefined; if (c != null && !i.isFree && !(i as { coveredByMealPlan?: boolean }).coveredByMealPlan) { g.ostaloProductCost += (c * (i.quantity || 0)) / rate } else { g.ostaloFallbackRevenue += (i.totalAr || 0) / rate } } })
 
   // Bar / wellness / meal plan / excursions from order items (have reservationId directly)
   pijacaOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.pijaca += (o.priceAr || 0) / rate })
-  wellnessOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.wellness += (o.priceAr || 0) / rate; g.wellnessCount += 1 })
-  mealPlanItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.mealPlan += (o.priceAr || 0) / rate })
+  wellnessOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); const eur = (o.priceAr || 0) / rate; g.wellness += eur; g.wellnessCount += 1; if (!autoMassageIds.has(o.id)) { g.wellnessFormulaCount += 1; g.wellnessFormulaRevenue += eur } })
+  mealPlanItems.forEach(o => { if (!o.reservationId) return; const eur = prehranaOrderRevenueAr(o) / rate; if (!eur) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.mealPlan += eur })
   excursionItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); g.excursions += excItemRevenueAr(o) / rate; g.excursionCost += ((o as { costAr?: number | null }).costAr || 0) / rate })
   ostaloOrderItems.forEach(o => { if (!o.reservationId) return; const r = resById.get(o.reservationId); const g = getGuest(o.reservationId, r?.guestName, r?.bungalow, r?.arrival, r?.departure); const revAr = orderItemRevenueAr(o); g.ostalo += revAr / rate; const p = ostaloProductByName.get(o.name!)!; const manual = (o as { costAr?: number | null }).costAr; if (manual != null) { g.ostaloProductCost += Number(manual) / rate } else if (p.priceAr > 0 && p.costAr > 0) { g.ostaloProductCost += (revAr * p.costAr / p.priceAr) / rate } else { g.ostaloFallbackRevenue += revAr / rate } })
 
@@ -1457,7 +1710,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const barPijacaC = costMap.bar_pijaca?.type === 'percentage' ? g.pijaca * costMap.bar_pijaca.value / 100 : 0
     const barPrehranaC = costMap.bar_prehrana?.type === 'percentage' ? g.prehrana * costMap.bar_prehrana.value / 100 : 0
     const mealPlanC = costMap.bar_prehrana?.type === 'percentage' ? g.mealPlan * costMap.bar_prehrana.value / 100 : 0
-    const wellnessC = costMap.wellness?.type === 'fixed' ? g.wellnessCount * wellnessUnitCost : (costMap.wellness ? g.wellness * costMap.wellness.value / 100 : 0)
+    const wellnessC = costMap.wellness?.type === 'fixed' ? g.wellnessFormulaCount * wellnessUnitCost : (costMap.wellness ? g.wellnessFormulaRevenue * costMap.wellness.value / 100 : 0)
     const ostaloC = g.ostaloProductCost + (costMap.ostalo?.type === 'percentage' ? g.ostaloFallbackRevenue * costMap.ostalo.value / 100 : 0)
     const directCost = barPijacaC + barPrehranaC + mealPlanC + wellnessC + ostaloC + g.excursionCost + g.transferCost
     // Allocated overhead
@@ -1501,7 +1754,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
 
   // Bar product sales breakdown — how many of each article were sold in the bar
   // (from delivery_note_items). Chargeable revenue comes from totalAr; complimentary
-  // "On House" and meal-plan-covered items count toward quantity but add 0 revenue.
+  // "On House" items and meals a paid pension covers count toward quantity but add 0 revenue.
   const barSalesMap = new Map<string, {
     name: string
     category: string
@@ -1518,15 +1771,340 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const qty = Number(i.quantity || 0)
     const key = `${name}|||${category}`
     const e = barSalesMap.get(key) || { name, category, costCategory, quantity: 0, revenueEur: 0, freeQuantity: 0, coveredQuantity: 0 }
+    const coveredFood = costCategory === 'prehrana' && pensionCoversDeliveryItem({
+      deliveryNoteId: String(i.deliveryNoteId || ''),
+      productId: (i.productId as string | null) ?? null,
+      productName: (i.productName as string | null) ?? null,
+      coveredByMealPlan: Boolean(i.coveredByMealPlan),
+    })
     e.quantity += qty
-    e.revenueEur += Number(i.totalAr || 0) / rate
+    if (!coveredFood) e.revenueEur += Number(i.totalAr || 0) / rate
     if (i.isFree) e.freeQuantity += qty
-    if (i.coveredByMealPlan) e.coveredQuantity += qty
+    if (i.coveredByMealPlan || coveredFood) e.coveredQuantity += qty
     barSalesMap.set(key, e)
   }
   const barProductSales = [...barSalesMap.values()]
     .map(e => ({ ...e, revenueEur: Math.round(e.revenueEur * 100) / 100 }))
     .sort((a, b) => b.revenueEur - a.revenueEur || b.quantity - a.quantity)
+
+  const salaryMonth = `${year}-${String(month).padStart(2, '0')}-01`
+  const guestNameById = new Map(allReservationsForNights.map(r => [r.id, r.guestName || '']))
+  const noteDate = new Map(monthDeliveryNotes.map(n => [n.id, isoDay(n.date)]))
+  const salaryLines = (staff: typeof accommodationStaff): KuhinjaRacunLine[] =>
+    staff
+      .map(s => ({
+        id: `placa-${s.id}`,
+        date: salaryMonth,
+        name: (s.staffName || '').trim() || 'Brez imena',
+        amountEur: monthSalary(s) / rate,
+        source: 'placa',
+      }))
+      .filter(l => l.amountEur !== 0)
+  const expenseKind = (method: string | null | undefined) => {
+    if (method === 'cash') return 'gotovina'
+    if (method === 'orange_money') return 'Orange'
+    if (method === 'transfer') return 'Nakazilo'
+    if (method === 'in_kind') return 'V naravi'
+    if (method === 'kompenzacija') return 'Kompenzacija'
+    return 'Vnos'
+  }
+  const expenseLines = (category: string): KuhinjaRacunLine[] =>
+    monthExpenses
+      .filter(e => category === 'marketing' ? (e.category || 'marketing') === 'marketing' : e.category === category)
+      .filter(e => Number(e.amount) !== 0)
+      .map(e => ({
+        id: String(e.id),
+        date: isoDay(e.date) || salaryMonth,
+        name: (e.description || '').trim() || 'Brez imena',
+        amountEur: Number(e.amount),
+        source: expenseKind(e.paymentMethod),
+      }))
+
+  const transferDilipRaw: KuhinjaRacunLine[] = []
+  const transferHermanRaw: KuhinjaRacunLine[] = []
+  for (const t of allTransfers) {
+    const guest = guestNameById.get(t.reservationId) || 'Prevoz'
+    const when = isoDay(t.pickupDate)
+    if (t.boatId && !t.skipBoatPay) {
+      let routeId = t.route
+      if (t.route && !t.route.startsWith('route-')) {
+        const foundRoute = allRoutes.find(r => r.name === t.route)
+        if (foundRoute) routeId = foundRoute.id
+      }
+      const routeData = allRoutes.find(r => r.id === routeId)
+      const pricingRouteId = routeData?.baseRouteId || routeId
+      const pricing = allSupplierPricing.find(sp => sp.boatId === t.boatId && sp.routeId === pricingRouteId)
+      const ar = pricing?.priceAr || 0
+      if (ar) {
+        transferDilipRaw.push({
+          id: `dilip-${t.id}`,
+          date: when,
+          name: [guest, routeData?.name || t.route || ''].filter(Boolean).join(' · '),
+          amountEur: ar / rate,
+          source: 'Cenik',
+        })
+      }
+    }
+    if (t.hermanRouteId) {
+      const hp = allSupplierPricing.find(sp => sp.boatId === 'taxi-herman' && sp.routeId === t.hermanRouteId)
+      const ar = hp?.priceAr || 0
+      if (ar) {
+        const routeData = allRoutes.find(r => r.id === t.hermanRouteId)
+        transferHermanRaw.push({
+          id: `herman-${t.id}`,
+          date: when,
+          name: [guest, routeData?.name || 'Herman'].filter(Boolean).join(' · '),
+          amountEur: ar / rate,
+          source: 'Cenik',
+        })
+      }
+    }
+  }
+
+  const excursionFormulaRaw: KuhinjaRacunLine[] = []
+  for (const booking of allExcursionBookings) {
+    let ar = 0
+    if (booking.boatId && booking.excursionId) {
+      const pricing = allExcursionPricing.find(p => p.excursionId === booking.excursionId && p.boatId === booking.boatId)
+      if (pricing) ar += pricing.priceAr || 0
+    }
+    const exc = allExcursions.find(e => e.id === booking.excursionId)
+    if (exc) {
+      const pax = booking.pax || 1
+      ar += (exc.guidePriceAr || 0) + (exc.entranceFeeAr || 0) * pax
+      if (booking.lunchProviderId) ar += (exc.lunchPriceAr || 0) * pax
+    }
+    if (ar) {
+      excursionFormulaRaw.push({
+        id: `izlet-${booking.id}`,
+        date: isoDay(booking.date),
+        name: [guestNameById.get(booking.reservationId), exc?.name || 'Izlet'].filter(Boolean).join(' · ') || 'Izlet',
+        amountEur: ar / rate,
+        source: 'Cenik',
+      })
+    }
+  }
+  for (const o of excursionItems) {
+    const costAr = Number((o as { costAr?: number | null }).costAr || 0)
+    if (!costAr) continue
+    excursionFormulaRaw.push({
+      id: `izlet-rocno-${o.id}`,
+      date: isoDay(o.eventDate),
+      name: (o.name || '').trim() || 'Izlet',
+      amountEur: costAr / rate,
+      source: 'Ročno',
+    })
+  }
+
+  const wellnessFormulaRaw: KuhinjaRacunLine[] = []
+  if (costMap.wellness) {
+    if (costMap.wellness.type === 'fixed') {
+      const unit = costMap.wellness.value
+      for (const i of formulaWellnessDelivery) {
+        const qty = i.quantity || 0
+        if (!qty) continue
+        wellnessFormulaRaw.push({
+          id: `well-${i.id}`,
+          date: noteDate.get(i.deliveryNoteId) || '',
+          name: `${i.productName || 'Masaža'}${qty > 1 ? ` × ${qty}` : ''}`,
+          amountEur: qty * unit,
+          source: 'Cenik',
+        })
+      }
+      for (const o of formulaWellnessOrders) {
+        wellnessFormulaRaw.push({
+          id: `well-${o.id}`,
+          date: isoDay(o.eventDate),
+          name: [guestNameById.get(o.reservationId || ''), o.name || 'Masaža'].filter(Boolean).join(' · '),
+          amountEur: unit,
+          source: 'Cenik',
+        })
+      }
+    } else {
+      const pct = costMap.wellness.value / 100
+      for (const i of formulaWellnessDelivery) {
+        const rev = (i.totalAr || 0) / rate
+        if (!rev) continue
+        wellnessFormulaRaw.push({
+          id: `well-${i.id}`,
+          date: noteDate.get(i.deliveryNoteId) || '',
+          name: i.productName || 'Masaža',
+          amountEur: rev * pct,
+          source: 'Odstotek',
+        })
+      }
+      for (const o of formulaWellnessOrders) {
+        const rev = (o.priceAr || 0) / rate
+        if (!rev) continue
+        wellnessFormulaRaw.push({
+          id: `well-${o.id}`,
+          date: isoDay(o.eventDate),
+          name: o.name || 'Masaža',
+          amountEur: rev * pct,
+          source: 'Odstotek',
+        })
+      }
+    }
+  }
+
+  const ostaloRaw: KuhinjaRacunLine[] = []
+  for (const i of ostaloItems) {
+    const c = i.productId ? productCostArById.get(i.productId) : undefined
+    if (c != null && !i.isFree && !(i as { coveredByMealPlan?: boolean }).coveredByMealPlan && (i.quantity || 0) > 0) {
+      ostaloRaw.push({
+        id: `ostalo-${i.id}`,
+        date: noteDate.get(i.deliveryNoteId) || '',
+        name: i.productName || 'Izdelek',
+        amountEur: c * (i.quantity || 0) / rate,
+        source: 'Nabava',
+      })
+    }
+  }
+  for (const o of ostaloOrderItems) {
+    const revAr = orderItemRevenueAr(o)
+    const p = ostaloProductByName.get(o.name!)!
+    let costAr = 0
+    if ((o as { costAr?: number | null }).costAr != null) costAr = Number((o as { costAr?: number | null }).costAr)
+    else if (p.priceAr > 0 && p.costAr > 0) costAr = revAr * p.costAr / p.priceAr
+    if (!costAr) continue
+    ostaloRaw.push({
+      id: `ostalo-${o.id}`,
+      date: isoDay(o.eventDate),
+      name: o.name || 'Izdelek',
+      amountEur: costAr / rate,
+      source: 'Nabava',
+    })
+  }
+  if (ostaloRaw.length > 0 && ostaloFallbackCost !== 0) {
+    ostaloRaw.push({
+      id: 'ostalo-odstotek',
+      date: salaryMonth,
+      name: `Odstotek (${costMap.ostalo?.value || 0}%)`,
+      amountEur: ostaloFallbackCost,
+      source: 'Odstotek',
+    })
+  }
+
+  const salariesAccommodation = roundKuhinjaLines(salaryLines(accommodationStaff), accommodationSalaryCost)
+  const salariesBar = roundKuhinjaLines(salaryLines(barStaff), barSalaryCost)
+  const salariesKuhinja = roundKuhinjaLines(salaryLines(kuhinjaStaff), kuhinjaSalaryCost)
+  const salariesManagement = roundKuhinjaLines(salaryLines(managementStaff), managementSalaryCost)
+  const marketingItems = roundKuhinjaLines(expenseLines('marketing'), marketingCost)
+  const bookingItems = roundKuhinjaLines(expenseLines('booking'), bookingCost)
+  const optimaplusItems = roundKuhinjaLines(expenseLines('optimaplus'), optimaplusCost)
+  const reklamaItems = roundKuhinjaLines(expenseLines('reklama'), reklamaCost)
+  const starlinkItems: KuhinjaRacunLine[] = starlinkCost
+    ? [{ id: 'starlink', date: salaryMonth, name: 'Starlink', amountEur: starlinkCost, source: 'Fiksno' }]
+    : []
+  const receiptsNocitveItems = roundKuhinjaLines(deptLines.nocitve, receiptsNocitveCost)
+  const receiptsWellnessItems = roundKuhinjaLines(deptLines.wellness, receiptsWellnessCost)
+  const receiptsOstaloItems = roundKuhinjaLines(deptLines.ostalo, receiptsOstaloCost)
+  const receiptsReprezentancaItems = roundKuhinjaLines(deptLines.reprezentanca, receiptsReprezentancaCost)
+  const receiptsVzdrzevanjeItems = roundKuhinjaLines(deptLines.vzdrzevanje, receiptsVzdrzevanjeCost)
+  const najemninaItems = roundKuhinjaLines(nabavaExtra.najemnina, najemninaHisaCost)
+  const stipendijaItems = roundKuhinjaLines(nabavaExtra.stipendija, stipendijaCost)
+  const hranaStudentiItems = roundKuhinjaLines(nabavaExtra.hrana_studenti, hranaStudentiCost)
+  const racunovodstvoItems = roundKuhinjaLines(nabavaExtra.racunovodstvo, racunovodstvoCost)
+  const prevoznikiItems = roundKuhinjaLines(nabavaExtra.prevozniki, prevoznikiCost)
+  const izletGotovinaItems = roundKuhinjaLines(nabavaExtra.izlet, izletGotovinaCost)
+  const transfersDilip = roundKuhinjaLines(transferDilipRaw, dilipCost)
+  const transfersHerman = roundKuhinjaLines(transferHermanRaw, hermanCost)
+  const transfersItems = roundKuhinjaLines([...transferDilipRaw, ...transferHermanRaw], transferCostTotal)
+  const excursionFormulaItems = roundKuhinjaLines(excursionFormulaRaw, excursionCost)
+  const wellnessFormulaItems = roundKuhinjaLines(wellnessFormulaRaw, wellnessCost)
+  const ostaloItemsLines = roundKuhinjaLines(ostaloRaw, ostaloCost)
+  const depreciationItemsLines = roundKuhinjaLines(
+    depreciation.items.filter(i => i.active && i.monthlyEur).map(i => ({
+      id: `amort-${i.id}`,
+      date: salaryMonth,
+      name: i.name,
+      amountEur: i.monthlyEur,
+      source: 'Amortizacija',
+    })),
+    depreciationCost,
+  )
+  const portersItems = roundKuhinjaLines(porterLinesRaw, portersCost)
+  const tuctucItems = roundKuhinjaLines(tucLinesRaw, tuctucCost)
+
+  const skupajParts: { key: string; name: string; amount: number; items: KuhinjaRacunLine[] }[] = [
+    { key: 'place-nocitve', name: 'Plače (vrtnar, sobarica)', amount: accommodationSalaryCost, items: salariesAccommodation },
+    { key: 'place-bar', name: 'Plače (barman)', amount: barSalaryCost, items: salariesBar },
+    { key: 'place-kuhinja', name: 'Plače (kuhinja)', amount: kuhinjaSalaryCost, items: salariesKuhinja },
+    { key: 'place-management', name: 'Plače (management)', amount: managementSalaryCost, items: salariesManagement },
+    { key: 'marketing', name: 'Marketing', amount: marketingCost, items: marketingItems },
+    { key: 'booking', name: 'Booking', amount: bookingCost, items: bookingItems },
+    { key: 'optimaplus', name: 'Optima plus', amount: optimaplusCost, items: optimaplusItems },
+    { key: 'starlink', name: 'Starlink', amount: starlinkCost, items: starlinkItems },
+    { key: 'nabava-pijaca', name: 'Nabava pijača', amount: barPijacaCost, items: [] },
+    { key: 'nabava-hrana', name: 'Nabava hrana', amount: barPrehranaCost + mealPlanCost, items: [] },
+    { key: 'racuni-kuhinja', name: 'Računi nabava Kuhinja', amount: receiptsKuhinjaCost, items: receiptsKuhinjaItems },
+    { key: 'racuni-bar', name: 'Računi nabava Bar', amount: receiptsBarCost, items: receiptsBarItems },
+    { key: 'racuni-nocitve', name: 'Računi nabava Nočitve', amount: receiptsNocitveCost, items: receiptsNocitveItems },
+    { key: 'racuni-wellness', name: 'Plačilo maserki', amount: receiptsWellnessCost, items: receiptsWellnessItems },
+    { key: 'racuni-ostalo', name: 'Računi ostalo', amount: receiptsOstaloCost, items: receiptsOstaloItems },
+    { key: 'reprezentanca', name: 'Računi reprezentanca', amount: receiptsReprezentancaCost, items: receiptsReprezentancaItems },
+    { key: 'vzdrzevanje', name: 'Računi vzdrževanje', amount: receiptsVzdrzevanjeCost, items: receiptsVzdrzevanjeItems },
+    { key: 'prevozi', name: 'Dobavitelj prevozov', amount: transferCostTotal, items: transfersItems },
+    { key: 'izleti', name: 'Najem čolnov + vodič + vstop + kosilo', amount: excursionCost, items: excursionFormulaItems },
+    { key: 'izlet-gotovina', name: 'Plačilo dobavitelju (gotovina)', amount: izletGotovinaCost, items: izletGotovinaItems },
+    { key: 'maserke', name: 'Maserke', amount: wellnessCost, items: wellnessFormulaItems },
+    { key: 'ostalo', name: 'Nabavna cena + pranje', amount: ostaloCost, items: ostaloItemsLines },
+    { key: 'amortizacija', name: 'Amortizacija', amount: depreciationCost, items: depreciationItemsLines },
+    { key: 'najemnina', name: 'Najemnina hiša', amount: najemninaHisaCost, items: najemninaItems },
+    { key: 'stipendija', name: 'Štipendija', amount: stipendijaCost, items: stipendijaItems },
+    { key: 'hrana-studenti', name: 'Hrana za študente', amount: hranaStudentiCost, items: hranaStudentiItems },
+    { key: 'racunovodstvo', name: 'Računovodstvo', amount: racunovodstvoCost, items: racunovodstvoItems },
+    { key: 'prevozniki', name: 'Prevozniki', amount: prevoznikiCost, items: prevoznikiItems },
+    { key: 'reklama', name: 'Reklama', amount: reklamaCost, items: reklamaItems },
+    { key: 'nosaci', name: 'Nosači', amount: portersCost, items: portersItems },
+    { key: 'tuctuc', name: 'Tuc tuc', amount: tuctucCost, items: tuctucItems },
+  ]
+  const skupajRaw: KuhinjaRacunLine[] = []
+  for (const part of skupajParts) {
+    if (part.items.length) skupajRaw.push(...part.items)
+    else if (Math.round(part.amount * 100) !== 0) {
+      skupajRaw.push({
+        id: `skupaj-${part.key}`,
+        date: salaryMonth,
+        name: part.name,
+        amountEur: part.amount,
+        source: 'Odstotek',
+      })
+    }
+  }
+
+  const costLines = {
+    salariesAccommodation,
+    salariesBar,
+    salariesKuhinja,
+    salariesManagement,
+    marketing: marketingItems,
+    booking: bookingItems,
+    optimaplus: optimaplusItems,
+    reklama: reklamaItems,
+    starlink: starlinkItems,
+    receiptsNocitve: receiptsNocitveItems,
+    receiptsWellness: receiptsWellnessItems,
+    receiptsOstalo: receiptsOstaloItems,
+    receiptsReprezentanca: receiptsReprezentancaItems,
+    receiptsVzdrzevanje: receiptsVzdrzevanjeItems,
+    najemnina: najemninaItems,
+    stipendija: stipendijaItems,
+    hranaStudenti: hranaStudentiItems,
+    racunovodstvo: racunovodstvoItems,
+    prevozniki: prevoznikiItems,
+    izletGotovina: izletGotovinaItems,
+    transfers: transfersItems,
+    transfersDilip,
+    transfersHerman,
+    excursions: excursionFormulaItems,
+    wellness: wellnessFormulaItems,
+    ostalo: ostaloItemsLines,
+    depreciation: depreciationItemsLines,
+    porters: portersItems,
+    tuctuc: tuctucItems,
+    skupaj: roundKuhinjaLines(skupajRaw, totalCosts),
+  }
 
   return {
     year,
@@ -1556,7 +2134,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
       transfers: Math.round(transferCostTotal * 100) / 100,
       mealPlan: Math.round(mealPlanCost * 100) / 100,
       receiptsKuhinja: Math.round(receiptsKuhinjaCost * 100) / 100,
+      receiptsKuhinjaItems,
       receiptsBar: Math.round(receiptsBarCost * 100) / 100,
+      receiptsBarItems,
       receiptsNocitve: Math.round(receiptsNocitveCost * 100) / 100,
       receiptsWellness: Math.round(receiptsWellnessCost * 100) / 100,
       receiptsOstalo: Math.round(receiptsOstaloCost * 100) / 100,
@@ -1564,6 +2144,10 @@ export async function getMonthlyStatistics(year: number, month: number) {
       receiptsVzdrzevanje: Math.round(receiptsVzdrzevanjeCost * 100) / 100,
       najemninaHisa: Math.round(najemninaHisaCost * 100) / 100,
       stipendija: Math.round(stipendijaCost * 100) / 100,
+      hranaStudenti: Math.round(hranaStudentiCost * 100) / 100,
+      racunovodstvo: Math.round(racunovodstvoCost * 100) / 100,
+      prevozniki: Math.round(prevoznikiCost * 100) / 100,
+      reklama: Math.round(reklamaCost * 100) / 100,
       porters: Math.round(portersCost * 100) / 100,
       tuctuc: Math.round(tuctucCost * 100) / 100,
       depreciation: Math.round(depreciationCost * 100) / 100,
@@ -1606,7 +2190,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
     guestBreakdown,
     barProductSales,
     costSettings: costs,
-    staffMembers: activeStaff
+    staffMembers: activeStaff,
+    costLines,
   }
 }
 
@@ -1823,6 +2408,10 @@ export async function getYearlyStatistics(year: number) {
       receiptsVzdrzevanje: 0,
       najemninaHisa: 0,
       stipendija: 0,
+      hranaStudenti: 0,
+      racunovodstvo: 0,
+      prevozniki: 0,
+      reklama: 0,
       porters: 0,
       tuctuc: 0,
       depreciation: 0,
@@ -1859,6 +2448,10 @@ export async function getYearlyStatistics(year: number) {
     yearly.costs.receiptsVzdrzevanje += (m.costs as { receiptsVzdrzevanje?: number }).receiptsVzdrzevanje || 0
     yearly.costs.najemninaHisa += (m.costs as { najemninaHisa?: number }).najemninaHisa || 0
     yearly.costs.stipendija += (m.costs as { stipendija?: number }).stipendija || 0
+    yearly.costs.hranaStudenti += (m.costs as { hranaStudenti?: number }).hranaStudenti || 0
+    yearly.costs.racunovodstvo += (m.costs as { racunovodstvo?: number }).racunovodstvo || 0
+    yearly.costs.prevozniki += (m.costs as { prevozniki?: number }).prevozniki || 0
+    yearly.costs.reklama += (m.costs as { reklama?: number }).reklama || 0
     yearly.costs.porters += (m.costs as { porters?: number }).porters || 0
     yearly.costs.tuctuc += (m.costs as { tuctuc?: number }).tuctuc || 0
     yearly.costs.depreciation += (m.costs as { depreciation?: number }).depreciation || 0

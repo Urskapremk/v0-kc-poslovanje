@@ -17,6 +17,7 @@ const MONTH_NAMES = ['januar', 'februar', 'marec', 'april', 'maj', 'junij', 'jul
 
 const CATEGORIES = [
   { id: 'marketing', label: 'Marketing', placeholder: 'npr. Facebook oglasi, fotograf, agencija...' },
+  { id: 'reklama', label: 'Reklama', placeholder: 'npr. reklamni material, kontra strošek...' },
   { id: 'booking', label: 'Booking', placeholder: 'npr. provizija Booking.com' },
   { id: 'optimaplus', label: 'Optima plus', placeholder: 'npr. strošek Optima plus' },
   { id: 'provizija', label: 'Provizija', placeholder: 'npr. provizija Orange Money' },
@@ -29,6 +30,7 @@ const PAYMENT_METHODS = [
   { id: 'orange_money', label: 'Orange Money' },
   { id: 'transfer', label: 'Bančni transfer' },
   { id: 'in_kind', label: 'Hnatura d.o.o.' },
+  { id: 'kompenzacija', label: 'Kompenzacija' },
 ] as const
 
 const PAYMENT_LABELS: Record<string, string> = Object.fromEntries(PAYMENT_METHODS.map((m) => [m.id, m.label]))

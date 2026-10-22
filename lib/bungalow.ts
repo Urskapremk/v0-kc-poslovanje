@@ -42,6 +42,23 @@ export function bungalowDisplayName(raw: string | null | undefined): string {
   return cleanSingleName(raw)
 }
 
+// Distinct bungalow names for guest-facing copy when Bentral repeats the same unit
+// across rate segments (semicolon-separated). Each physical unit appears once; two
+// different units are joined with ", ".
+export function bungalowDistinctDisplayNames(raw: string | null | undefined): string {
+  if (!raw) return ''
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const seg of raw.split(';').map((s) => s.trim()).filter(Boolean)) {
+    const key = segmentKey(seg)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const special = BUNGALOW_DISPLAY_NAMES[key]
+    names.push(special || cleanSingleName(seg))
+  }
+  return names.join(', ')
+}
+
 // Normaliziran kljuc enote za ROBUSTNO ujemanje razlicnih zapisov istega bungalova.
 // Bentral zapise npr. "Ocean Bungalov I – za 4 / Ocean Bungalov I – za 4 (4+0)",
 // aplikacija pa uporablja kratke angleske nazive "Ocean Bungalow I".

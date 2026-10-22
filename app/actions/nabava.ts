@@ -4,6 +4,7 @@ import { db } from "@/lib/db"
 import { sql } from "drizzle-orm"
 import { unpaySupplier } from "./supplier-payment"
 import { addCashExpense, updateCashExpense, deleteCashExpense } from "./banka"
+import { addOmTransaction, deleteOmTransaction, updateOmTransaction } from "./orange-money"
 import { getExchangeRate } from "./komba"
 import { STROSEK_CATEGORIES, type StrosekCategory } from "@/lib/stroski-categories"
 
@@ -61,6 +62,12 @@ async function ensureTable() {
   await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "loanRate" numeric`)
   // Strošek sredstva v izdelavi (pogodba): povezava na fixed_assets (status in_progress).
   await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "assetId" text`)
+  // Samodejno gotovinsko plačilo maserki, vezano na postavko masaže pri gostu.
+  // Ločeno od orderItemId (ta je posojilo gostu).
+  await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "massageOrderItemId" text`)
+  // Računovodstvo: gotovina (blagajna) ali Orange Money. Natanko ena vknjižba.
+  await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "payMethod" text NOT NULL DEFAULT 'cash'`)
+  await db.execute(sql`ALTER TABLE nabava_purchases ADD COLUMN IF NOT EXISTS "omLedgerId" text`)
 }
 
 const LOAN_CAT = "posojilo_gostu"
@@ -68,7 +75,11 @@ const WIP_CAT = "sredstvo_v_izdelavi"
 const RENT_CAT = "najemnina"
 const IZLET_CAT = "izlet"
 const STIPEND_CAT = "stipendija"
-type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina" | "izlet" | "stipendija"
+const STUDENT_FOOD_CAT = "hrana_studenti"
+const ACCOUNTING_CAT = "racunovodstvo"
+const PREVOZNIKI_CAT = "prevozniki"
+const ACCOUNTING_TRIP_NOTE = "Računovodstvo"
+type NabavaCat = StrosekCategory | "osnovno_sredstvo" | "posojilo_gostu" | "sredstvo_v_izdelavi" | "najemnina" | "izlet" | "stipendija" | "hrana_studenti" | "racunovodstvo" | "prevozniki"
 
 async function syncWipCost(purchaseId: string, category: NabavaCat, assetId: string, date: string, name: string, amountAr: number) {
   const { upsertNabavaAssetCost, removeNabavaAssetCost } = await import("./statistics")
@@ -90,6 +101,9 @@ function normCategory(c: string): NabavaCat {
   if (c === RENT_CAT) return RENT_CAT
   if (c === IZLET_CAT) return IZLET_CAT
   if (c === STIPEND_CAT) return STIPEND_CAT
+  if (c === STUDENT_FOOD_CAT) return STUDENT_FOOD_CAT
+  if (c === ACCOUNTING_CAT) return ACCOUNTING_CAT
+  if (c === PREVOZNIKI_CAT) return PREVOZNIKI_CAT
   return STROSEK_CATEGORIES.includes(c as StrosekCategory) ? (c as StrosekCategory) : "kuhinja"
 }
 
@@ -232,11 +246,12 @@ export async function deleteNabavaTrip(id: string) {
   }
   // Počisti tudi gotovinske nakupe (in njihove odlive iz blagajne).
   const purchases = await db.execute(
-    sql`SELECT id, "cashExpenseId", "orderItemId" FROM nabava_purchases WHERE "tripId" = ${id}`
+    sql`SELECT id, "cashExpenseId", "omLedgerId", "orderItemId" FROM nabava_purchases WHERE "tripId" = ${id}`
   )
   const { removeNabavaAssetCost } = await import("./statistics")
   for (const row of purchases.rows as Record<string, unknown>[]) {
     if (row.cashExpenseId) await deleteCashExpense(String(row.cashExpenseId))
+    if (row.omLedgerId) await deleteOmTransaction(String(row.omLedgerId))
     if (row.orderItemId) await deleteLoanOrderItem(String(row.orderItemId))
     await removeNabavaAssetCost(String(row.id))
   }
@@ -265,6 +280,9 @@ export type NabavaPurchase = {
   guestName: string
   bungalow: string
   createdAt: string
+  autoMassage: boolean
+  payMethod: "cash" | "orange"
+  omLedgerId: string
 }
 
 function mapPurchase(r: Record<string, unknown>): NabavaPurchase {
@@ -286,6 +304,9 @@ function mapPurchase(r: Record<string, unknown>): NabavaPurchase {
     guestName: r.guestName ? String(r.guestName) : "",
     bungalow: r.bungalow ? String(r.bungalow) : "",
     createdAt: r.createdAt ? String(r.createdAt) : "",
+    autoMassage: !!r.massageOrderItemId,
+    payMethod: r.payMethod === "orange" ? "orange" : "cash",
+    omLedgerId: r.omLedgerId ? String(r.omLedgerId) : "",
   }
 }
 
@@ -320,6 +341,7 @@ export async function addNabavaPurchase(params: {
   reservationId?: string
   loanRate?: number
   assetId?: string
+  payMethod?: "cash" | "orange"
 }) {
   await ensureTable()
   const id = `nabp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -334,9 +356,9 @@ export async function addNabavaPurchase(params: {
   if (category === LOAN_CAT && !reservationId) throw new Error("Izberi gosta za posojilo.")
   const loanRate = category === LOAN_CAT ? Number(params.loanRate) || 0 : 0
   if (category === LOAN_CAT && loanRate <= 0) throw new Error("Vpiši menjalni tečaj za posojilo.")
-  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : `Nabava — ${params.name || "nakup"}`
-  // Odliv iz blagajne (gotovina) — nakup/posojilo je vedno plačano z gotovino.
-  const { id: cashExpenseId } = await addCashExpense({ company, date, purpose, amount: amountAr })
+  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : purchasePurpose(category, params.name)
+  // Natanko en lonček: blagajna ALI Orange Money. Bančne vrstice ni.
+  const method = params.payMethod === "orange" ? "orange" : "cash"
   // Posojilo gostu → postavka na računu gosta (plača jo s kartico ob odhodu).
   const orderItemId = category === LOAN_CAT ? await createLoanOrderItem(reservationId, amountAr, date, loanRate) : null
   // Osnovno sredstvo → ustvari zapis v fixed_assets (amortizacija čez čas; nakup NE bremeni oddelka takoj).
@@ -351,10 +373,26 @@ export async function addNabavaPurchase(params: {
     })
     fixedAssetId = fa.id
   }
-  await db.execute(
-    sql`INSERT INTO nabava_purchases (id, "tripId", name, category, "amountAr", company, date, "cashExpenseId", "annualRatePct", "fixedAssetId", "reservationId", "orderItemId", "loanRate", "assetId")
-        VALUES (${id}, ${params.tripId}, ${params.name || ""}, ${category}, ${amountAr}, ${company}, ${date}, ${cashExpenseId}, ${annualRatePct}, ${fixedAssetId}, ${reservationId || null}, ${orderItemId}, ${loanRate || null}, ${assetId || null})`
-  )
+  let cashExpenseId: string | null = null
+  let omLedgerId: string | null = null
+  try {
+    const ledger = await syncPurchasePot({ method, company, date, purpose, amountAr })
+    cashExpenseId = ledger.cashExpenseId
+    omLedgerId = ledger.omLedgerId
+    await db.execute(
+      sql`INSERT INTO nabava_purchases (id, "tripId", name, category, "amountAr", company, date, "cashExpenseId", "annualRatePct", "fixedAssetId", "reservationId", "orderItemId", "loanRate", "assetId", "payMethod", "omLedgerId")
+          VALUES (${id}, ${params.tripId}, ${params.name || ""}, ${category}, ${amountAr}, ${company}, ${date}, ${cashExpenseId}, ${annualRatePct}, ${fixedAssetId}, ${reservationId || null}, ${orderItemId}, ${loanRate || null}, ${assetId || null}, ${method}, ${omLedgerId})`
+    )
+  } catch (e) {
+    if (cashExpenseId) await deleteCashExpense(cashExpenseId)
+    if (omLedgerId) await deleteOmTransaction(omLedgerId)
+    if (orderItemId) await deleteLoanOrderItem(orderItemId)
+    if (fixedAssetId) {
+      const { deleteFixedAsset } = await import("./statistics")
+      await deleteFixedAsset(fixedAssetId)
+    }
+    throw e
+  }
   if (category === WIP_CAT) await syncWipCost(id, category, assetId, date, params.name, amountAr)
   return { ok: true, id }
 }
@@ -370,6 +408,7 @@ export async function updateNabavaPurchase(params: {
   reservationId?: string
   loanRate?: number
   assetId?: string
+  payMethod?: "cash" | "orange"
 }) {
   await ensureTable()
   const category = normCategory(params.category)
@@ -384,24 +423,29 @@ export async function updateNabavaPurchase(params: {
   const loanRate = category === LOAN_CAT ? Number(params.loanRate) || 0 : 0
   if (category === LOAN_CAT && loanRate <= 0) throw new Error("Vpiši menjalni tečaj za posojilo.")
   const existing = await db.execute(
-    sql`SELECT "cashExpenseId", company, "fixedAssetId", "orderItemId" FROM nabava_purchases WHERE id = ${params.id}`
+    sql`SELECT "cashExpenseId", company, "fixedAssetId", "orderItemId", "omLedgerId", "payMethod", category FROM nabava_purchases WHERE id = ${params.id}`
   )
   const row = existing.rows[0] as Record<string, unknown> | undefined
-  const oldCashId = row?.cashExpenseId ? String(row.cashExpenseId) : ""
-  const oldCompany = row?.company ? String(row.company) : "tourism"
   const oldFixedAssetId = row?.fixedAssetId ? String(row.fixedAssetId) : ""
   const oldOrderItemId = row?.orderItemId ? String(row.orderItemId) : ""
-  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : `Nabava — ${params.name || "nakup"}`
-  let cashExpenseId = oldCashId
-  if (oldCashId && oldCompany === company) {
-    // Isto podjetje → posodobi obstoječi odliv.
-    await updateCashExpense(oldCashId, { date, purpose, amount: amountAr })
-  } else {
-    // Podjetje se je spremenilo (ali odliva še ni) → izbriši starega in ustvari novega.
-    if (oldCashId) await deleteCashExpense(oldCashId)
-    const created = await addCashExpense({ company, date, purpose, amount: amountAr })
-    cashExpenseId = created.id
-  }
+  const purpose = category === LOAN_CAT ? await loanPurpose(reservationId, params.name) : purchasePurpose(category, params.name)
+  const method: "cash" | "orange" =
+    params.payMethod === "orange" ? "orange" : params.payMethod === "cash" ? "cash" : row?.payMethod === "orange" ? "orange" : "cash"
+  const ledger = await syncPurchasePot({
+    method,
+    company,
+    date,
+    purpose,
+    amountAr,
+    existing: {
+      payMethod: row?.payMethod === "orange" ? "orange" : "cash",
+      company: row?.company ? String(row.company) : "tourism",
+      cashExpenseId: row?.cashExpenseId ? String(row.cashExpenseId) : "",
+      omLedgerId: row?.omLedgerId ? String(row.omLedgerId) : "",
+    },
+  })
+  const cashExpenseId = ledger.cashExpenseId
+  const omLedgerId = ledger.omLedgerId
   // Uskladi postavko na računu gosta (posojilo): vedno na novo, da sledi gostu/znesku/datumu.
   await deleteLoanOrderItem(oldOrderItemId)
   const orderItemId = category === LOAN_CAT ? await createLoanOrderItem(reservationId, amountAr, date, loanRate) : null
@@ -432,7 +476,7 @@ export async function updateNabavaPurchase(params: {
   }
   await db.execute(
     sql`UPDATE nabava_purchases
-        SET name = ${params.name || ""}, category = ${category}, "amountAr" = ${amountAr}, company = ${company}, date = ${date}, "cashExpenseId" = ${cashExpenseId}, "annualRatePct" = ${annualRatePct}, "fixedAssetId" = ${fixedAssetId}, "reservationId" = ${reservationId || null}, "orderItemId" = ${orderItemId}, "loanRate" = ${loanRate || null}, "assetId" = ${assetId || null}
+        SET name = ${params.name || ""}, category = ${category}, "amountAr" = ${amountAr}, company = ${company}, date = ${date}, "cashExpenseId" = ${cashExpenseId}, "payMethod" = ${method}, "omLedgerId" = ${omLedgerId}, "annualRatePct" = ${annualRatePct}, "fixedAssetId" = ${fixedAssetId}, "reservationId" = ${reservationId || null}, "orderItemId" = ${orderItemId}, "loanRate" = ${loanRate || null}, "assetId" = ${assetId || null}
         WHERE id = ${params.id}`
   )
   await syncWipCost(params.id, category, assetId, date, params.name, amountAr)
@@ -499,9 +543,10 @@ export async function getArchivedNabavaTrips(
 
 export async function deleteNabavaPurchase(id: string) {
   await ensureTable()
-  const existing = await db.execute(sql`SELECT "cashExpenseId", "fixedAssetId", "orderItemId" FROM nabava_purchases WHERE id = ${id}`)
+  const existing = await db.execute(sql`SELECT "cashExpenseId", "omLedgerId", "fixedAssetId", "orderItemId", "tripId" FROM nabava_purchases WHERE id = ${id}`)
   const row = existing.rows[0] as Record<string, unknown> | undefined
   if (row?.cashExpenseId) await deleteCashExpense(String(row.cashExpenseId))
+  if (row?.omLedgerId) await deleteOmTransaction(String(row.omLedgerId))
   if (row?.orderItemId) await deleteLoanOrderItem(String(row.orderItemId))
   if (row?.fixedAssetId) {
     const { deleteFixedAsset } = await import("./statistics")
@@ -510,5 +555,395 @@ export async function deleteNabavaPurchase(id: string) {
   const { removeNabavaAssetCost } = await import("./statistics")
   await removeNabavaAssetCost(id)
   await db.execute(sql`DELETE FROM nabava_purchases WHERE id = ${id}`)
+  if (row?.tripId) {
+    const tripId = String(row.tripId)
+    await removeEmptyMassageTrip(tripId)
+    await removeEmptyAccountingTrip(tripId)
+  }
   return { ok: true }
+}
+
+function resortToday() {
+  return new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+function accountingPurpose(note: string) {
+  return note ? `Računovodstvo — ${note}` : "Računovodstvo"
+}
+
+function purchasePurpose(category: NabavaCat, name: string) {
+  if (category === ACCOUNTING_CAT) {
+    const trimmed = (name || "").trim()
+    const note = !trimmed || trimmed === "Računovodstvo" ? "" : trimmed
+    return accountingPurpose(note)
+  }
+  if (category === PREVOZNIKI_CAT) {
+    const trimmed = (name || "").trim()
+    return !trimmed || trimmed === "Prevozniki" ? "Prevozniki" : `Prevozniki — ${trimmed}`
+  }
+  return `Nabava — ${name || "nakup"}`
+}
+
+// En odliv: gotovina iz izbrane blagajne ali Orange Money. Nikoli oboje in nikoli banka.
+async function syncPurchasePot(params: {
+  method: "cash" | "orange"
+  company: string
+  date: string
+  purpose: string
+  amountAr: number
+  existing?: { payMethod: string; company: string; cashExpenseId: string; omLedgerId: string }
+}) {
+  const prev = params.existing
+  if (params.method === "orange") {
+    if (prev?.cashExpenseId) await deleteCashExpense(prev.cashExpenseId)
+    if (prev?.payMethod === "orange" && prev.omLedgerId) {
+      await updateOmTransaction(prev.omLedgerId, {
+        date: params.date,
+        direction: "out",
+        category: "placilo",
+        amount: params.amountAr,
+        description: params.purpose,
+      })
+      return { cashExpenseId: null as string | null, omLedgerId: prev.omLedgerId }
+    }
+    if (prev?.omLedgerId) await deleteOmTransaction(prev.omLedgerId)
+    const created = await addOmTransaction({
+      date: params.date,
+      direction: "out",
+      category: "placilo",
+      amount: params.amountAr,
+      description: params.purpose,
+    })
+    return { cashExpenseId: null as string | null, omLedgerId: created.id }
+  }
+  if (prev?.omLedgerId) await deleteOmTransaction(prev.omLedgerId)
+  if (prev && prev.payMethod !== "orange" && prev.cashExpenseId && prev.company === params.company) {
+    await updateCashExpense(prev.cashExpenseId, { date: params.date, purpose: params.purpose, amount: params.amountAr })
+    return { cashExpenseId: prev.cashExpenseId, omLedgerId: null as string | null }
+  }
+  if (prev?.cashExpenseId) await deleteCashExpense(prev.cashExpenseId)
+  const created = await addCashExpense({
+    company: params.company,
+    date: params.date,
+    purpose: params.purpose,
+    amount: params.amountAr,
+  })
+  return { cashExpenseId: created.id, omLedgerId: null as string | null }
+}
+
+async function ensureAccountingTrip(date: string) {
+  const existing = await db.execute(sql`
+    SELECT id FROM nabava_trips
+    WHERE site = 'hv' AND date = ${date} AND note = ${ACCOUNTING_TRIP_NOTE}
+    ORDER BY "createdAt" ASC
+    LIMIT 1
+  `)
+  const found = existing.rows[0] as Record<string, unknown> | undefined
+  if (found?.id) return String(found.id)
+  const id = `nab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await db.execute(sql`
+    INSERT INTO nabava_trips (id, date, note, site, "noBoat")
+    VALUES (${id}, ${date}, ${ACCOUNTING_TRIP_NOTE}, 'hv', true)
+  `)
+  return id
+}
+
+async function removeEmptyAccountingTrip(tripId: string) {
+  if (!tripId) return
+  const trip = await db.execute(sql`SELECT id, note, site FROM nabava_trips WHERE id = ${tripId}`)
+  const t = trip.rows[0] as Record<string, unknown> | undefined
+  if (!t || String(t.note || "") !== ACCOUNTING_TRIP_NOTE || String(t.site || "") !== "hv") return
+  const cnt = await db.execute(sql`SELECT COUNT(*)::int AS n FROM nabava_purchases WHERE "tripId" = ${tripId}`)
+  const n = Number((cnt.rows[0] as Record<string, unknown> | undefined)?.n || 0)
+  if (n > 0) return
+  const pays = await db.execute(sql`SELECT 1 FROM supplier_payments WHERE "refKey" LIKE ${"nabava:" + tripId + ":%"} LIMIT 1`)
+  if (pays.rows.length > 0) return
+  await db.execute(sql`DELETE FROM nabava_trips WHERE id = ${tripId}`)
+}
+
+// Plačilo računovodstva z Nabave HV. Strošek je svoja kategorija.
+// Gotovina vzame denar iz blagajne, Orange Money iz denarnice. Bančne vrstice ni.
+async function writeAccountingLedger(params: {
+  method: "cash" | "orange"
+  company: string
+  date: string
+  note: string
+  amountAr: number
+  existing?: { payMethod: string; company: string; cashExpenseId: string; omLedgerId: string }
+}) {
+  return syncPurchasePot({
+    method: params.method,
+    company: params.company,
+    date: params.date,
+    purpose: accountingPurpose(params.note),
+    amountAr: params.amountAr,
+    existing: params.existing,
+  })
+}
+
+export async function getHvAccountingPayments(): Promise<NabavaPurchase[]> {
+  await ensureTable()
+  const res = await db.execute(sql`
+    SELECT p.*, r."guestName", r.bungalow
+    FROM nabava_purchases p
+    LEFT JOIN reservations r ON r.id = p."reservationId"
+    JOIN nabava_trips t ON t.id = p."tripId"
+    WHERE p.category = ${ACCOUNTING_CAT} AND t.site = 'hv' AND t.note = ${ACCOUNTING_TRIP_NOTE}
+    ORDER BY p.date DESC, p."createdAt" DESC
+  `)
+  return (res.rows as Record<string, unknown>[]).map(mapPurchase)
+}
+
+export async function addAccountingPayment(params: {
+  amountAr: number
+  date: string
+  note: string
+  method: "cash" | "orange"
+  company?: string
+}) {
+  await ensureTable()
+  const amountAr = Math.max(0, Math.round(params.amountAr || 0))
+  if (amountAr <= 0) throw new Error("Vpiši znesek.")
+  const date = params.date || resortToday()
+  const method = params.method === "orange" ? "orange" : "cash"
+  const company = params.company === "sarl" ? "sarl" : "tourism"
+  const note = (params.note || "").trim().slice(0, 200)
+  const name = note || "Računovodstvo"
+  const tripId = await ensureAccountingTrip(date)
+  let cashExpenseId: string | null = null
+  let omLedgerId: string | null = null
+  try {
+    const ledger = await writeAccountingLedger({ method, company, date, note, amountAr })
+    cashExpenseId = ledger.cashExpenseId
+    omLedgerId = ledger.omLedgerId
+    const id = `nabp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    await db.execute(sql`
+      INSERT INTO nabava_purchases (id, "tripId", name, category, "amountAr", company, date, "cashExpenseId", "payMethod", "omLedgerId")
+      VALUES (${id}, ${tripId}, ${name}, ${ACCOUNTING_CAT}, ${amountAr}, ${company}, ${date}, ${cashExpenseId}, ${method}, ${omLedgerId})
+    `)
+    return { ok: true, id }
+  } catch (e) {
+    if (cashExpenseId) await deleteCashExpense(cashExpenseId)
+    if (omLedgerId) await deleteOmTransaction(omLedgerId)
+    await removeEmptyAccountingTrip(tripId)
+    throw e
+  }
+}
+
+export async function updateAccountingPayment(params: {
+  id: string
+  amountAr: number
+  date: string
+  note: string
+  method: "cash" | "orange"
+  company?: string
+}) {
+  await ensureTable()
+  const amountAr = Math.max(0, Math.round(params.amountAr || 0))
+  if (amountAr <= 0) throw new Error("Vpiši znesek.")
+  const date = params.date || resortToday()
+  const method = params.method === "orange" ? "orange" : "cash"
+  const company = params.company === "sarl" ? "sarl" : "tourism"
+  const note = (params.note || "").trim().slice(0, 200)
+  const name = note || "Računovodstvo"
+  const existing = await db.execute(sql`
+    SELECT "tripId", "cashExpenseId", "omLedgerId", "payMethod", company, category
+    FROM nabava_purchases WHERE id = ${params.id}
+  `)
+  const row = existing.rows[0] as Record<string, unknown> | undefined
+  if (!row || String(row.category || "") !== ACCOUNTING_CAT) throw new Error("To ni vnos računovodstva.")
+  const oldTripId = row.tripId ? String(row.tripId) : ""
+  const ledger = await writeAccountingLedger({
+    method,
+    company,
+    date,
+    note,
+    amountAr,
+    existing: {
+      payMethod: row.payMethod === "orange" ? "orange" : "cash",
+      company: row.company ? String(row.company) : "tourism",
+      cashExpenseId: row.cashExpenseId ? String(row.cashExpenseId) : "",
+      omLedgerId: row.omLedgerId ? String(row.omLedgerId) : "",
+    },
+  })
+  const tripId = await ensureAccountingTrip(date)
+  await db.execute(sql`
+    UPDATE nabava_purchases
+    SET "tripId" = ${tripId}, name = ${name}, category = ${ACCOUNTING_CAT}, "amountAr" = ${amountAr},
+        company = ${company}, date = ${date}, "cashExpenseId" = ${ledger.cashExpenseId},
+        "payMethod" = ${method}, "omLedgerId" = ${ledger.omLedgerId}
+    WHERE id = ${params.id}
+  `)
+  if (oldTripId && oldTripId !== tripId) await removeEmptyAccountingTrip(oldTripId)
+  return { ok: true }
+}
+
+// Borut maserki izroči 40.000 Ar na masažo, takoj, v gotovini (Tourism).
+// Ocena 13 € v kalkulacijah se za te vrstice ne prišteje še enkrat.
+const MASSAGE_AUTO_FROM = "2026-10-07"
+const MASSAGE_PAY_AR = 40000
+const MASSAGE_TRIP_NOTE = "Masaže"
+
+function foldSi(s: string) {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+}
+
+function isGuestMassage(category: string, name: string) {
+  const cat = foldSi(category || "")
+  if (cat === "masaza") return true
+  if (cat === "wellness" && /massage|masaz/.test(foldSi(name || ""))) return true
+  return false
+}
+
+async function ensureMassageTrip(date: string) {
+  const existing = await db.execute(sql`
+    SELECT id FROM nabava_trips
+    WHERE site = 'komba' AND date = ${date} AND note = ${MASSAGE_TRIP_NOTE}
+    ORDER BY "createdAt" ASC
+    LIMIT 1
+  `)
+  const found = existing.rows[0] as Record<string, unknown> | undefined
+  if (found?.id) return String(found.id)
+  const id = `nab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  await db.execute(sql`
+    INSERT INTO nabava_trips (id, date, note, site, "noBoat")
+    VALUES (${id}, ${date}, ${MASSAGE_TRIP_NOTE}, 'komba', true)
+  `)
+  return id
+}
+
+async function removeEmptyMassageTrip(tripId: string) {
+  if (!tripId) return
+  const trip = await db.execute(sql`SELECT id, note, site FROM nabava_trips WHERE id = ${tripId}`)
+  const t = trip.rows[0] as Record<string, unknown> | undefined
+  if (!t || String(t.note || "") !== MASSAGE_TRIP_NOTE || String(t.site || "") !== "komba") return
+  const cnt = await db.execute(sql`SELECT COUNT(*)::int AS n FROM nabava_purchases WHERE "tripId" = ${tripId}`)
+  const n = Number((cnt.rows[0] as Record<string, unknown> | undefined)?.n || 0)
+  if (n > 0) return
+  const pays = await db.execute(sql`SELECT 1 FROM supplier_payments WHERE "refKey" LIKE ${"nabava:" + tripId + ":%"} LIMIT 1`)
+  if (pays.rows.length > 0) return
+  await db.execute(sql`DELETE FROM nabava_trips WHERE id = ${tripId}`)
+}
+
+export async function getAutoMassageOrderItemIds(): Promise<string[]> {
+  await ensureTable()
+  const res = await db.execute(sql`
+    SELECT "massageOrderItemId" FROM nabava_purchases
+    WHERE "massageOrderItemId" IS NOT NULL AND "massageOrderItemId" <> ''
+  `)
+  return (res.rows as Record<string, unknown>[]).map((r) => String(r.massageOrderItemId))
+}
+
+function ymd(value: unknown): string {
+  if (value == null || value === "") return ""
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getUTCFullYear()
+    const m = String(value.getUTCMonth() + 1).padStart(2, "0")
+    const d = String(value.getUTCDate()).padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }
+  const match = String(value).match(/\d{4}-\d{2}-\d{2}/)
+  return match ? match[0] : ""
+}
+
+// Postavka masaže je lahko na računu recepcije (order_items) ali na dobavnici bara.
+// Oba vira knjižita isto gotovino maserki. Id je shranjen v massageOrderItemId.
+async function loadMassageSource(id: string): Promise<{ name: string; category: string; qty: number; eventDate: string; guestName: string } | null> {
+  const itemRes = await db.execute(sql`
+    SELECT oi.name, oi.category, oi.qty, oi."eventDate", r."guestName"
+    FROM order_items oi
+    LEFT JOIN reservations r ON r.id = oi."reservationId"
+    WHERE oi.id = ${id}
+    LIMIT 1
+  `)
+  const item = itemRes.rows[0] as Record<string, unknown> | undefined
+  if (item) {
+    return {
+      name: String(item.name || ""),
+      category: String(item.category || ""),
+      qty: Number(item.qty) || 1,
+      eventDate: ymd(item.eventDate),
+      guestName: String(item.guestName || ""),
+    }
+  }
+  const noteRes = await db.execute(sql`
+    SELECT dni."productName" AS name, dni.category, dni.quantity AS qty, dn.date AS "eventDate",
+           COALESCE(NULLIF(BTRIM(r."guestName"), ''), NULLIF(BTRIM(dn."guestName"), '')) AS "guestName"
+    FROM delivery_note_items dni
+    JOIN delivery_notes dn ON dn.id = dni."deliveryNoteId"
+    LEFT JOIN reservations r ON r.id = dn."reservationId"
+    WHERE dni.id = ${id}
+    LIMIT 1
+  `)
+  const note = noteRes.rows[0] as Record<string, unknown> | undefined
+  if (!note) return null
+  return {
+    name: String(note.name || ""),
+    category: String(note.category || ""),
+    qty: Number(note.qty) || 1,
+    eventDate: ymd(note.eventDate),
+    guestName: String(note.guestName || ""),
+  }
+}
+
+// Ustvari, premakne ali odstrani gotovinsko plačilo maserki za eno postavko na računu gosta.
+// Kliče se ob vpisu, spremembi datuma/količine in brisanju. Če Urška vrstico v nabavi zbriše ročno,
+// se ne ustvari znova, dokler postavke znova ne shrani.
+export async function syncMassageWorkerCash(orderItemId: string) {
+  if (!orderItemId) return
+  await ensureTable()
+  const existing = await db.execute(sql`
+    SELECT id, "tripId" FROM nabava_purchases WHERE "massageOrderItemId" = ${orderItemId} LIMIT 1
+  `)
+  const linked = existing.rows[0] as Record<string, unknown> | undefined
+
+  const item = await loadMassageSource(orderItemId)
+  const eventDate = item?.eventDate || ""
+  const book = !!item
+    && isGuestMassage(item.category, item.name)
+    && /^\d{4}-\d{2}-\d{2}$/.test(eventDate)
+    && eventDate >= MASSAGE_AUTO_FROM
+
+  if (!item || !book) {
+    if (linked?.id) {
+      const tripId = linked.tripId ? String(linked.tripId) : ""
+      await deleteNabavaPurchase(String(linked.id))
+      await removeEmptyMassageTrip(tripId)
+    }
+    return
+  }
+
+  const qty = Math.max(1, Math.round(Number(item.qty) || 1))
+  const amountAr = MASSAGE_PAY_AR * qty
+  const guest = String(item.guestName || "").trim() || "gost"
+  const name = qty > 1 ? `Masaža × ${qty} — ${guest}` : `Masaža — ${guest}`
+  const tripId = await ensureMassageTrip(eventDate)
+
+  if (linked?.id) {
+    const purchaseId = String(linked.id)
+    const oldTripId = linked.tripId ? String(linked.tripId) : ""
+    await updateNabavaPurchase({
+      id: purchaseId,
+      name,
+      category: "wellness",
+      amountAr,
+      company: "tourism",
+      date: eventDate,
+    })
+    if (oldTripId !== tripId) {
+      await db.execute(sql`UPDATE nabava_purchases SET "tripId" = ${tripId} WHERE id = ${purchaseId}`)
+      await removeEmptyMassageTrip(oldTripId)
+    }
+    return
+  }
+
+  const created = await addNabavaPurchase({
+    tripId,
+    name,
+    category: "wellness",
+    amountAr,
+    company: "tourism",
+    date: eventDate,
+  })
+  await db.execute(sql`UPDATE nabava_purchases SET "massageOrderItemId" = ${orderItemId} WHERE id = ${created.id}`)
 }

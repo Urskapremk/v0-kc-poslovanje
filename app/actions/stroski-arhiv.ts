@@ -36,7 +36,24 @@ export type StroskiReceipt = {
   sentToAccountingAt: string | null
   paymentMethod: PaymentMethod | null
   cashLedgerId: string | null
+  /** Kdaj je račun označen kot knjižen. Null = še ni knjiženo (stari računi ostanejo prazni). */
+  knjizenoAt: string | null
   createdAt: string | null
+}
+
+let knjizenoColumnReady: Promise<void> | null = null
+
+function ensureKnjizenoColumn() {
+  if (!knjizenoColumnReady) {
+    knjizenoColumnReady = db
+      .execute(sql`ALTER TABLE stroski_receipts ADD COLUMN IF NOT EXISTS "knjizenoAt" text`)
+      .then(() => undefined)
+      .catch((err) => {
+        knjizenoColumnReady = null
+        throw err
+      })
+  }
+  return knjizenoColumnReady
 }
 
 export type PaymentMethod = 'card' | 'orange_money' | 'cash'
@@ -64,6 +81,7 @@ function parsePages(raw: unknown, fallbackPathname: string, fallbackName: string
 
 // Vrne vse arhivirane račune (fotografije stroškov) za dano leto.
 export async function getStroskiReceipts(year: number): Promise<StroskiReceipt[]> {
+  await ensureKnjizenoColumn()
   const result = await db.execute(
     sql`SELECT * FROM stroski_receipts WHERE year = ${year} ORDER BY date DESC, "createdAt" DESC`
   )
@@ -88,6 +106,7 @@ export async function getStroskiReceipts(year: number): Promise<StroskiReceipt[]
       sentToAccountingAt: (r.sentToAccountingAt as string | null) ?? null,
       paymentMethod: (r.paymentMethod as PaymentMethod | null) ?? null,
       cashLedgerId: (r.cashLedgerId as string | null) ?? null,
+      knjizenoAt: (r.knjizenoAt as string | null) ?? null,
       createdAt: r.createdAt as string | null,
     }
   })
@@ -725,6 +744,17 @@ export async function setReceiptPaymentMethod(
   )
   revalidatePath('/statistika')
   return { ok: true as const, cashLedgerId, prevMethod }
+}
+
+// Označi prejet račun kot knjižen (roza žig) ali oznako odstrani.
+// Ne spremeni zneska, kategorij ali načina plačila. Starih računov ne označuje sam.
+export async function setReceiptKnjizeno(id: string, knjizeno: boolean) {
+  await ensureKnjizenoColumn()
+  const stamp = knjizeno ? new Date().toISOString() : null
+  await db.execute(sql`UPDATE stroski_receipts SET "knjizenoAt" = ${stamp} WHERE id = ${id}`)
+  revalidatePath('/statistika')
+  revalidatePath('/')
+  return { ok: true as const, knjizenoAt: stamp }
 }
 
 export type OmMatch = { id: string; date: string; amount: number; description: string; exact: boolean }

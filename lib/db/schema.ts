@@ -214,7 +214,7 @@ export const payments = pgTable('payments', {
   reservationId: text('reservationId').notNull().references(() => reservations.id),
   amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
   currency: text('currency').default('EUR'),
-  method: text('method').notNull(), // 'card', 'transfer', 'orange_money', 'cash'
+  method: text('method').notNull(), // 'card', 'transfer', 'orange_money', 'cash', 'kompenzacija'
   paidAt: date('paidAt').notNull(),
   notes: text('notes'),
   // Pri načinu Orange Money: koliko Ar je dejansko prišlo na OM denarnico.
@@ -225,6 +225,9 @@ export const payments = pgTable('payments', {
   // (bank_cash_income), ki se izbriše ob brisanju plačila.
   cashCompany: text('cashCompany'),
   cashLedgerId: text('cashLedgerId'),
+  // Kompenzacija: kontra strošek reklama (marketing_expenses). Brisanje plačila
+  // pobriše strošek in obratno. Brez blagajne, banke in Orange Money.
+  contraExpenseId: text('contraExpenseId'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })
 
@@ -382,6 +385,8 @@ export const excursions = pgTable('excursions', {
   excursionId: text('excursionId').notNull().references(() => excursions.id, { onDelete: 'cascade' }),
   boatId: text('boatId').notNull().references(() => boats.id, { onDelete: 'cascade' }),
   priceAr: integer('priceAr').notNull().default(0),
+  // Obračun Dilipu. Stolpec je v bazi; brez njega v shemi cenik pokaže "Dilip: 0 Ar".
+  supplierPriceAr: integer('supplierPriceAr').default(0),
   active: boolean('active').default(true),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })
@@ -633,13 +638,16 @@ export const staffSalaries = pgTable('staff_salaries', {
 
 export const marketingExpenses = pgTable('marketing_expenses', {
   id: text('id').primaryKey(),
-  category: text('category').notNull().default('marketing'), // 'marketing' | 'booking' | 'optimaplus'
+  category: text('category').notNull().default('marketing'), // 'marketing' | 'booking' | 'optimaplus' | 'provizija' | 'reklama'
   year: integer('year').notNull(),
   month: integer('month').notNull(), // 1-12 (izpeljano iz date)
   date: date('date'), // dejanski datum stroska
   description: text('description').notNull(),
   amount: decimal('amount', { precision: 10, scale: 2 }).notNull(), // v EUR
-  paymentMethod: text('paymentMethod'), // 'cash' | 'orange_money' | 'transfer' | 'in_kind'
+  paymentMethod: text('paymentMethod'), // 'cash' | 'orange_money' | 'transfer' | 'in_kind' | 'kompenzacija'
+  // Če je vrstica kontra strošek kompenzacije, tu je id plačila gosta. Brisanje
+  // stroška pobriše tudi plačilo (in obratno). Denarja ne premika.
+  compensationPaymentId: text('compensationPaymentId'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })
 

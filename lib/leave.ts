@@ -49,13 +49,24 @@ export const LEAVE_DEPARTMENTS: Record<LeaveDepartment, { sl: string; fr: string
   barman: { sl: 'Bar', fr: 'Bar', en: 'Bar' },
 }
 
-export type LeaveType = 'annual' | 'sick' | 'unpaid'
+export type LeaveType = 'annual' | 'exceptional' | 'sick' | 'unpaid'
+
+/** Izredni dopust (cl. 126 t. 4): družinski dogodki, do 10 dni/leto, ne od rednega dopusta. */
+export const LEAVE_EXCEPTIONAL_ANNUAL_QUOTA = 10
 
 export const LEAVE_TYPES: Record<LeaveType, { sl: string; fr: string; en: string }> = {
   annual: { sl: 'Redni dopust', fr: 'Congé annuel payé', en: 'Paid annual leave' },
-  sick: { sl: 'Bolniški dopust', fr: 'Congé de maladie', en: 'Sick leave' },
+  exceptional: {
+    sl: 'Izredni dopust',
+    fr: 'Congé exceptionnel',
+    en: 'Exceptional leave (family events)',
+  },
+  sick: { sl: 'Bolniška', fr: 'Congé de maladie', en: 'Sick leave' },
   unpaid: { sl: 'Neplačan dopust', fr: 'Congé sans solde', en: 'Unpaid leave' },
 }
+
+/** Vrste v obrazcu »Nov dopust« (bolniška ima ločen gumb). */
+export const DOPUST_FORM_LEAVE_TYPES: LeaveType[] = ['annual', 'exceptional']
 
 export interface LeaveRequest {
   id: string
@@ -71,6 +82,7 @@ export interface LeaveRequest {
   status: string
   signedAt: string | null
   signedDocumentPath?: string | null
+  doctorCertificatePath?: string | null
   advancePayAr?: number | null
   createdAt: string
 }
@@ -123,12 +135,81 @@ export function leaveDateSl(d: string | null): string {
   return `${dt.getDate()}. ${MONTHS_SL[dt.getMonth()]} ${dt.getFullYear()}`
 }
 
-// Sesteje porabljene dni dopusta za doloceno koledarsko leto (vse vrste skupaj).
-// Dopust se steje v leto svojega zacetnega datuma.
+// Porabljeni dnevi rednega dopusta v koledarskem letu.
+// Bolniška in izredni dopust se NE štejeta proti redni kvoti.
 export function usedDaysInYear(requests: LeaveRequest[], year: number): number {
   return requests
-    .filter(r => new Date(r.startDate + 'T00:00:00').getFullYear() === year)
+    .filter(
+      r =>
+        r.leaveType !== 'sick' &&
+        r.leaveType !== 'exceptional' &&
+        new Date(r.startDate + 'T00:00:00').getFullYear() === year,
+    )
     .reduce((sum, r) => sum + (r.days || 0), 0)
+}
+
+// Porabljeni dnevi izrednega dopusta v koledarskem letu (0–10).
+export function exceptionalLeaveUsedInYear(
+  requests: LeaveRequest[],
+  year: number,
+  excludeId?: string | null,
+): number {
+  return requests
+    .filter(r => {
+      if (r.leaveType !== 'exceptional') return false
+      if (excludeId && r.id === excludeId) return false
+      return new Date(r.startDate + 'T00:00:00').getFullYear() === year
+    })
+    .reduce((sum, r) => sum + (r.days || 0), 0)
+}
+
+export function exceptionalLeaveRemaining(
+  requests: LeaveRequest[],
+  year: number,
+  excludeId?: string | null,
+): number {
+  const used = exceptionalLeaveUsedInYear(requests, year, excludeId)
+  return Math.max(0, LEAVE_EXCEPTIONAL_ANNUAL_QUOTA - used)
+}
+
+export function exceptionalLeaveOverQuotaMessage(remaining: number, year: number): string {
+  const d = Math.max(0, Math.round(remaining * 2) / 2)
+  const unit = d === 1 ? 'dan' : 'dni'
+  return `V letu ${year} vam je še le ${d} ${unit} izrednega dopusta.`
+}
+
+export function isSickLeave(type: string | null | undefined): boolean {
+  return type === 'sick'
+}
+
+/** Velika oznaka na celici razporeda. */
+export function scheduleLeaveLabel(type: string | null | undefined): string {
+  return isSickLeave(type) ? 'BOLNIŠKA' : 'DOPUST'
+}
+
+/** Kratka oznaka poleg imena v pogledu po izmenah. */
+export function scheduleLeaveShort(type: string | null | undefined): string {
+  return isSickLeave(type) ? '(bolniška)' : '(dopust)'
+}
+
+// Koliko koledarskih dni bolniške pade v dani mesec (vsak dan samo enkrat).
+// To so plačani dnevi: 100 % nadomestilo, plača se ne zmanjša.
+export function sickDaysInMonth(
+  requests: Array<{ leaveType: string; startDate: string; endDate: string }>,
+  year: number,
+  month: number,
+): number {
+  const days = new Set<number>()
+  for (const r of requests) {
+    if (r.leaveType !== 'sick') continue
+    const start = new Date(String(r.startDate).slice(0, 10) + 'T00:00:00')
+    const end = new Date(String(r.endDate).slice(0, 10) + 'T00:00:00')
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) continue
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      if (d.getFullYear() === year && d.getMonth() === month - 1) days.add(d.getDate())
+    }
+  }
+  return days.size
 }
 
 // Normalizira ime za primerjavo (mala crka, brez sumnikov). Razporedi uporabljajo
@@ -210,6 +291,7 @@ export type LeaveSummary = {
   balanceBefore: number        // stanje pred tem mesecem
   earnedThisMonth: number      // priraslo ta mesec
   takenThisMonth: number       // izkoriscen letni dopust ta mesec
+  sickDaysThisMonth: number    // bolniška v tem mesecu (100 % plačan dan, ne zmanjša dopusta)
   remaining: number            // preostalo stanje po tem mesecu (tekoce + pretekla leta)
   referenceAmount: number      // ZAKONSKO: 1/12 placila prejsnjih 12 mesecev (povprecna mesecna osnova)
   // Razclenitev po letih (najprej koristimo tekoce leto, nato pretekla leta)
@@ -291,6 +373,7 @@ export function computeLeaveSummary(args: {
 
   const balanceBefore = openingBalance + monthsToPrev * params.monthlyAccrual - takenToPrev
   const remaining = openingBalance + earnedYtd - takenYtd
+  const sickDaysThisMonth = sickDaysInMonth(requests, year, month)
 
   // Razclenitev koriscenja po letih: NAJPREJ porabimo dopust tekocega leta,
   // sele ko ga zmanjka, porabljamo dopust iz preteklih let (openingBalance).
@@ -308,6 +391,7 @@ export function computeLeaveSummary(args: {
     balanceBefore,
     earnedThisMonth,
     takenThisMonth,
+    sickDaysThisMonth,
     remaining,
     referenceAmount,
     priorYearsBalance,

@@ -13,6 +13,7 @@ import {
   getExcursionSellingPricing, updateExcursionSellingPricing,
   getLunchProviders, addLunchProvider, updateLunchProvider, deleteLunchProvider
 } from "../actions/pricing";
+import { shownDilipSupplierAr } from "@/lib/dilip-excursion";
 
 type Product = {
   id: string;
@@ -1219,7 +1220,13 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
                         {boats.map((boat: Boat) => {
                           const priceKey = `${excursion.id}-${boat.id}`;
                           const price = getExcursionPrice(excursion.id, boat.id);
-                          const supplierPrice = getExcursionSupplierPrice(excursion.id, boat.id);
+                          const supplierPrice = shownDilipSupplierAr({
+                            excursionName: excursion.name,
+                            boatId: boat.id,
+                            boatName: boat.name,
+                            boatPriceAr: price,
+                            storedSupplierPriceAr: getExcursionSupplierPrice(excursion.id, boat.id),
+                          });
                           const isEditing = editingPrice === priceKey;
                           
                           return (

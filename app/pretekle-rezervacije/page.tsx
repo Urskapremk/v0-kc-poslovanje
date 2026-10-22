@@ -20,7 +20,7 @@ const MEAL_PLANS = [
 type ExcRow = { excursionId: string; amountEur: string }
 type TrfRow = { routeId: string; type: 'arrival' | 'departure'; pax: string; amountEur: string }
 type PayRow = {
-  method: 'cash' | 'card' | 'orange_money'
+  method: 'cash' | 'card' | 'orange_money' | 'kompenzacija'
   amountEur: string
   date: string
   cashCompany: 'tourism' | 'sarl'
@@ -448,8 +448,8 @@ export default function PretekleRezervacijePage() {
                     <div>
                       <label className={labelCls}>Način</label>
                       <div className="flex gap-2">
-                        {([['cash', 'Gotovina'], ['card', 'Kartica'], ['orange_money', 'OM']] as const).map(([v, l]) => (
-                          <button key={v} onClick={() => setPayRows(r => r.map((x, j) => j === i ? { ...x, method: v } : x))}
+                        {([['cash', 'Gotovina'], ['card', 'Kartica'], ['orange_money', 'OM'], ['kompenzacija', 'Kompenzacija']] as const).map(([v, l]) => (
+                          <button key={v} onClick={() => setPayRows(r => r.map((x, j) => j === i ? { ...x, method: v, writeToRegister: v === 'card' || v === 'kompenzacija' ? false : x.writeToRegister } : x))}
                             className={`flex-1 rounded-lg border px-2 py-2 text-[11px] font-medium transition-colors ${row.method === v ? 'border-[#c59b5b]/50 bg-[#c59b5b]/15 text-[#c59b5b]' : 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10'}`}>
                             {l}
                           </button>
@@ -489,7 +489,7 @@ export default function PretekleRezervacijePage() {
                         <p className="mt-1 text-[11px] text-white/40">Prazno = samodejno {ar(num(row.amountEur) * rate)}.</p>
                       </div>
                     )}
-                    {row.method !== 'card' && (
+                    {(row.method === 'cash' || row.method === 'orange_money') && (
                       <label className="sm:col-span-2 flex cursor-pointer items-center gap-2 text-[12px] text-white/70">
                         <input type="checkbox" checked={row.writeToRegister} className="h-4 w-4 accent-[#c59b5b]"
                           onChange={e => setPayRows(r => r.map((x, j) => j === i ? { ...x, writeToRegister: e.target.checked } : x))} />

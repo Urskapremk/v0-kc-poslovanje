@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { RefreshCw, Trash2, MessageSquare } from "lucide-react"
+import { RefreshCw, Trash2, MessageSquare, Search, X } from "lucide-react"
 import {
   getSurveyResponses,
   getSurveySummary,
@@ -30,6 +30,7 @@ export function SurveyResponsesBox() {
   const [responses, setResponses] = useState<SurveyResponseRecord[]>([])
   const [summary, setSummary] = useState<SurveySummaryRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [guestSearch, setGuestSearch] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -47,6 +48,16 @@ export function SurveyResponsesBox() {
   }, [load])
 
   const total = summary.reduce((acc, s) => acc + s.count, 0)
+
+  const q = guestSearch.trim().toLowerCase()
+  const filteredResponses =
+    q.length === 0
+      ? responses
+      : responses.filter((r) => {
+          const name = (r.guestName || "").toLowerCase()
+          const bungalow = r.bungalow ? bungalowDisplayName(r.bungalow).toLowerCase() : ""
+          return name.includes(q) || bungalow.includes(q)
+        })
 
   async function handleDelete(id: string) {
     if (!confirm("Izbrišem ta odgovor?")) return
@@ -108,8 +119,36 @@ export function SurveyResponsesBox() {
           Ko gostje odgovorijo na anketo, se bodo odgovori prikazali tukaj.
         </p>
       ) : (
+        <>
+          <label className="mb-3 block text-[10px] font-semibold uppercase tracking-[0.22em] text-white/40">
+            Išči gosta
+          </label>
+          <div className="relative mb-4">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+            <input
+              type="search"
+              value={guestSearch}
+              onChange={(e) => setGuestSearch(e.target.value)}
+              placeholder="Ime ali bungalov"
+              autoComplete="off"
+              className="w-full rounded-xl border border-white/10 bg-white/5 py-2.5 pl-10 pr-9 text-sm text-white placeholder:text-white/30 focus:border-[#c59b5b]/50 focus:outline-none"
+            />
+            {guestSearch && (
+              <button
+                type="button"
+                onClick={() => setGuestSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-white/40 transition-colors hover:bg-white/10 hover:text-white/70"
+                aria-label="Počisti iskanje"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          {q.length > 0 && filteredResponses.length === 0 ? (
+            <p className="py-4 text-center text-sm text-white/40">Ni gostov s tem imenom.</p>
+          ) : (
         <div className="space-y-2">
-          {responses.map((r) => {
+          {filteredResponses.map((r) => {
             const src = findSurveySource(r.source)
             return (
               <div
@@ -147,6 +186,8 @@ export function SurveyResponsesBox() {
             )
           })}
         </div>
+          )}
+        </>
       )}
     </div>
   )

@@ -1,11 +1,12 @@
 'use server'
 
 import { db } from '@/lib/db'
-import { reservations, transfers, orderItems, settings, boats, routes, supplements, routeSupplements, supplierPricing, sellingPricing, excursions, excursionPricing, excursionSellingPricing, excursionBookings, bentralReservations, guests, payments, agencies, products, lunchProviders, deliveryNotes, deliveryNoteItems, scheduledExcursions, staff, invoiceDiscounts, supplierPayments } from '@/lib/db/schema'
+import { reservations, transfers, orderItems, settings, boats, routes, supplements, routeSupplements, supplierPricing, sellingPricing, excursions, excursionPricing, excursionSellingPricing, excursionBookings, bentralReservations, guests, payments, agencies, products, lunchProviders, deliveryNotes, deliveryNoteItems, scheduledExcursions, staff, invoiceDiscounts, supplierPayments, marketingExpenses } from '@/lib/db/schema'
 import { eq, and, or, lte, gte, desc, isNull, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { unpaySupplier } from './supplier-payment'
 import { unpayFanja } from './fanja-payment'
+import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
 
 // Generate unique ID
 function uid(prefix: string) {
@@ -405,7 +406,7 @@ async function syncAccommodationItem(reservationId: string) {
   const paymentInfoParts = pays.map((p) => {
     const amt = Number(p.amount)
     const method =
-      p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method
+      p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method === 'kompenzacija' ? 'Kompenzacija' : p.method
     const date = new Date(p.paidAt).toLocaleDateString('sl-SI')
     return `${amt.toFixed(2)} EUR (${method}, ${date})`
   })
@@ -492,7 +493,9 @@ async function syncTransferItem(reservationId: string, type: 'arrival' | 'depart
 }
 
 export async function deleteReservation(id: string) {
+  const items = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.reservationId, id))
   await db.delete(reservations).where(eq(reservations.id, id))
+  for (const item of items) await syncMassageCash(item.id)
   revalidatePath('/')
 }
 
@@ -668,6 +671,15 @@ export async function deleteTransfer(reservationId: string, type: 'arrival' | 'd
 
 // ============ ORDER ITEMS ============
 
+async function syncMassageCash(orderItemId: string) {
+  try {
+    const { syncMassageWorkerCash } = await import('./nabava')
+    await syncMassageWorkerCash(orderItemId)
+  } catch (e) {
+    console.log('[v0] syncMassageWorkerCash failed:', (e as Error).message)
+  }
+}
+
 export async function addOrderItem(reservationId: string, data: {
   name: string
   category: string
@@ -680,8 +692,9 @@ export async function addOrderItem(reservationId: string, data: {
   eventDate?: string // Date when the item/service occurs (for excursions, transfers)
   addedBy?: string // who added this item at reception (defaults to Urska)
 }) {
+  const id = uid('ord')
   await db.insert(orderItems).values({
-    id: uid('ord'),
+    id,
     reservationId,
     name: data.name,
     category: data.category,
@@ -694,7 +707,9 @@ export async function addOrderItem(reservationId: string, data: {
     eventDate: data.eventDate || null,
     addedBy: data.addedBy || 'Urska'
   })
+  await syncMassageCash(id)
   revalidatePath('/')
+  return { id }
 }
 
 // Reverse every recorded payment tied to an excursion booking (supplier: Dilip/lunch/
@@ -734,6 +749,7 @@ export async function deleteOrderItem(id: string) {
   }
 
   await db.delete(orderItems).where(eq(orderItems.id, id))
+  await syncMassageCash(id)
   revalidatePath('/')
   revalidatePath('/statistika')
 }
@@ -773,6 +789,7 @@ export async function updateOrderItemDate(id: string, eventDate: string) {
     }
   }
 
+  await syncMassageCash(id)
   revalidatePath('/')
 }
 
@@ -1673,8 +1690,10 @@ export async function deleteReservationAndGuest(reservationId: string, deleteGue
     }).where(eq(bentralReservations.id, res.bentralReservationId))
   }
   
+  const reservationOrders = await db.select({ id: orderItems.id }).from(orderItems).where(eq(orderItems.reservationId, reservationId))
   // Delete reservation
   await db.delete(reservations).where(eq(reservations.id, reservationId))
+  for (const item of reservationOrders) await syncMassageCash(item.id)
   
   // Delete guest if requested and no other reservations exist for this guest
   if (deleteGuest && res.guestId) {
@@ -1692,7 +1711,12 @@ export async function deleteReservationAndGuest(reservationId: string, deleteGue
 
 // ============ PAYMENTS ============
 
-const PAYMENT_METHODS = ['card', 'transfer', 'orange_money', 'cash'] as const
+const PAYMENT_METHODS = ['card', 'transfer', 'orange_money', 'cash', 'kompenzacija'] as const
+
+async function ensureKompenzacijaColumns() {
+  await db.execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS "contraExpenseId" text`)
+  await db.execute(sql`ALTER TABLE marketing_expenses ADD COLUMN IF NOT EXISTS "compensationPaymentId" text`)
+}
 
 export async function getPayments(reservationId: string) {
   return db.select().from(payments)
@@ -1710,10 +1734,39 @@ export async function addPayment(data: {
   cashCompany?: string // Pri gotovini: podjetje (tourism/sarl) → vpiše priliv v blagajno
 }) {
   const id = uid('pay')
+  const method = data.method === 'kompenzacija' ? 'kompenzacija' : data.method
+
+  // Kompenzacija poravna račun in hkrati knjiži kontra strošek reklama.
+  // Denar ne vstopi v blagajno, banko ali Orange Money in iz njih tudi ne izstopi.
+  let contraExpenseId: string | null = null
+  let notes = data.notes
+  if (method === 'kompenzacija') {
+    await ensureKompenzacijaColumns()
+    const [res] = await db.select().from(reservations).where(eq(reservations.id, data.reservationId))
+    const guestName = res?.guestName || 'gost'
+    const parts = String(data.paidAt || '').split('-')
+    const year = Number(parts[0]) || new Date().getUTCFullYear()
+    const month = Number(parts[1]) || 1
+    const eur = Number(data.amount)
+    contraExpenseId = uid('mkt')
+    const description = `${guestName} — reklamni material za Komba Cabana (kontra strošek)`
+    await db.insert(marketingExpenses).values({
+      id: contraExpenseId,
+      category: 'reklama',
+      year,
+      month,
+      date: data.paidAt,
+      description,
+      amount: Number.isFinite(eur) ? eur.toFixed(2) : '0.00',
+      paymentMethod: 'kompenzacija',
+      compensationPaymentId: id,
+    })
+    if (!notes?.trim()) notes = 'Reklamni material za Komba Cabana'
+  }
 
   // Če je plačilo prek Orange Money in je vpisan Ar znesek → priliv v OM denarnico (kategorija stranka)
   let omLedgerId: string | null = null
-  const omAmountAr = data.method === 'orange_money' && data.omAmountAr && data.omAmountAr > 0 ? Math.round(data.omAmountAr) : null
+  const omAmountAr = method === 'orange_money' && data.omAmountAr && data.omAmountAr > 0 ? Math.round(data.omAmountAr) : null
   if (omAmountAr) {
     const [res] = await db.select().from(reservations).where(eq(reservations.id, data.reservationId))
     const guestName = res?.guestName || 'stranka'
@@ -1731,7 +1784,7 @@ export async function addPayment(data: {
   // Če je plačilo z gotovino in je izbrano podjetje → priliv v blagajno (bank_cash_income).
   // Znesek plačila je v EUR, blagajna hrani Ar → pretvorba prek tečaja.
   let cashLedgerId: string | null = null
-  const cashCompany = data.method === 'cash' && data.cashCompany ? data.cashCompany : null
+  const cashCompany = method === 'cash' && data.cashCompany ? data.cashCompany : null
   if (cashCompany) {
     const [res] = await db.select().from(reservations).where(eq(reservations.id, data.reservationId))
     const guestName = res?.guestName || 'stranka'
@@ -1747,18 +1800,26 @@ export async function addPayment(data: {
     cashLedgerId = ci.id
   }
 
-  await db.insert(payments).values({
-    id,
-    reservationId: data.reservationId,
-    amount: data.amount,
-    method: data.method,
-    paidAt: data.paidAt,
-    notes: data.notes,
-    omAmountAr,
-    omLedgerId,
-    cashCompany,
-    cashLedgerId,
-  })
+  try {
+    await db.insert(payments).values({
+      id,
+      reservationId: data.reservationId,
+      amount: data.amount,
+      method,
+      paidAt: data.paidAt,
+      notes,
+      omAmountAr,
+      omLedgerId,
+      cashCompany,
+      cashLedgerId,
+      contraExpenseId,
+    })
+  } catch (err) {
+    if (contraExpenseId) {
+      await db.delete(marketingExpenses).where(eq(marketingExpenses.id, contraExpenseId))
+    }
+    throw err
+  }
   
   // Update reservation amountPaid
   const allPayments = await db.select().from(payments).where(eq(payments.reservationId, data.reservationId))
@@ -1766,12 +1827,22 @@ export async function addPayment(data: {
   await db.update(reservations).set({ amountPaid: totalPaid.toString() }).where(eq(reservations.id, data.reservationId))
   
   revalidatePath('/')
+  revalidatePath('/statistika')
   return id
 }
 
 export async function deletePayment(id: string) {
+  await ensureKompenzacijaColumns()
   const [payment] = await db.select().from(payments).where(eq(payments.id, id))
   if (!payment) return
+
+  // Kontra strošek reklama gre stran skupaj s kompenzacijo. Povezavo prej
+  // prekinemo, da brisanje stroška ne poskusi znova zbrisati tega plačila.
+  // Strošek nima blagajniškega ali bančnega gibanja.
+  if (payment.contraExpenseId) {
+    await db.execute(sql`UPDATE marketing_expenses SET "compensationPaymentId" = NULL WHERE id = ${payment.contraExpenseId}`)
+    await db.delete(marketingExpenses).where(eq(marketingExpenses.id, payment.contraExpenseId))
+  }
 
   // Če je bil ustvarjen priliv v OM denarnico, ga izbriši skupaj s plačilom
   if (payment.omLedgerId) {
@@ -1793,6 +1864,7 @@ export async function deletePayment(id: string) {
   await db.update(reservations).set({ amountPaid: totalPaid.toString() }).where(eq(reservations.id, payment.reservationId))
   
   revalidatePath('/')
+  revalidatePath('/statistika')
 }
 
 // ============ EXCURSION BOOKINGS ============
@@ -2249,6 +2321,17 @@ export async function completeCheckout(reservationId: string, checkoutPayments: 
 }>) {
   // Add all checkout payments
   for (const payment of checkoutPayments) {
+    if (String(payment.method || '').toLowerCase() === 'kompenzacija') {
+      const today = new Date().toISOString().slice(0, 10)
+      await addPayment({
+        reservationId,
+        amount: String(payment.amount),
+        method: 'kompenzacija',
+        paidAt: today,
+        notes: payment.notes,
+      })
+      continue
+    }
     const id = `pay-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
     await db.insert(payments).values({
       id,
@@ -2607,8 +2690,12 @@ export async function getArchivedExcursions() {
     const isDirectBoat = nameLc.includes('ampangorina') || nameLc.includes('maki')
     const boatNet = Math.max(0, boatCompletePrice - guidePrice)
     const dilipOverride = members.find(m => m.dilipOverrideAr != null)?.dilipOverrideAr
+    // Ista izjema kot na seznamu "Izleti za naročiti": polna cena čolna, brez provizije.
+    const dilipPaysFullBoat = dilipOverride == null && dilipOwesFullBoatPrice(excursionName, first.boatId)
     const dilipPayment = dilipOverride != null
       ? Number(dilipOverride)
+      : dilipPaysFullBoat
+      ? dilipFullBoatAr(boatCompletePrice)
       : isFixedDilip
       ? 80000 + guidePrice
       : isDirectBoat

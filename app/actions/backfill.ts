@@ -98,7 +98,7 @@ export type BackfillInput = {
   // Payments — one or more, each with its own method/amount/date. Lets a historical stay be
   // split across methods (e.g. part cash, part card).
   payments: {
-    method: 'cash' | 'card' | 'orange_money'
+    method: 'cash' | 'card' | 'orange_money' | 'kompenzacija'
     amountEur: number
     date: string // YYYY-MM-DD
     cashCompany?: 'tourism' | 'sarl' // when method === 'cash'
@@ -238,8 +238,9 @@ export async function backfillPastReservation(input: BackfillInput) {
 
     const massageCount = Number(input.massageCount) || 0
     for (let i = 0; i < massageCount; i++) {
+      const massageId = uid('oi')
       await db.insert(orderItems).values({
-        id: uid('oi'),
+        id: massageId,
         reservationId: resId,
         name: 'Malagasy Massage',
         category: 'Wellness',
@@ -251,6 +252,12 @@ export async function backfillPastReservation(input: BackfillInput) {
         eventDate: input.arrival,
         addedBy: 'Urska',
       })
+      try {
+        const { syncMassageWorkerCash } = await import('./nabava')
+        await syncMassageWorkerCash(massageId)
+      } catch (e) {
+        console.log('[v0] syncMassageWorkerCash (backfill) failed:', (e as Error).message)
+      }
     }
 
     const chocolateCount = Number(input.chocolateCount) || 0

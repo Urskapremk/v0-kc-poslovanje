@@ -6,6 +6,7 @@ import { eq, and, isNull, or } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { randomBytes } from 'crypto'
 import { logSentEmail } from './sent-emails'
+import { bungalowDistinctDisplayNames } from '@/lib/bungalow'
 
 // ============ GUEST SELF CHECK-IN ============
 
@@ -438,15 +439,17 @@ async function buildCheckinEmail(
     if (link.url) guests.push({ name: s.name || 'Guest', url: link.url })
   }
 
+  const bungalowLine = bungalowDistinctDisplayNames((res.bungalow as string) || '')
+
   const html = buildCheckinEmailHtml({
     guestName: names.first || 'Guest',
-    bungalow: (res.bungalow as string) || '',
+    bungalow: bungalowLine,
     arrival: formatEmailDate(res.arrival as string | null),
     departure: formatEmailDate(res.departure as string | null),
     guests,
   })
 
-  return { html, to, guestName: names.first || 'Guest', bungalow: (res.bungalow as string) || '' }
+  return { html, to, guestName: names.first || 'Guest', bungalow: bungalowLine }
 }
 
 // Returns the rendered HTML + recipient so the UI can show a preview before sending.

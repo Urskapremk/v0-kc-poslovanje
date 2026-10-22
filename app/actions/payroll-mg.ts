@@ -13,6 +13,7 @@ import {
   type AttendanceMonth,
 } from '@/lib/attendance'
 import { computeLeaveBalance, type LeaveBalance } from '@/lib/payroll-mg'
+import { sickDaysInMonth } from '@/lib/leave'
 import { parseSalaryChanges } from '@/lib/employment'
 
 const MG_CONFIG_KEY = 'payroll_mg_config'
@@ -25,6 +26,7 @@ export type MgAttendanceSummary = {
   sundayHours: number
   holidayHours: number
   leaveDays: number
+  sickDays: number          // bolniška iz razporeda: 100 % plačan dan, ne zmanjša dopusta
   offDays: number
   totalWorkHours: number
   creditedHours: number
@@ -57,12 +59,20 @@ export async function getMgAttendanceSummary(
   const summary = computeAttendanceSummary(entries, year, month)
   const norm = computeNorm(summary)
 
-  // Koristeni dopust v LETU do konca izbranega meseca (vsi dnevi status='leave').
+  // Koristeni dopust v LETU do konca izbranega meseca (status='leave').
+  // Dan, ki je na razporedu bolniška, ni redni dopust — tudi če je v prisotnosti vpisan kot dopust.
   const usedRes = await db.execute(
     sql`SELECT COUNT(*)::int AS used
-        FROM attendance_days
-        WHERE "staffId" = ${staffId} AND year = ${year} AND month <= ${month}
-          AND status = 'leave'`,
+        FROM attendance_days a
+        WHERE a."staffId" = ${staffId} AND a.year = ${year} AND a.month <= ${month}
+          AND a.status = 'leave'
+          AND NOT EXISTS (
+            SELECT 1 FROM leave_requests l
+            WHERE l."staffId" = a."staffId"
+              AND l."leaveType" = 'sick'
+              AND make_date(a.year, a.month, a.day) >= l."startDate"::date
+              AND make_date(a.year, a.month, a.day) <= l."endDate"::date
+          )`,
   )
   const usedYtd = Number(usedRes.rows[0]?.used ?? 0)
 
@@ -83,12 +93,28 @@ export async function getMgAttendanceSummary(
 
   const leaveBalance = computeLeaveBalance({ year, month, hireISO, usedYtd, opening, priorByYear })
 
+  const sickRes = await db.execute(
+    sql`SELECT "leaveType", "startDate", "endDate"
+        FROM leave_requests
+        WHERE "staffId" = ${staffId} AND "leaveType" = 'sick'`,
+  )
+  const sickDays = sickDaysInMonth(
+    sickRes.rows.map((r) => ({
+      leaveType: String(r.leaveType ?? ''),
+      startDate: String(r.startDate ?? ''),
+      endDate: String(r.endDate ?? ''),
+    })),
+    year,
+    month,
+  )
+
   return {
     hasData: result.rows.length > 0,
     normalHours: summary.normalHours,
     sundayHours: summary.sundayHours,
     holidayHours: summary.holidayHours,
     leaveDays: summary.leaveDays,
+    sickDays,
     offDays: summary.offDays,
     totalWorkHours: summary.totalWorkHours,
     creditedHours: norm.creditedHours,

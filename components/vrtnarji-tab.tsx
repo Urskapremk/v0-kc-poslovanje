@@ -18,7 +18,7 @@ import { getAllStaffMembers } from '@/app/actions/statistics'
 import { employedOn, endDatesFor, keptInMonth } from '@/lib/employment'
 import { defaultPrintFrom, printAfterDialog, printStartDay, printWithClass } from '@/lib/print-from'
 import { PrintFromDialog } from '@/components/print-from-dialog'
-import { leaveDaysForStaff, LEAVE_TYPES, type LeaveType } from '@/lib/leave'
+import { leaveDaysForStaff, LEAVE_TYPES, scheduleLeaveLabel, scheduleLeaveShort, type LeaveType } from '@/lib/leave'
 import { getHolidayName, isSunday } from '@/lib/holidays'
 import { summarizeMonthHours, type HoursBreakdown } from '@/lib/work-hours'
 import { HoursBreakdownLines } from '@/components/hours-breakdown-lines'
@@ -83,7 +83,8 @@ export default function VrtnarjiTab({
         const away = !employedOn(endByName[g], day.date)
         const post = away ? null : ((day.assignments[g] || 'OFF') as GardenPost)
         const worked = !!post && post !== 'OFF' && post !== 'RESERVE'
-        return { day: i + 1, hours: worked ? hoursForPost(post) : 0, onLeave: !away && !!leaveByStaff[g]?.[i + 1] }
+        const info = leaveByStaff[g]?.[i + 1]
+        return { day: i + 1, hours: worked ? hoursForPost(post) : 0, onLeave: !away && !!info, leaveType: info?.type }
       })
       map[g] = summarizeMonthHours(year, month, entries)
     }
@@ -165,6 +166,8 @@ export default function VrtnarjiTab({
           .gardeners-color-print .gc-off { color: #aaa !important; }
           .gardeners-color-print .gc-leave { background: #f0e0da !important; color: #975b45 !important; }
           .gardeners-color-print .gc-leave small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
+          .gardeners-color-print .gc-sick { background: #ebe4f4 !important; color: #5c3d78 !important; }
+          .gardeners-color-print .gc-sick small { display: block; font-weight: 400; font-size: 9px; opacity: .75; }
           .gardeners-color-print .g-total td { font-weight: 700; background: #f8f5ef !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .gardeners-color-print .doc-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 11px; margin-top: 10px; }
           .gardeners-color-print .doc-legend .lg { display: inline-flex; align-items: center; gap: 5px; }
@@ -430,8 +433,8 @@ export default function VrtnarjiTab({
                       {names.map((g) => {
                         const leave = leaveByStaff[g]?.[dayNum]
                         return (
-                          <span key={g} className={`inline-block rounded-md px-2 py-0.5 text-xs ${leave ? `border ${t.leaveBadge}` : cls}`}>
-                            {g}{leave ? ' (dopust)' : ''}
+                          <span key={g} className={`inline-block rounded-md px-2 py-0.5 text-xs ${leave ? `border ${leave.type === 'sick' ? t.sickBadge : t.leaveBadge}` : cls}`}>
+                            {g}{leave ? ` ${scheduleLeaveShort(leave.type)}` : ''}
                           </span>
                         )
                       })}
@@ -524,10 +527,10 @@ export default function VrtnarjiTab({
                       <td key={g} className="py-1.5 px-2">
                         {leave ? (
                           <span
-                            className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-0.5 text-xs ${t.leaveBadge}`}
+                            className={`inline-flex flex-col gap-0.5 rounded-md border px-2 py-0.5 text-xs ${leave.type === 'sick' ? t.sickBadge : t.leaveBadge}`}
                             title={LEAVE_TYPES[leave.type as LeaveType]?.sl}
                           >
-                            <span className="font-semibold">DOPUST</span>
+                            <span className="font-semibold">{scheduleLeaveLabel(leave.type)}</span>
                             <span className="text-[10px] opacity-70">{POST_LABELS[post]}</span>
                           </span>
                         ) : (
@@ -597,8 +600,8 @@ export default function VrtnarjiTab({
                     const leave = leaveByStaff[g]?.[dayNum]
                     if (leave) {
                       return (
-                        <td key={g} className="gc-cell gc-leave">
-                          DOPUST
+                        <td key={g} className={`gc-cell ${leave.type === 'sick' ? 'gc-sick' : 'gc-leave'}`}>
+                          {scheduleLeaveLabel(leave.type)}
                           <small>{POST_LABELS[post]}</small>
                         </td>
                       )
