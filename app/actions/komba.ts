@@ -1,6 +1,7 @@
 'use server'
 
 import { db } from '@/lib/db'
+import { bentralCountryForImport } from '@/lib/bentral-country-lock'
 import { reservations, transfers, orderItems, settings, boats, routes, supplements, routeSupplements, supplierPricing, sellingPricing, excursions, excursionPricing, excursionSellingPricing, excursionBookings, bentralReservations, guests, payments, agencies, products, lunchProviders, deliveryNotes, deliveryNoteItems, scheduledExcursions, staff, invoiceDiscounts, supplierPayments, marketingExpenses } from '@/lib/db/schema'
 import { eq, and, or, lte, gte, desc, isNull, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
@@ -1512,6 +1513,9 @@ export async function importBentralCSV(csvContent: string) {
       const adults = parseInt(adultsStr) || 1
       const children = parseInt(childrenStr) || 0
       const amount = amountStr ? amountStr.replace(',', '.') : '0'
+      // A fresh Bentral export still says Madagascar for the six corrected
+      // 2026 lines. Keep the correction instead of writing that country back.
+      const countryValue = bentralCountryForImport(externalId, country)
       
       // Check if reservation exists
       const existing = await db.select().from(bentralReservations).where(eq(bentralReservations.externalId, externalId)).limit(1)
@@ -1522,7 +1526,7 @@ export async function importBentralCSV(csvContent: string) {
           status,
           source: source || null,
           guestName,
-          country: country || null,
+          country: countryValue,
           checkIn,
           checkOut,
           nights,
@@ -1545,7 +1549,7 @@ export async function importBentralCSV(csvContent: string) {
           status,
           source: source || null,
           guestName,
-          country: country || null,
+          country: countryValue,
           checkIn,
           checkOut,
           nights,
