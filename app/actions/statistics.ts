@@ -26,6 +26,7 @@ import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
+import { normalizeAssetCost } from '@/lib/asset-cost'
 
 type KuhinjaRacunLine = {
   id: string
@@ -444,10 +445,11 @@ export async function addAssetCost(params: {
   payFromCash?: boolean
 }) {
   await ensureAssetSchema()
-  const amountAr = Math.round((params.amountAr || 0) * 100) / 100
-  if (!params.assetId || !params.date || !params.description.trim() || amountAr <= 0) {
+  const parsed = normalizeAssetCost(params)
+  if (!params.assetId || !parsed) {
     throw new Error('Opis, datum in znesek stroška so obvezni.')
   }
+  const { date, description, amountAr } = parsed
   const receiptId = params.receiptId?.trim() || null
   if (receiptId) {
     const dup = await db.execute(
@@ -462,8 +464,8 @@ export async function addAssetCost(params: {
     const { addCashExpense } = await import('./banka')
     const res = await addCashExpense({
       company: 'tourism',
-      date: params.date,
-      purpose: `${assetName}: ${params.description.trim()}`,
+      date,
+      purpose: `${assetName}: ${description}`,
       amount: amountAr,
     })
     cashExpenseId = (res as { id?: string } | undefined)?.id ?? null
@@ -471,11 +473,112 @@ export async function addAssetCost(params: {
   const id = `fac-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   await db.execute(
     sql`INSERT INTO fixed_asset_costs (id, "assetId", date, description, "amountAr", "receiptId", "cashExpenseId")
-        VALUES (${id}, ${params.assetId}, ${params.date}, ${params.description.trim()}, ${String(amountAr)}, ${receiptId}, ${cashExpenseId})`
+        VALUES (${id}, ${params.assetId}, ${date}, ${description}, ${String(amountAr)}, ${receiptId}, ${cashExpenseId})`
   )
   await recomputeAssetValue(params.assetId)
   revalidatePath('/statistika')
   return { id }
+}
+
+// Popravi obstoječi strošek na sredstvu v izdelavi.
+// Ista preverba kot pri dodajanju. Gotovina Tourism: ista vknjižba se posodobi
+// (datum, besedilo, znesek). Nova se odpre samo, če je potrjena gotovina in
+// povezane vknjižbe še ni. Izklop gotovine pobriše samo povezani odliv.
+// Račun ostane račun — gotovine pri njem ne vklapljamo in je ne brišemo.
+export async function updateAssetCost(params: {
+  id: string
+  date: string
+  description: string
+  amountAr: number
+  payFromCash?: boolean
+}) {
+  await ensureAssetSchema()
+  const parsed = normalizeAssetCost(params)
+  if (!params.id || !parsed) {
+    throw new Error('Opis, datum in znesek stroška so obvezni.')
+  }
+  const { date, description, amountAr } = parsed
+  const row = await db.execute(
+    sql`SELECT c."assetId", c."receiptId", c."cashExpenseId", c."nabavaPurchaseId", a.name AS "assetName"
+        FROM fixed_asset_costs c
+        JOIN fixed_assets a ON a.id = c."assetId"
+        WHERE c.id = ${params.id}`
+  )
+  const r = row.rows[0]
+  if (!r) throw new Error('Strošek ne obstaja.')
+  const assetId = r.assetId as string
+  const receiptId = (r.receiptId as string) || null
+  let cashExpenseId = (r.cashExpenseId as string) || null
+  const nabavaPurchaseId = (r.nabavaPurchaseId as string) || null
+  const assetName = (r.assetName as string) || 'sredstvo v izdelavi'
+  if (params.payFromCash && receiptId) {
+    throw new Error('Račun se ne odšteva iz blagajne. Gotovino vklopi samo pri ročnem strošku.')
+  }
+  const wantCash = Boolean(params.payFromCash) && !receiptId
+  const purpose = `${assetName}: ${description}`
+  const { addCashExpense, updateCashExpense, deleteCashExpense } = await import('./banka')
+
+  async function syncLinkedCash(linkedId: string | null): Promise<string | null> {
+    if (wantCash) {
+      if (linkedId) {
+        const exists = await db.execute(
+          sql`SELECT id FROM bank_cash_expenses WHERE id = ${linkedId} LIMIT 1`
+        )
+        if (exists.rows.length > 0) {
+          await updateCashExpense(linkedId, { date, purpose, amount: amountAr })
+          return linkedId
+        }
+      }
+      const created = await addCashExpense({
+        company: 'tourism',
+        date,
+        purpose,
+        amount: amountAr,
+      })
+      return (created as { id?: string } | undefined)?.id ?? null
+    }
+    if (linkedId) await deleteCashExpense(linkedId)
+    return null
+  }
+
+  if (nabavaPurchaseId) {
+    const purchase = await db.execute(
+      sql`SELECT "cashExpenseId", "payMethod", company FROM nabava_purchases WHERE id = ${nabavaPurchaseId} LIMIT 1`
+    )
+    const p = purchase.rows[0]
+    if (p?.payMethod === 'orange') {
+      throw new Error('Ta strošek je knjižen prek nabave z Orange Money. Popravi ga v nabavi.')
+    }
+    const purchaseCashId = (p?.cashExpenseId as string) || null
+    const costCashBefore = cashExpenseId
+    const linked = purchaseCashId || costCashBefore
+    cashExpenseId = await syncLinkedCash(linked)
+    if (costCashBefore && costCashBefore !== cashExpenseId) {
+      await deleteCashExpense(costCashBefore)
+    }
+    if (p) {
+      const company = cashExpenseId ? 'tourism' : ((p.company as string) || 'tourism')
+      const payMethod = cashExpenseId ? 'cash' : ((p.payMethod as string) || 'cash')
+      await db.execute(
+        sql`UPDATE nabava_purchases
+            SET name = ${description}, date = ${date}, "amountAr" = ${amountAr},
+                "cashExpenseId" = ${cashExpenseId}, "payMethod" = ${payMethod}, company = ${company}
+            WHERE id = ${nabavaPurchaseId}`
+      )
+    }
+  } else if (!receiptId) {
+    cashExpenseId = await syncLinkedCash(cashExpenseId)
+  }
+
+  await db.execute(
+    sql`UPDATE fixed_asset_costs
+        SET date = ${date}, description = ${description}, "amountAr" = ${String(amountAr)},
+            "cashExpenseId" = ${cashExpenseId}
+        WHERE id = ${params.id}`
+  )
+  await recomputeAssetValue(assetId)
+  revalidatePath('/statistika')
+  return { id: params.id }
 }
 
 // Strošek, vnesen prek Borutove nabave (gotovina): odliv blagajne je v lasti nakupa (nabava_purchases),
