@@ -26,6 +26,7 @@ import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { ensureSupplierPaymentCostColumns } from './supplier-payment'
+import { transportCostTitle } from '@/lib/dilip-boat-cost'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
 import { normalizeAssetCost } from '@/lib/asset-cost'
 
@@ -523,7 +524,7 @@ export async function updateAssetCost(params: {
   const assetName = (r.assetName as string) || 'sredstvo v izdelavi'
   if (supplierPaymentId) {
     if (params.payFromCash) {
-      throw new Error('Plačilo Dilipu je že zabeleženo v blagajni ali Orange Money. Popravi ga pri čolnu — tukaj ne odštevaj še enkrat.')
+      throw new Error('Plačilo je že zabeleženo v blagajni ali Orange Money. Popravi ga na dnevu — tukaj ne odštevaj še enkrat.')
     }
     const { syncDilipBoatPaymentFromContract } = await import('./supplier-payment')
     await syncDilipBoatPaymentFromContract({
@@ -1593,14 +1594,20 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Gotovinski nakupi na Borutovih nabavnih poteh (kalamari, riba, pijača …): ista logika
   // razvrščanja kot arhiv računov — hrana bremeni kuhinjo, pijača bar itd. Zneski so v Ar → EUR.
   const nabavaPurchases = await getNabavaPurchasesForMonth(year, month)
-  // Plačilo Dilipu za čoln Nero, označeno z vrsto stroška: ista razporeditev kot nakup.
+  // Plačila Dilipu, vozniku in nosačem, označena z vrsto stroška: ista razporeditev kot nakup.
   // Sredstvo v izdelavi / osnovno sredstvo / posojilo zanka spodaj preskoči (niso tekoči oddelek).
+  // Tuc tuc ostane pri besedilnem seštevku spodaj.
   const nabavaMonthPrefix = `${year}-${String(month).padStart(2, "0")}%`
   await ensureSupplierPaymentCostColumns()
+  const transportCostWhere = sql`(
+    "refKey" LIKE 'nabava:%:boat'
+    OR "refKey" LIKE 'nabava:%:boatdriver'
+    OR "refKey" LIKE 'nabava:%:porters'
+  )`
   const boatCostRows = await db.execute(sql`
-    SELECT id, "paidAt", "amountAr", "costCategory", method, "ledgerId"
+    SELECT id, "refKey", "paidAt", "amountAr", "costCategory", method, "ledgerId"
     FROM supplier_payments
-    WHERE "refKey" LIKE 'nabava:%:boat'
+    WHERE ${transportCostWhere}
       AND COALESCE("costCategory", '') <> ''
       AND COALESCE("paidAt", '') LIKE ${nabavaMonthPrefix}
   `)
@@ -1608,9 +1615,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
     const orange = r.method === "orange"
     const ledgerId = r.ledgerId ? String(r.ledgerId) : ""
     return {
-      id: `dilip-boat-${String(r.id)}`,
+      id: `transport-pay-${String(r.id)}`,
       date: r.paidAt ? String(r.paidAt).slice(0, 10) : "",
-      name: "Dilip (čoln Nero)",
+      name: transportCostTitle(String(r.refKey || "")),
       amountAr: Number(r.amountAr) || 0,
       payMethod: (orange ? "orange" : "cash") as "orange" | "cash",
       category: String(r.costCategory || ""),
@@ -1710,6 +1717,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Nosači in Tuc tuc = vsak SVOJ samostojen strošek (npr. Borutove nabave HV/Komba). Vir so gotovinski odlivi
   // (bank_cash_expenses) IN Orange Money odlivi, prepoznani po besedilu opisa. NE bremenita nobenega oddelka —
   // znižujeta le SKUPNI dobiček (kot reprezentanca/amortizacija). Zneski so v Ar → EUR prek tečaja.
+  // Označeno plačilo Dilipu, vozniku ali nosačem je že v zanki kategorij zgoraj, zato ga tukaj izpustimo.
   const monthStart = `${year}-${String(month).padStart(2, "0")}-01`
   const nextMonthStart = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`
   const cashExtraRows = await db.execute(sql`
@@ -1720,7 +1728,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
     WHERE date >= ${monthStart} AND date < ${nextMonthStart}
       AND id NOT IN (
         SELECT "ledgerId" FROM supplier_payments
-        WHERE "refKey" LIKE 'nabava:%:boat'
+        WHERE (
+          "refKey" LIKE 'nabava:%:boat'
+          OR "refKey" LIKE 'nabava:%:boatdriver'
+          OR "refKey" LIKE 'nabava:%:porters'
+        )
           AND COALESCE("costCategory", '') <> ''
           AND "ledgerId" IS NOT NULL
       )
@@ -1733,7 +1745,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
     WHERE direction = 'out' AND date >= ${monthStart} AND date < ${nextMonthStart}
       AND id NOT IN (
         SELECT "ledgerId" FROM supplier_payments
-        WHERE "refKey" LIKE 'nabava:%:boat'
+        WHERE (
+          "refKey" LIKE 'nabava:%:boat'
+          OR "refKey" LIKE 'nabava:%:boatdriver'
+          OR "refKey" LIKE 'nabava:%:porters'
+        )
           AND COALESCE("costCategory", '') <> ''
           AND "ledgerId" IS NOT NULL
       )
@@ -1750,7 +1766,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
     WHERE date >= ${monthStart} AND date < ${nextMonthStart}
       AND id NOT IN (
         SELECT "ledgerId" FROM supplier_payments
-        WHERE "refKey" LIKE 'nabava:%:boat'
+        WHERE (
+          "refKey" LIKE 'nabava:%:boat'
+          OR "refKey" LIKE 'nabava:%:boatdriver'
+          OR "refKey" LIKE 'nabava:%:porters'
+        )
           AND COALESCE("costCategory", '') <> ''
           AND "ledgerId" IS NOT NULL
       )
@@ -1765,7 +1785,11 @@ export async function getMonthlyStatistics(year: number, month: number) {
     WHERE direction = 'out' AND date >= ${monthStart} AND date < ${nextMonthStart}
       AND id NOT IN (
         SELECT "ledgerId" FROM supplier_payments
-        WHERE "refKey" LIKE 'nabava:%:boat'
+        WHERE (
+          "refKey" LIKE 'nabava:%:boat'
+          OR "refKey" LIKE 'nabava:%:boatdriver'
+          OR "refKey" LIKE 'nabava:%:porters'
+        )
           AND COALESCE("costCategory", '') <> ''
           AND "ledgerId" IS NOT NULL
       )

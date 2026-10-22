@@ -5,9 +5,9 @@ import { sql } from "drizzle-orm"
 import { addCashExpense, deleteCashExpense, updateCashExpense } from "./banka"
 import { addOmTransaction, deleteOmTransaction, updateOmTransaction } from "./orange-money"
 import {
-  dilipBoatCostDescription,
-  isDilipBoatPayRef,
+  isTransportCostPayRef,
   planBoatCostLink,
+  transportCostDescription,
   resolveBoatCostMark,
   type BoatCostFields,
   type ResolvedBoatCost,
@@ -17,7 +17,7 @@ import {
 export type SupplierPayMethod = "cash" | "orange"
 export type SupplierPayCompany = "tourism" | "sarl"
 
-// Oznaka stroška (ista kot pri nakupih) živi samo na plačilu čolna Dilip.
+// Oznaka stroška (ista kot pri nakupih) živi na plačilu Dilipu, vozniku čolna in nosačem.
 // Stolpci so opcijski, da stara plačila ostanejo brez oznake.
 let costColsReady: Promise<void> | null = null
 export async function ensureSupplierPaymentCostColumns() {
@@ -120,7 +120,7 @@ export async function paySupplier(params: {
   const company: SupplierPayCompany = params.company === "sarl" ? "sarl" : "tourism"
   const date = params.date || new Date().toISOString().slice(0, 10)
   const amount = Math.round(params.amountAr)
-  const boat = isDilipBoatPayRef(refKey)
+  const boat = isTransportCostPayRef(refKey)
 
   const prev = await loadPayment(refKey)
   const markInput: BoatCostFields | null = !boat
@@ -181,7 +181,7 @@ export async function paySupplier(params: {
       next: resolved.mark,
       date,
       amountAr: amount,
-      description: dilipBoatCostDescription(params.label),
+      description: transportCostDescription(refKey, params.label),
     })
   }
 
@@ -287,7 +287,7 @@ export async function unpaySupplier(params: { refKey: string }) {
     if (prev.method === "orange") await deleteOmTransaction(prev.ledgerId)
     else await deleteCashExpense(prev.ledgerId)
   }
-  if (isDilipBoatPayRef(refKey)) await releaseBoatCostLinks(prev)
+  if (isTransportCostPayRef(refKey)) await releaseBoatCostLinks(prev)
   await db.execute(sql`DELETE FROM supplier_payments WHERE "refKey" = ${refKey}`)
   return { ok: true }
 }
@@ -307,13 +307,13 @@ export async function syncDilipBoatPaymentFromContract(params: {
     SELECT id, method, "ledgerId", "refKey" FROM supplier_payments WHERE id = ${params.supplierPaymentId} LIMIT 1
   `)
   const row = (found.rows as Record<string, unknown>[])[0]
-  if (!row) throw new Error("Plačilo Dilipu ne obstaja.")
+  if (!row) throw new Error("Plačilo ne obstaja.")
   const ledgerId = row.ledgerId ? String(row.ledgerId) : ""
   const method = row.method === "orange" ? "orange" : "cash"
-  if (!ledgerId) throw new Error("Plačilo Dilipu nima vknjižbe. Popravi ga pri čolnu.")
+  if (!ledgerId) throw new Error("Plačilo nima vknjižbe. Popravi ga na dnevu.")
   if (method === "orange") {
     const exists = await db.execute(sql`SELECT id FROM orange_money_transactions WHERE id = ${ledgerId} LIMIT 1`)
-    if (!exists.rows.length) throw new Error("Vknjižba Orange Money za to plačilo ne obstaja. Popravi jo pri čolnu.")
+    if (!exists.rows.length) throw new Error("Vknjižba Orange Money za to plačilo ne obstaja. Popravi jo na dnevu.")
     await updateOmTransaction(ledgerId, {
       date,
       direction: "out",
@@ -323,7 +323,7 @@ export async function syncDilipBoatPaymentFromContract(params: {
     })
   } else {
     const exists = await db.execute(sql`SELECT id FROM bank_cash_expenses WHERE id = ${ledgerId} LIMIT 1`)
-    if (!exists.rows.length) throw new Error("Vknjižba v blagajni za to plačilo ne obstaja. Popravi jo pri čolnu.")
+    if (!exists.rows.length) throw new Error("Vknjižba v blagajni za to plačilo ne obstaja. Popravi jo na dnevu.")
     await updateCashExpense(ledgerId, { date, purpose: description, amount })
   }
   await db.execute(sql`
