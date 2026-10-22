@@ -48,6 +48,8 @@ import { payFanja, unpayFanja } from "./actions/fanja-payment";
 import { paySupplier, unpaySupplier } from "./actions/supplier-payment";
 import { getNabavaTrips, addNabavaTrip, updateNabavaTrip, deleteNabavaTrip, setNabavaBoat, setNabavaBoatOrdered, setNabavaNoBoat } from "./actions/nabava";
 import { NabavaPurchasesSection } from "@/components/nabava-purchases-section";
+import { DilipBoatCostMark, DilipBoatCostSummary, EMPTY_DILIP_BOAT_COST, dilipCostDraftFromPayment, dilipCostFieldsFromDraft } from "@/components/dilip-boat-cost-mark";
+import { boatCostMarkError, WIP_CAT } from "@/lib/dilip-boat-cost";
 import { NabavaRacunovodstvo } from "@/components/nabava-racunovodstvo";
 import { TaxesPanel } from "@/components/taxes-panel";
 import { GuestReplyAssistant } from "@/components/guest-reply-assistant";
@@ -1677,6 +1679,7 @@ export default function KombaCabanaApp() {
   const [supPayCompany, setSupPayCompany] = React.useState<'tourism' | 'sarl'>('tourism');
   const [supPayDate, setSupPayDate] = React.useState(() => new Date().toISOString().slice(0, 10));
   const [supPaySaving, setSupPaySaving] = React.useState(false);
+  const [boatCost, setBoatCost] = React.useState(EMPTY_DILIP_BOAT_COST);
   // Ročni zneski za dodatna gotovinska doplačila (voznik čolna / nosači / tuc tuc), keyirano po refKey.
   const [extraAmt, setExtraAmt] = React.useState<Record<string, string>>({});
   // Schedules are always shown for the current month (view-only, no month picker).
@@ -1906,7 +1909,7 @@ export default function KombaCabanaApp() {
   const dbAllProducts = data?.allProducts || [] as { id: string; name: string; category: string; costCategory?: string; priceAr: number }[];
   const dbScheduledExcursions = data?.scheduledExcursions || [] as { id: string; date: string; excursionType: string; isOption: boolean; notes: string | null; guests: { reservationId: string; guestName: string; bungalow: string; pax: number }[] }[];
   // Plačila dobaviteljem prevoza — hitro iskanje po refKey
-  const dbSupplierPayments = (data?.supplierPayments || []) as { refKey: string; supplier: string; paidAt: string | null; method: string | null; company: string | null; amountAr: number }[];
+  const dbSupplierPayments = (data?.supplierPayments || []) as { refKey: string; supplier: string; paidAt: string | null; method: string | null; company: string | null; amountAr: number; costCategory?: string | null; assetId?: string | null; annualRatePct?: number | null; reservationId?: string | null; loanRate?: number | null }[];
   const supplierPayByKey = React.useMemo(() => {
     const m: Record<string, (typeof dbSupplierPayments)[number]> = {};
     for (const p of dbSupplierPayments) m[p.refKey] = p;
@@ -8593,9 +8596,11 @@ function GuestCard() {
 
   // Plačilo dobavitelju prevoza (Dilip/Herman) — isti vzorec kot pri Fanji, keyiran po refKey.
   // supplierLabel je npr. 'Dilip (čoln)' / 'Herman (avto)'; label gre v opis vknjižbe.
-  const renderSupplierPay = (refKey: string, supplier: string, amountAr: number, supplierLabel: string, label: string, accentOverride?: string) => {
+  const renderSupplierPay = (refKey: string, supplier: string, amountAr: number, supplierLabel: string, label: string, accentOverride?: string, opts?: { costMark?: boolean }) => {
     const paid = supplierPayByKey[refKey];
     const accent = accentOverride || (supplier === 'dilip' ? '#3f6b7d' : '#4f7a54');
+    const costFields = opts?.costMark ? dilipCostFieldsFromDraft(boatCost) : null;
+    const costError = costFields ? boatCostMarkError(costFields) : null;
     if (supPayOpen === refKey) {
       return (
         <div className="mt-2 rounded-lg p-2.5 space-y-2.5" style={{ border: `1px solid ${accent}40`, backgroundColor: `${accent}0d` }}>
@@ -8619,6 +8624,7 @@ function GuestCard() {
               ))}
             </div>
           )}
+          {opts?.costMark && <DilipBoatCostMark value={boatCost} onChange={setBoatCost} amountAr={amountAr} />}
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-[#2b2622]/55">Datum plačila:</span>
             <input type="date" value={supPayDate} onChange={e => setSupPayDate(e.target.value)}
@@ -8629,8 +8635,18 @@ function GuestCard() {
               className="rounded-lg bg-[#0f2e3a]/5 border border-[#0f2e3a]/15 px-3 py-2 text-[11px] font-medium text-[#2b2622]/70 hover:bg-[#0f2e3a]/10 transition-colors">
               Prekliči
             </button>
-            <button disabled={supPaySaving}
+            <button disabled={supPaySaving || !!costError}
               onClick={async () => {
+                if (opts?.costMark && costFields) {
+                  if (costError) { alert(costError); return }
+                  if (boatCost.category === WIP_CAT) {
+                    if (!confirm(`Zabeležim plačilo in dodam ${ar(amountAr)} k stroškom izbrane pogodbe?`)) return
+                  } else if (boatCost.category) {
+                    if (!confirm('Zabeležim plačilo in označim znesek kot strošek?')) return
+                  } else if (paid?.costCategory) {
+                    if (!confirm('Odstranim oznako stroška? Plačilo Dilipu ostane zabeleženo.')) return
+                  }
+                }
                 setSupPaySaving(true);
                 try {
                   await paySupplier({
@@ -8640,9 +8656,13 @@ function GuestCard() {
                     date: supPayDate,
                     amountAr,
                     label,
+                    cost: costFields || undefined,
                   });
                   setSupPayOpen(null);
                   refresh();
+                  if (opts?.costMark) await mutate("assets-in-progress");
+                } catch (e) {
+                  alert(e instanceof Error ? e.message : 'Plačila ni bilo mogoče zabeležiti.');
                 } finally {
                   setSupPaySaving(false);
                 }
@@ -8666,21 +8686,27 @@ function GuestCard() {
             <p className="text-[10px] text-[#2b2622]/55">
               {paid.paidAt ? new Date(paid.paidAt).toLocaleDateString('sl-SI', { day: 'numeric', month: 'short', year: 'numeric' }) : ''} · {ar(paid.amountAr || amountAr)}
             </p>
+            {opts?.costMark && <DilipBoatCostSummary category={paid.costCategory} assetId={paid.assetId} />}
           </div>
           <div className="flex shrink-0 gap-1.5">
             <button onClick={() => {
               setSupPayMethod(paid.method === 'orange' ? 'orange' : 'cash');
               setSupPayCompany(paid.company === 'sarl' ? 'sarl' : 'tourism');
               setSupPayDate((paid.paidAt || new Date().toISOString()).slice(0, 10));
+              if (opts?.costMark) setBoatCost(dilipCostDraftFromPayment(paid));
               setSupPayOpen(refKey);
             }}
               className="rounded-full border px-3 py-1.5 text-[10px] font-medium transition-colors" style={{ borderColor: `${accent}40`, backgroundColor: `${accent}1a`, color: accent }}>
               Uredi
             </button>
             <button onClick={async () => {
-              if (!confirm('Prekličem plačilo dobavitelju? Vknjižba v blagajni/Orange Money se bo izbrisala.')) return;
+              const dropContract = opts?.costMark && paid.costCategory === WIP_CAT;
+              if (!confirm(dropContract
+                ? 'Prekličem plačilo Dilipu? Vknjižba se izbriše in strošek se umakne s pogodbe.'
+                : 'Prekličem plačilo dobavitelju? Vknjižba v blagajni/Orange Money se bo izbrisala.')) return;
               await unpaySupplier({ refKey });
               refresh();
+              if (dropContract) await mutate("assets-in-progress");
             }}
               className="rounded-full border border-[#0f2e3a]/15 bg-[#0f2e3a]/5 px-3 py-1.5 text-[10px] font-medium text-[#2b2622]/70 hover:bg-red-500/10 hover:text-red-600 hover:border-red-500/40 transition-colors">
               Prekliči
@@ -8694,6 +8720,7 @@ function GuestCard() {
         setSupPayMethod('cash');
         setSupPayCompany('tourism');
         setSupPayDate(new Date().toISOString().slice(0, 10));
+        if (opts?.costMark) setBoatCost(EMPTY_DILIP_BOAT_COST);
         setSupPayOpen(refKey);
       }}
         className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border px-4 py-2 transition-colors"
@@ -9579,7 +9606,7 @@ function GuestCard() {
                               <div className="rounded-lg border border-[#3f6b7d]/30 bg-[#3f6b7d]/10 px-2 py-1">
                                 <p className="text-[10px] font-semibold text-[#3f6b7d]">Za plačilo Dilipu (čoln {boatName}): {ar(boatCostAr)}</p>
                               </div>
-                              {renderSupplierPay(`nabava:${trip.id}:boat`, 'dilip', boatCostAr, `Dilip (čoln ${boatName})`, trip.note || 'nabava', '#3f6b7d')}
+                              {renderSupplierPay(`nabava:${trip.id}:boat`, 'dilip', boatCostAr, `Dilip (čoln ${boatName})`, trip.note || 'nabava', '#3f6b7d', { costMark: true })}
                             </div>
                           );
                         })()}

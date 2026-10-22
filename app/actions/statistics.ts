@@ -25,6 +25,7 @@ import { eq, and, gte, lte, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
+import { ensureSupplierPaymentCostColumns } from './supplier-payment'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
 import { normalizeAssetCost } from '@/lib/asset-cost'
 
@@ -284,6 +285,12 @@ function ensureAssetSchema() {
         "createdAt" timestamp NOT NULL DEFAULT now()
       )`)
       await db.execute(sql`ALTER TABLE fixed_asset_costs ADD COLUMN IF NOT EXISTS "nabavaPurchaseId" text`)
+      await db.execute(sql`ALTER TABLE fixed_asset_costs ADD COLUMN IF NOT EXISTS "supplierPaymentId" text`)
+      await db.execute(sql`
+        CREATE UNIQUE INDEX IF NOT EXISTS fixed_asset_costs_supplier_payment_idx
+        ON fixed_asset_costs ("supplierPaymentId")
+        WHERE "supplierPaymentId" IS NOT NULL
+      `)
     })().catch((e) => {
       assetSchemaReady = null
       throw e
@@ -317,6 +324,7 @@ export type AssetCost = {
   amountAr: number
   receiptId: string | null
   cashExpenseId: string | null
+  supplierPaymentId: string | null
 }
 
 export type AssetInProgress = {
@@ -352,6 +360,7 @@ export async function getAssetsInProgress(): Promise<AssetInProgress[]> {
       amountAr: Number(c.amountAr) || 0,
       receiptId: (c.receiptId as string) || null,
       cashExpenseId: (c.cashExpenseId as string) || null,
+      supplierPaymentId: (c.supplierPaymentId as string) || null,
     }
     ;(byAsset[cost.assetId] ||= []).push(cost)
   }
@@ -499,7 +508,7 @@ export async function updateAssetCost(params: {
   }
   const { date, description, amountAr } = parsed
   const row = await db.execute(
-    sql`SELECT c."assetId", c."receiptId", c."cashExpenseId", c."nabavaPurchaseId", a.name AS "assetName"
+    sql`SELECT c."assetId", c."receiptId", c."cashExpenseId", c."nabavaPurchaseId", c."supplierPaymentId", a.name AS "assetName"
         FROM fixed_asset_costs c
         JOIN fixed_assets a ON a.id = c."assetId"
         WHERE c.id = ${params.id}`
@@ -510,7 +519,28 @@ export async function updateAssetCost(params: {
   const receiptId = (r.receiptId as string) || null
   let cashExpenseId = (r.cashExpenseId as string) || null
   const nabavaPurchaseId = (r.nabavaPurchaseId as string) || null
+  const supplierPaymentId = (r.supplierPaymentId as string) || null
   const assetName = (r.assetName as string) || 'sredstvo v izdelavi'
+  if (supplierPaymentId) {
+    if (params.payFromCash) {
+      throw new Error('Plačilo Dilipu je že zabeleženo v blagajni ali Orange Money. Popravi ga pri čolnu — tukaj ne odštevaj še enkrat.')
+    }
+    const { syncDilipBoatPaymentFromContract } = await import('./supplier-payment')
+    await syncDilipBoatPaymentFromContract({
+      supplierPaymentId,
+      date,
+      description,
+      amountAr,
+    })
+    await db.execute(
+      sql`UPDATE fixed_asset_costs
+          SET date = ${date}, description = ${description}, "amountAr" = ${String(amountAr)}
+          WHERE id = ${params.id}`
+    )
+    await recomputeAssetValue(assetId)
+    revalidatePath('/statistika')
+    return { id: params.id }
+  }
   if (params.payFromCash && receiptId) {
     throw new Error('Račun se ne odšteva iz blagajne. Gotovino vklopi samo pri ročnem strošku.')
   }
@@ -617,6 +647,55 @@ export async function upsertNabavaAssetCost(params: {
   return { id }
 }
 
+// Plačilo Dilipu za čoln, označeno kot strošek pogodbe. Odliv je v lasti supplier_payments
+// (ena vknjižba). Tukaj je natanko ena vrstica na plačilo — popravek jo zamenja, ne podvoji.
+export async function upsertSupplierAssetCost(params: {
+  supplierPaymentId: string
+  assetId: string
+  date: string
+  description: string
+  amountAr: number
+}) {
+  await ensureAssetSchema()
+  const amountAr = Math.round(params.amountAr || 0)
+  if (!params.supplierPaymentId || !params.assetId) throw new Error('Izberi pogodbo (sredstvo v izdelavi).')
+  const asset = await db.execute(sql`SELECT id, status FROM fixed_assets WHERE id = ${params.assetId} LIMIT 1`)
+  const assetRow = asset.rows[0]
+  if (!assetRow || ((assetRow.status as string) || 'active') !== 'in_progress') {
+    throw new Error('Izberi pogodbo (sredstvo v izdelavi).')
+  }
+  const existing = await db.execute(
+    sql`SELECT id, "assetId" FROM fixed_asset_costs WHERE "supplierPaymentId" = ${params.supplierPaymentId} LIMIT 1`
+  )
+  const prev = existing.rows[0]
+  if (prev) {
+    await db.execute(
+      sql`UPDATE fixed_asset_costs SET "assetId" = ${params.assetId}, date = ${params.date},
+            description = ${params.description.trim() || 'Dilip (čoln Nero)'}, "amountAr" = ${String(amountAr)}
+          WHERE id = ${prev.id as string}`
+    )
+    if ((prev.assetId as string) !== params.assetId) await recomputeAssetValue(prev.assetId as string)
+  } else {
+    const id = `fac-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    await db.execute(
+      sql`INSERT INTO fixed_asset_costs (id, "assetId", date, description, "amountAr", "supplierPaymentId")
+          VALUES (${id}, ${params.assetId}, ${params.date}, ${params.description.trim() || 'Dilip (čoln Nero)'}, ${String(amountAr)}, ${params.supplierPaymentId})`
+    )
+  }
+  await recomputeAssetValue(params.assetId)
+  revalidatePath('/statistika')
+}
+
+export async function removeSupplierAssetCost(supplierPaymentId: string) {
+  await ensureAssetSchema()
+  if (!supplierPaymentId) return
+  const row = await db.execute(
+    sql`SELECT "assetId" FROM fixed_asset_costs WHERE "supplierPaymentId" = ${supplierPaymentId}`
+  )
+  await db.execute(sql`DELETE FROM fixed_asset_costs WHERE "supplierPaymentId" = ${supplierPaymentId}`)
+  for (const r of row.rows) await recomputeAssetValue(r.assetId as string)
+}
+
 export async function removeNabavaAssetCost(nabavaPurchaseId: string) {
   await ensureAssetSchema()
   const row = await db.execute(
@@ -628,9 +707,15 @@ export async function removeNabavaAssetCost(nabavaPurchaseId: string) {
 
 export async function deleteAssetCost(id: string) {
   await ensureAssetSchema()
-  const row = await db.execute(sql`SELECT "assetId", "cashExpenseId", "nabavaPurchaseId" FROM fixed_asset_costs WHERE id = ${id}`)
+  const row = await db.execute(sql`SELECT "assetId", "cashExpenseId", "nabavaPurchaseId", "supplierPaymentId" FROM fixed_asset_costs WHERE id = ${id}`)
   const r = row.rows[0]
   if (!r) return
+  if (r.supplierPaymentId) {
+    const { clearDilipBoatCostMark } = await import('./supplier-payment')
+    await clearDilipBoatCostMark(r.supplierPaymentId as string)
+    revalidatePath('/statistika')
+    return
+  }
   if (r.nabavaPurchaseId) {
     // Izbris na pogodbi izbriše tudi nakup v nabavi (in njegov odliv iz blagajne).
     const { deleteNabavaPurchase } = await import('./nabava')
@@ -1508,6 +1593,31 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Gotovinski nakupi na Borutovih nabavnih poteh (kalamari, riba, pijača …): ista logika
   // razvrščanja kot arhiv računov — hrana bremeni kuhinjo, pijača bar itd. Zneski so v Ar → EUR.
   const nabavaPurchases = await getNabavaPurchasesForMonth(year, month)
+  // Plačilo Dilipu za čoln Nero, označeno z vrsto stroška: ista razporeditev kot nakup.
+  // Sredstvo v izdelavi / osnovno sredstvo / posojilo zanka spodaj preskoči (niso tekoči oddelek).
+  const nabavaMonthPrefix = `${year}-${String(month).padStart(2, "0")}%`
+  await ensureSupplierPaymentCostColumns()
+  const boatCostRows = await db.execute(sql`
+    SELECT id, "paidAt", "amountAr", "costCategory", method, "ledgerId"
+    FROM supplier_payments
+    WHERE "refKey" LIKE 'nabava:%:boat'
+      AND COALESCE("costCategory", '') <> ''
+      AND COALESCE("paidAt", '') LIKE ${nabavaMonthPrefix}
+  `)
+  const dilipBoatCosts = (boatCostRows.rows as Record<string, unknown>[]).map((r) => {
+    const orange = r.method === "orange"
+    const ledgerId = r.ledgerId ? String(r.ledgerId) : ""
+    return {
+      id: `dilip-boat-${String(r.id)}`,
+      date: r.paidAt ? String(r.paidAt).slice(0, 10) : "",
+      name: "Dilip (čoln Nero)",
+      amountAr: Number(r.amountAr) || 0,
+      payMethod: (orange ? "orange" : "cash") as "orange" | "cash",
+      category: String(r.costCategory || ""),
+      cashExpenseId: orange ? "" : ledgerId,
+      omLedgerId: orange ? ledgerId : "",
+    }
+  })
   // Najemnina hiše (Borut plača gotovino v Nabavi Komba) = samostojen strošek, ločen od ostalih kategorij.
   let najemninaHisaAr = 0
   let stipendijaAr = 0
@@ -1525,7 +1635,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     amountEur: p.amountAr / rate,
     source: p.payMethod === 'orange' ? 'Orange' : 'gotovina',
   })
-  for (const p of nabavaPurchases) {
+  for (const p of [...nabavaPurchases, ...dilipBoatCosts]) {
   if (p.category === "najemnina") {
     najemninaHisaAr += p.amountAr
     if (p.amountAr) nabavaExtra.najemnina.push(nabavaLine(p))
@@ -1608,6 +1718,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
       COALESCE(SUM(amount) FILTER (WHERE purpose ILIKE '%tuc tuc%' OR purpose ILIKE '%tuctuc%' OR purpose ILIKE '%tuk tuk%'), 0) AS tuctuc
     FROM bank_cash_expenses
     WHERE date >= ${monthStart} AND date < ${nextMonthStart}
+      AND id NOT IN (
+        SELECT "ledgerId" FROM supplier_payments
+        WHERE "refKey" LIKE 'nabava:%:boat'
+          AND COALESCE("costCategory", '') <> ''
+          AND "ledgerId" IS NOT NULL
+      )
   `)
   const omExtraRows = await db.execute(sql`
     SELECT
@@ -1615,6 +1731,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
       COALESCE(SUM(amount) FILTER (WHERE description ILIKE '%tuc tuc%' OR description ILIKE '%tuctuc%' OR description ILIKE '%tuk tuk%'), 0) AS tuctuc
     FROM orange_money_transactions
     WHERE direction = 'out' AND date >= ${monthStart} AND date < ${nextMonthStart}
+      AND id NOT IN (
+        SELECT "ledgerId" FROM supplier_payments
+        WHERE "refKey" LIKE 'nabava:%:boat'
+          AND COALESCE("costCategory", '') <> ''
+          AND "ledgerId" IS NOT NULL
+      )
   `)
   const cashExtra = (cashExtraRows.rows as Record<string, unknown>[])[0] || {}
   const omExtra = (omExtraRows.rows as Record<string, unknown>[])[0] || {}
@@ -1626,6 +1748,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
     SELECT id, date, purpose AS name, amount
     FROM bank_cash_expenses
     WHERE date >= ${monthStart} AND date < ${nextMonthStart}
+      AND id NOT IN (
+        SELECT "ledgerId" FROM supplier_payments
+        WHERE "refKey" LIKE 'nabava:%:boat'
+          AND COALESCE("costCategory", '') <> ''
+          AND "ledgerId" IS NOT NULL
+      )
       AND (
         purpose ILIKE '%nosač%' OR purpose ILIKE '%nosac%'
         OR purpose ILIKE '%tuc tuc%' OR purpose ILIKE '%tuctuc%' OR purpose ILIKE '%tuk tuk%'
@@ -1635,6 +1763,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
     SELECT id, date, description AS name, amount
     FROM orange_money_transactions
     WHERE direction = 'out' AND date >= ${monthStart} AND date < ${nextMonthStart}
+      AND id NOT IN (
+        SELECT "ledgerId" FROM supplier_payments
+        WHERE "refKey" LIKE 'nabava:%:boat'
+          AND COALESCE("costCategory", '') <> ''
+          AND "ledgerId" IS NOT NULL
+      )
       AND (
         description ILIKE '%nosač%' OR description ILIKE '%nosac%'
         OR description ILIKE '%tuc tuc%' OR description ILIKE '%tuctuc%' OR description ILIKE '%tuk tuk%'

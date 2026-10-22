@@ -247,15 +247,15 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
     }
     setEditErr(null)
     const wasCash = Boolean(cost.cashExpenseId) && !cost.receiptId
-    if (!wasCash && editCash && !confirm(`Odštejem ${formatAr(editParsed.amountAr)} iz gotovinske blagajne Tourism?`)) return
-    if (wasCash && !editCash && !confirm('Razveljavim gotovinski odliv iz blagajne Tourism?')) return
+    if (!cost.supplierPaymentId && !wasCash && editCash && !confirm(`Odštejem ${formatAr(editParsed.amountAr)} iz gotovinske blagajne Tourism?`)) return
+    if (!cost.supplierPaymentId && wasCash && !editCash && !confirm('Razveljavim gotovinski odliv iz blagajne Tourism?')) return
     const ok = await run(() =>
       updateAssetCost({
         id: cost.id,
         date: editParsed.date,
         description: editParsed.description,
         amountAr: editParsed.amountAr,
-        payFromCash: !cost.receiptId && editCash,
+        payFromCash: cost.supplierPaymentId ? false : (!cost.receiptId && editCash),
       })
     )
     if (ok) {
@@ -402,7 +402,9 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
                         <input inputMode="numeric" value={editAr} onChange={(e) => setEditAr(e.target.value)} className={`${inputCls} text-right`} />
                       </div>
                     </div>
-                    {c.receiptId ? (
+                    {c.supplierPaymentId ? (
+                      <p className="text-xs text-white/45">Znesek pripada plačilu Dilipu. Popravek tukaj popravi isto vknjižbo, ne doda nove.</p>
+                    ) : c.receiptId ? (
                       <p className="flex items-center gap-1 text-[10px] text-[#7fa8b8]"><Receipt className="h-3 w-3" /> račun</p>
                     ) : (
                       <label className="flex items-start gap-2 text-xs text-white/55">
@@ -441,6 +443,8 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
                     <span className="min-w-0 flex-1 basis-32 truncate text-white/80">{c.description}</span>
                     {c.receiptId ? (
                       <span className="flex shrink-0 items-center gap-1 text-[10px] text-[#7fa8b8]"><Receipt className="h-3 w-3" /> račun</span>
+                    ) : c.supplierPaymentId ? (
+                      <span className="shrink-0 text-[10px] text-[#c59b5b]">plačilo Dilipu</span>
                     ) : c.cashExpenseId ? (
                       <span className="shrink-0 text-[10px] text-[#8fae92]">gotovina Tourism</span>
                     ) : null}
@@ -458,7 +462,11 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
                       <button
                         type="button"
                         onClick={() => {
-                          if (confirm(c.cashExpenseId ? 'Odstraniti strošek? Gotovinski odliv se razveljavi.' : 'Odstraniti strošek iz sredstva?'))
+                          if (confirm(c.supplierPaymentId
+                            ? 'Odstranim ta strošek s pogodbe? Plačilo Dilipu ostane zabeleženo.'
+                            : c.cashExpenseId
+                              ? 'Odstraniti strošek? Gotovinski odliv se razveljavi.'
+                              : 'Odstraniti strošek iz sredstva?'))
                             run(() => deleteAssetCost(c.id))
                         }}
                         className="rounded p-1 text-white/30 hover:text-red-400"
