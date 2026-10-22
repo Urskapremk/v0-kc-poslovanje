@@ -8,16 +8,35 @@ import {
   createAssetInProgress,
   updateAssetContract,
   addAssetCost,
+  updateAssetCost,
   deleteAssetCost,
   activateAsset,
   deleteFixedAsset,
   getExchangeRateValue,
   type AssetInProgress,
 } from '@/app/actions/statistics'
+import { amountFromArInput, normalizeAssetCost } from '@/lib/asset-cost'
 
 export const ASSETS_IN_PROGRESS_KEY = 'assets-in-progress'
 
 const COST_PRESETS = ['Razžaganje lesa', 'Izdelava desk', 'Montaža']
+
+function CostPresetChips({ value, onPick }: { value: string; onPick: (preset: string) => void }) {
+  return (
+    <div className="mb-2 flex flex-wrap gap-1.5">
+      {COST_PRESETS.map((p) => (
+        <button
+          key={p}
+          type="button"
+          onClick={() => onPick(p)}
+          className={`rounded-full px-2.5 py-1 text-xs transition-colors ${value === p ? 'bg-[#c59b5b] text-[#1a1410]' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
+        >
+          {p}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 function formatAr(n: number) {
   return `${new Intl.NumberFormat('sl-SI').format(Math.round(n || 0))} Ar`
@@ -166,8 +185,17 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
   const [actRate, setActRate] = useState(String(a.annualRatePct || 33.33))
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [editingCostId, setEditingCostId] = useState<string | null>(null)
+  const [editDesc, setEditDesc] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [editAr, setEditAr] = useState('')
+  const [editCash, setEditCash] = useState(false)
+  const [editErr, setEditErr] = useState<string | null>(null)
 
-  const costArNum = Number(costAr.replace(/[^\d]/g, '')) || 0
+  const costArNum = amountFromArInput(costAr)
+  const costParsed = normalizeAssetCost({ date: costDate, description: costDesc, amountAr: costArNum })
+  const editArNum = amountFromArInput(editAr)
+  const editParsed = normalizeAssetCost({ date: editDate, description: editDesc, amountAr: editArNum })
   const rate = useEurRate()
 
   function startEdit() {
@@ -198,11 +226,55 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
     }
   }
 
-  async function handleAddCost() {
-    if (!costDesc.trim() || costArNum <= 0) return
-    if (costCash && !confirm(`Odštejem ${formatAr(costArNum)} iz gotovinske blagajne Tourism?`)) return
+  function startCostEdit(c: AssetInProgress['costs'][number]) {
+    setEditingCostId(c.id)
+    setEditDesc(c.description)
+    setEditDate((c.date || '').slice(0, 10))
+    setEditAr(c.amountAr ? String(Math.round(c.amountAr)) : '')
+    setEditCash(Boolean(c.cashExpenseId) && !c.receiptId)
+    setEditErr(null)
+  }
+
+  async function handleSaveCost() {
+    const cost = a.costs.find((c) => c.id === editingCostId)
+    if (!cost || !editParsed) {
+      setEditErr('Vpiši opis, datum in znesek.')
+      return
+    }
+    if (cost.receiptId && editCash) {
+      setEditErr('Račun se ne odšteva iz blagajne. Gotovino vklopi samo pri ročnem strošku.')
+      return
+    }
+    setEditErr(null)
+    const wasCash = Boolean(cost.cashExpenseId) && !cost.receiptId
+    if (!wasCash && editCash && !confirm(`Odštejem ${formatAr(editParsed.amountAr)} iz gotovinske blagajne Tourism?`)) return
+    if (wasCash && !editCash && !confirm('Razveljavim gotovinski odliv iz blagajne Tourism?')) return
     const ok = await run(() =>
-      addAssetCost({ assetId: a.id, date: costDate, description: costDesc, amountAr: costArNum, payFromCash: costCash })
+      updateAssetCost({
+        id: cost.id,
+        date: editParsed.date,
+        description: editParsed.description,
+        amountAr: editParsed.amountAr,
+        payFromCash: !cost.receiptId && editCash,
+      })
+    )
+    if (ok) {
+      setEditingCostId(null)
+      setEditErr(null)
+    }
+  }
+
+  async function handleAddCost() {
+    if (!costParsed) return
+    if (costCash && !confirm(`Odštejem ${formatAr(costParsed.amountAr)} iz gotovinske blagajne Tourism?`)) return
+    const ok = await run(() =>
+      addAssetCost({
+        assetId: a.id,
+        date: costParsed.date,
+        description: costParsed.description,
+        amountAr: costParsed.amountAr,
+        payFromCash: costCash,
+      })
     )
     if (ok) {
       setCostDesc('')
@@ -312,42 +384,98 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
         ) : (
           <ul className="divide-y divide-white/[0.06] rounded-xl border border-white/[0.06]">
             {a.costs.map((c) => (
-              <li key={c.id} className="flex items-center gap-3 px-3 py-2 text-sm">
-                <span className="w-24 shrink-0 text-white/50">{formatDate(c.date)}</span>
-                <span className="min-w-0 flex-1 truncate text-white/80">{c.description}</span>
-                {c.receiptId ? (
-                  <span className="flex items-center gap-1 text-[10px] text-[#7fa8b8]"><Receipt className="h-3 w-3" /> račun</span>
-                ) : c.cashExpenseId ? (
-                  <span className="text-[10px] text-[#8fae92]">gotovina Tourism</span>
-                ) : null}
-                <span className="w-32 text-right tabular-nums text-white/80">{formatAr(c.amountAr)}</span>
-                <button
-                  onClick={() => {
-                    if (confirm(c.cashExpenseId ? 'Odstraniti strošek? Gotovinski odliv se razveljavi.' : 'Odstraniti strošek iz sredstva?'))
-                      run(() => deleteAssetCost(c.id))
-                  }}
-                  className="rounded p-1 text-white/30 hover:text-red-400"
-                  aria-label="Odstrani strošek"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+              <li key={c.id} className="px-3 py-2 text-sm">
+                {editingCostId === c.id ? (
+                  <div className="space-y-2">
+                    <CostPresetChips value={editDesc} onPick={setEditDesc} />
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
+                      <div className="min-w-0 flex-1">
+                        <label className={labelCls}>Opis stroška</label>
+                        <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="npr. Razžaganje lesa" className={inputCls} />
+                      </div>
+                      <div className="w-full sm:w-36">
+                        <label className={labelCls}>Datum</label>
+                        <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className={inputCls} />
+                      </div>
+                      <div className="w-full sm:w-36">
+                        <label className={labelCls}>Znesek (Ar)</label>
+                        <input inputMode="numeric" value={editAr} onChange={(e) => setEditAr(e.target.value)} className={`${inputCls} text-right`} />
+                      </div>
+                    </div>
+                    {c.receiptId ? (
+                      <p className="flex items-center gap-1 text-[10px] text-[#7fa8b8]"><Receipt className="h-3 w-3" /> račun</p>
+                    ) : (
+                      <label className="flex items-start gap-2 text-xs text-white/55">
+                        <input
+                          type="checkbox"
+                          checked={editCash}
+                          onChange={(e) => setEditCash(e.target.checked)}
+                          className="mt-0.5 accent-[#8fae92]"
+                        />
+                        Plačano z gotovino — odštej iz blagajne Tourism
+                      </label>
+                    )}
+                    {editErr && <p className="text-xs text-red-400">{editErr}</p>}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveCost}
+                        disabled={busy || !editParsed}
+                        className="flex items-center gap-1.5 rounded-lg bg-[#c59b5b] px-3 py-1.5 text-sm font-medium text-[#1a1410] hover:bg-[#d4aa6a] disabled:opacity-50"
+                      >
+                        <Check className="h-4 w-4" /> Shrani
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setEditingCostId(null); setEditErr(null) }}
+                        disabled={busy}
+                        className="rounded-lg border border-white/10 px-3 py-1.5 text-sm text-white/50 hover:bg-white/10 disabled:opacity-50"
+                      >
+                        Prekliči
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="w-24 shrink-0 text-white/50">{formatDate(c.date)}</span>
+                    <span className="min-w-0 flex-1 basis-32 truncate text-white/80">{c.description}</span>
+                    {c.receiptId ? (
+                      <span className="flex shrink-0 items-center gap-1 text-[10px] text-[#7fa8b8]"><Receipt className="h-3 w-3" /> račun</span>
+                    ) : c.cashExpenseId ? (
+                      <span className="shrink-0 text-[10px] text-[#8fae92]">gotovina Tourism</span>
+                    ) : null}
+                    <span className="shrink-0 text-right tabular-nums text-white/80">{formatAr(c.amountAr)}</span>
+                    <span className="ml-auto flex shrink-0 items-center">
+                      <button
+                        type="button"
+                        onClick={() => startCostEdit(c)}
+                        className="rounded p-1 text-white/40 hover:bg-[#c59b5b]/20 hover:text-[#c59b5b]"
+                        aria-label="Uredi strošek"
+                        title="Uredi strošek"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm(c.cashExpenseId ? 'Odstraniti strošek? Gotovinski odliv se razveljavi.' : 'Odstraniti strošek iz sredstva?'))
+                            run(() => deleteAssetCost(c.id))
+                        }}
+                        className="rounded p-1 text-white/30 hover:text-red-400"
+                        aria-label="Odstrani strošek"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
         )}
 
         <div className="mt-3 rounded-xl border border-dashed border-white/10 p-3">
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {COST_PRESETS.map((p) => (
-              <button
-                key={p}
-                onClick={() => setCostDesc(p)}
-                className={`rounded-full px-2.5 py-1 text-xs transition-colors ${costDesc === p ? 'bg-[#c59b5b] text-[#1a1410]' : 'bg-white/5 text-white/60 hover:bg-white/10'}`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
+          <CostPresetChips value={costDesc} onPick={setCostDesc} />
           <div className="flex flex-wrap items-end gap-2">
             <div className="min-w-[180px] flex-1">
               <label className={labelCls}>Opis stroška</label>
@@ -363,7 +491,7 @@ function AssetCard({ a, onChanged }: { a: AssetInProgress; onChanged: () => void
             </div>
             <button
               onClick={handleAddCost}
-              disabled={busy || !costDesc.trim() || costArNum <= 0}
+              disabled={busy || !costParsed}
               className="flex items-center gap-1.5 rounded-lg bg-[#c59b5b] px-3 py-2 text-sm font-medium text-[#1a1410] hover:bg-[#d4aa6a] disabled:opacity-50"
             >
               <Plus className="h-4 w-4" /> Dodaj strošek
