@@ -813,6 +813,8 @@ export async function setOrderItemTransferOrdered(id: string, which: 'dilip' | '
 
 export async function getDashboardData(includeReservationId?: string) {
   await ensureSkipBoatPayColumn()
+  const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
+  await ensureSupplierPaymentCostColumns()
   // Only fetch ACTIVE reservations (not checked out) for dashboard performance.
   // `includeReservationId` additionally pulls in ONE already checked-out guest, so a
   // past guest opened from search gets a full card (emails, dobavnica, payments).
@@ -1079,6 +1081,11 @@ excursions: resExcursions.map(e => ({
       method: sp.method,
       company: sp.company,
       amountAr: sp.amountAr ? Number(sp.amountAr) : 0,
+      costCategory: sp.costCategory || null,
+      assetId: sp.assetId || null,
+      annualRatePct: sp.annualRatePct ? Number(sp.annualRatePct) : null,
+      reservationId: sp.reservationId || null,
+      loanRate: sp.loanRate ? Number(sp.loanRate) : null,
     }))
   }
 }
@@ -2464,6 +2471,8 @@ export async function getArchivedReservations(page: number = 1, limit: number = 
 // exactly like the pending list. We keep everything with an effective date up to today
 // (lodge-local, UTC+3), newest first.
 export async function getArchivedTransfers() {
+  const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
+  await ensureSupplierPaymentCostColumns()
   const [allTransfers, allRoutes, allBoats, allSupplierPricing, allSupplierPayments, allOrderTransfers] = await Promise.all([
     db.select().from(transfers).where(isNotNull(transfers.route)),
     db.select().from(routes),
@@ -2636,6 +2645,8 @@ export async function getArchivedTransfers() {
 //  - other: dilipPayment = fixed / direct / (boatNet*0.9 + guide); lunch; entrance.
 // Fanja payment status is read from the first member (one ledger per group).
 export async function getArchivedExcursions() {
+  const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
+  await ensureSupplierPaymentCostColumns()
   const [allBookings, allExc, allExcPricing, allBoats, allSupplierPayments, allLunch, rate] = await Promise.all([
     db.select().from(excursionBookings),
     db.select().from(excursions),

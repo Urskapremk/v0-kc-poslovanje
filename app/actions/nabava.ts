@@ -129,7 +129,7 @@ async function getInvoiceExchangeRate() {
 
 // Račun gosta preračunava Ar → EUR po splošnem tečaju. Posojilo pa ima SVOJ tečaj (menjava ob založitvi),
 // zato priceAr nastavimo tako, da je EUR na računu točno amountAr / loanRate.
-async function createLoanOrderItem(reservationId: string, amountAr: number, date: string, loanRate: number) {
+export async function createLoanOrderItem(reservationId: string, amountAr: number, date: string, loanRate: number) {
   const id = `ord-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const invoiceRate = await getInvoiceExchangeRate()
   const eur = Math.round((amountAr / loanRate) * 100) / 100
@@ -142,7 +142,7 @@ async function createLoanOrderItem(reservationId: string, amountAr: number, date
   return id
 }
 
-async function deleteLoanOrderItem(orderItemId: string) {
+export async function deleteLoanOrderItem(orderItemId: string) {
   if (orderItemId) await db.execute(sql`DELETE FROM order_items WHERE id = ${orderItemId}`)
 }
 

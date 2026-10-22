@@ -699,6 +699,14 @@ export const supplierPayments = pgTable('supplier_payments', {
   company: text('company'), // 'tourism' | 'sarl' | null (samo pri gotovini)
   ledgerId: text('ledgerId'),
   amountAr: integer('amountAr'),
+  // Oznaka stroška samo pri plačilu čolna Dilip (nabava:<id>:boat). Ista taksonomija kot nakupi.
+  costCategory: text('costCategory'),
+  assetId: text('assetId'), // pogodba (fixed_assets v izdelavi), ko je costCategory sredstvo_v_izdelavi
+  annualRatePct: decimal('annualRatePct', { precision: 8, scale: 2 }),
+  fixedAssetId: text('fixedAssetId'), // osnovno sredstvo, ustvarjeno iz tega plačila
+  reservationId: text('reservationId'),
+  orderItemId: text('orderItemId'),
+  loanRate: decimal('loanRate', { precision: 12, scale: 2 }),
   createdAt: timestamp('createdAt', { withTimezone: true }).notNull().defaultNow(),
   })
 
