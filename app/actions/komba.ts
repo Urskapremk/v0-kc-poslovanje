@@ -838,9 +838,9 @@ export async function getDashboardData(includeReservationId?: string) {
   // Fetch additional data needed by frontend
   const allBoats = await db.select().from(boats).where(eq(boats.active, true))
   const allRoutes = await db.select().from(routes).where(eq(routes.active, true))
-  // All routes incl. inactive — used only to resolve supplier costs across
-  // same-named duplicate routes (e.g. active "route-airport" for the guest price
-  // and inactive "route-port" holding the boat's supplier cost).
+  // All routes incl. inactive — names and supplier costs for bookings that
+  // still point at a route no longer offered (e.g. "Airport Fascene - Komba
+  // Cabana", and the same-named route that holds the boat supplier cost).
   const allRoutesRaw = await db.select().from(routes)
   const allSellingPricing = await db.select().from(sellingPricing)
   const allSupplierPricing = await db.select().from(supplierPricing).where(eq(supplierPricing.active, true))

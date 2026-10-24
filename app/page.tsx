@@ -1898,9 +1898,20 @@ export default function KombaCabanaApp() {
   const reservations: Reservation[] = data?.reservations || [];
   const exchangeRate = data?.exchangeRate || DEFAULT_RATE;
   const dbRoutes = data?.routes || [];
-  // All routes incl. inactive — only for resolving supplier costs across
-  // same-named duplicate routes. Dropdowns keep using dbRoutes (active only).
+  // All routes, including ones no longer offered. Stored bookings, the archive,
+  // pending cards and supplier costs still resolve the name from here.
+  // Dropdowns for a new choice keep using dbRoutes (active only).
   const dbRoutesAll = data?.routesAll || dbRoutes;
+  const routeNameById = (id?: string | null): string =>
+    dbRoutesAll.find((r: { id: string; name?: string }) => r.id === id)?.name || "";
+  // Active routes, plus the route already stored on this transfer when that
+  // route is no longer active — so the old choice stays visible and is not cleared.
+  const routesKeepingCurrent = (currentId?: string | null) => {
+    const current = (currentId || "").trim();
+    if (!current || dbRoutes.some((r: { id: string }) => r.id === current)) return dbRoutes;
+    const stored = dbRoutesAll.find((r: { id: string; name?: string }) => r.id === current);
+    return stored ? [...dbRoutes, stored] : dbRoutes;
+  };
   const dbSellingPricing = data?.sellingPricing || [];
   const dbSupplierPricing = data?.supplierPricing || [];
   const dbBoats = data?.boats || [];
@@ -2015,7 +2026,7 @@ export default function KombaCabanaApp() {
       const isPaid = arrivalTransfer.paymentStatus === 'PAID';
       const totalPriceEur = arrivalTransfer.guestPrice || getTransferGuestPrice(routeId, boatId, pax);
       const totalPriceAr = Math.round(totalPriceEur * exchangeRate); // Convert EUR to Ariary
-      const routeName = dbRoutes.find((r: { id: string; name: string }) => r.id === routeId)?.name || routeId;
+      const routeName = routeNameById(routeId) || routeId;
       const boatName = dbBoats.find((b: { id: string; name: string }) => b.id === boatId)?.name || '';
       // Get arrival date as string for eventDate (YYYY-MM-DD format)
       const arrivalDateStr = formatDateStr(res.arrival);
@@ -2042,7 +2053,7 @@ export default function KombaCabanaApp() {
       const isPaid = departureTransfer.paymentStatus === 'PAID';
       const totalPriceEur = departureTransfer.guestPrice || getTransferGuestPrice(routeId, boatId, pax);
       const totalPriceAr = Math.round(totalPriceEur * exchangeRate); // Convert EUR to Ariary
-      const routeName = dbRoutes.find((r: { id: string; name: string }) => r.id === routeId)?.name || routeId;
+      const routeName = routeNameById(routeId) || routeId;
       const boatName = dbBoats.find((b: { id: string; name: string }) => b.id === boatId)?.name || '';
       // Get departure date as string for eventDate (YYYY-MM-DD format)
       const departureDateStr = formatDateStr(res.departure);
@@ -2190,9 +2201,15 @@ export default function KombaCabanaApp() {
   // Taxi routes for a given driver = routes that have a supplier price for that taxi.
   // The "Relacija avta (taksi)" dropdown must follow the SELECTED taxi, otherwise
   // Amad-only routes (e.g. "Exora Beach to Big Port Nosy Be") never show up.
-  const taxiRoutesFor = (taxiId: string) => dbRoutes.filter((r: { id: string }) =>
-    dbSupplierPricing.some((sp: { boatId: string; routeId: string }) => sp.boatId === taxiId && sp.routeId === r.id)
-  );
+  const taxiRoutesFor = (taxiId: string, currentId?: string | null) => {
+    const listed = dbRoutes.filter((r: { id: string }) =>
+      dbSupplierPricing.some((sp: { boatId: string; routeId: string }) => sp.boatId === taxiId && sp.routeId === r.id)
+    );
+    const current = (currentId || "").trim();
+    if (!current || listed.some((r: { id: string }) => r.id === current)) return listed;
+    const stored = dbRoutesAll.find((r: { id: string; name?: string }) => r.id === current);
+    return stored ? [...listed, stored] : listed;
+  };
   // Taxi SELLING price (for the guest) in EUR, from the selling price list, for the
   // selected driver (defaults to Herman for legacy legs with no taxi set).
   const getHermanGuestPrice = (hermanRouteId?: string, pax = 1, taxiId: string = HERMAN_BOAT_ID): number => {
@@ -2802,7 +2819,7 @@ async function handleCreateReservation() {
             // open task (before check-in), so it reads at a glance without opening the card.
             const arrivalRouteName =
               showArrival && hasArrivalTransfer
-                ? (dbRoutes.find((r: { id: string; name: string }) => r.id === src.transfers?.arrival?.route)?.name || '')
+                ? (routeNameById(src.transfers?.arrival?.route) || '')
                 : '';
             // Prefer the explicit "Pick up point (na vaucerju)" field when the receptionist
             // filled it in; otherwise fall back to the route-name origin (before " - ").
@@ -4907,7 +4924,7 @@ function GuestCard() {
                           }}
                         >
                           <option value="">-- Ni transferja --</option>
-                          {dbRoutes.map((r: { id: string; name: string }) => (
+                          {routesKeepingCurrent(reservation.transfers?.arrival?.route).map((r: { id: string; name: string }) => (
                             <option key={r.id} value={r.id}>{r.name}</option>
                           ))}
                         </select>
@@ -5063,7 +5080,7 @@ function GuestCard() {
                               }}
                             >
                               <option value="">-- Brez avta (taksi) --</option>
-                              {taxiRoutesFor(taxiIdOf(reservation.transfers?.arrival)).map((r: { id: string; name: string }) => (
+                              {taxiRoutesFor(taxiIdOf(reservation.transfers?.arrival), reservation.transfers?.arrival?.hermanRouteId).map((r: { id: string; name: string }) => (
                                 <option key={r.id} value={r.id}>{r.name} ({ar(getSupplierCostAr(taxiIdOf(reservation.transfers?.arrival), r.id))})</option>
                               ))}
                             </select>
@@ -5073,7 +5090,7 @@ function GuestCard() {
                               const dilipCostAr = getSupplierCostAr(reservation.transfers?.arrival?.boatId, reservation.transfers?.arrival?.route);
                               const hermanCostAr = getSupplierCostAr(taxiId, reservation.transfers?.arrival?.hermanRouteId);
                               const hermanGuestEur = getHermanGuestPrice(reservation.transfers?.arrival?.hermanRouteId, reservation.pax);
-                              const hermanRouteName = dbRoutes.find((rt: { id: string; name: string }) => rt.id === reservation.transfers?.arrival?.hermanRouteId)?.name || 'avto';
+                              const hermanRouteName = routeNameById(reservation.transfers?.arrival?.hermanRouteId) || 'avto';
                               if (dilipCostAr <= 0 && hermanCostAr <= 0) return null;
                               // With the cost panel hidden there is nothing left in this block
                               // unless the guest price applies — bail out so no empty gap remains.
@@ -5358,7 +5375,7 @@ function GuestCard() {
                           }}
                         >
                           <option value="">-- Ni transferja --</option>
-                          {dbRoutes.map((r: { id: string; name: string }) => (
+                          {routesKeepingCurrent(reservation.transfers?.departure?.route).map((r: { id: string; name: string }) => (
                             <option key={r.id} value={r.id}>{r.name}</option>
                           ))}
                         </select>
@@ -5498,7 +5515,7 @@ function GuestCard() {
                               }}
                             >
                               <option value="">-- Brez avta (taksi) --</option>
-                              {taxiRoutesFor(taxiIdOf(reservation.transfers?.departure)).map((r: { id: string; name: string }) => (
+                              {taxiRoutesFor(taxiIdOf(reservation.transfers?.departure), reservation.transfers?.departure?.hermanRouteId).map((r: { id: string; name: string }) => (
                                 <option key={r.id} value={r.id}>{r.name} ({ar(getSupplierCostAr(taxiIdOf(reservation.transfers?.departure), r.id))})</option>
                               ))}
                             </select>
@@ -5508,7 +5525,7 @@ function GuestCard() {
                               const dilipCostAr = getSupplierCostAr(reservation.transfers?.departure?.boatId, reservation.transfers?.departure?.route);
                               const hermanCostAr = getSupplierCostAr(taxiId, reservation.transfers?.departure?.hermanRouteId);
                               const hermanGuestEur = getHermanGuestPrice(reservation.transfers?.departure?.hermanRouteId, reservation.pax);
-                              const hermanRouteName = dbRoutes.find((rt: { id: string; name: string }) => rt.id === reservation.transfers?.departure?.hermanRouteId)?.name || 'avto';
+                              const hermanRouteName = routeNameById(reservation.transfers?.departure?.hermanRouteId) || 'avto';
                               if (dilipCostAr <= 0 && hermanCostAr <= 0) return null;
                               // With the cost panel hidden there is nothing left in this block
                               // unless the guest price applies — bail out so no empty gap remains.
@@ -8468,7 +8485,7 @@ function GuestCard() {
   })();
   const reminderSections: ReminderSection[] = (() => {
     const boatName = (id: string | null | undefined) => dbBoats.find((b: { id: string; name: string }) => b.id === id)?.name;
-    const routeName = (id: string | null | undefined) => dbRoutes.find((rt: { id: string; name: string }) => rt.id === id)?.name || id || "";
+    const routeName = (id: string | null | undefined) => routeNameById(id) || id || "";
     // Date one day after the selected day (transfers must be ordered a day ahead).
     // Compute in UTC so it stays consistent with today() and the DB date strings
     // (a local-time parse + toISOString would shift the day under a +TZ offset).
@@ -9150,7 +9167,7 @@ function GuestCard() {
     const taxiId = taxiIdOf(t);
     const taxiName = taxiNameOf(taxiId);
     const hermanCostAr = getSupplierCostAr(taxiId, t.hermanRouteId);
-    const routeName = dbRoutes.find((rt: { id: string; name: string }) => rt.id === t.route)?.name || t.route;
+    const routeName = routeNameById(t.route) || t.route;
     const TypeIcon = isArrival ? LogIn : LogOut;
     const typeColor = isArrival ? '#6f9a72' : '#c4744a';
     const cardCountdown = countdownLabel(t.pickupDate || (isArrival ? r.arrival : r.departure));
@@ -9198,7 +9215,7 @@ function GuestCard() {
                 {hermanCostAr > 0 && <span>{taxiName}: {ar(hermanCostAr)}</span>}
               </div>
               {t.skipBoatPay && <p className="mt-1 text-[10px] font-semibold text-[#1a346e]">Gostu se prevoz še vedno zaračuna.</p>}
-              {hermanCostAr > 0 && (<p className="mt-1 text-[10px] font-semibold text-[#4f7a54]">Pokliči tudi {taxiName} ({dbRoutes.find((rt: { id: string; name: string }) => rt.id === t.hermanRouteId)?.name || 'avto'})</p>)}
+              {hermanCostAr > 0 && (<p className="mt-1 text-[10px] font-semibold text-[#4f7a54]">Pokliči tudi {taxiName} ({routeNameById(t.hermanRouteId) || 'avto'})</p>)}
             </div>
           )}
           {dilipCostAr > 0 && (

@@ -212,7 +212,9 @@ async function buildVoucherData(
 
   // Route names from the price list
   const dash = await getDashboardData()
-  const routes: { id: string; name: string }[] = dash?.routes || []
+  // Include inactive routes so a booking that still points at one (the row
+  // stays in the archive) keeps its name on the voucher.
+  const routes: { id: string; name: string }[] = dash?.routesAll?.length ? dash.routesAll : (dash?.routes || [])
   const routeName = routes.find(r => r.id === transfer.route)?.name || ''
   const hermanRouteName = transfer.hermanRouteId
     ? routes.find(r => r.id === transfer.hermanRouteId)?.name || ''

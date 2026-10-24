@@ -254,8 +254,19 @@ export async function updateSellingPricing(
   return { success: true }
 }
 
+// Packaged "Airport Fascene - Komba Cabana" is no longer offered on the ceniki.
+// The row stays in the table so the archive, old bookings and supplier-cost
+// lookup can still resolve the name. Only flips the flag when it is still active.
+async function deactivateAirportPackageRoute() {
+  await db
+    .update(routes)
+    .set({ active: false })
+    .where(and(eq(routes.id, 'route-airport'), eq(routes.active, true)))
+}
+
 // Get routes that have guest pricing (includes composite routes like Airport)
 export async function getGuestRoutes() {
+  await deactivateAirportPackageRoute()
   return await db.query.routes.findMany({
     where: eq(routes.active, true),
     orderBy: (routes, { asc }) => [asc(routes.name)]
