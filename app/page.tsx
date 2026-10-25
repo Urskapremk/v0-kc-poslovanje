@@ -1663,6 +1663,34 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
   );
 }
 
+// Clock beside the person button. Borut is at the lodge (Madagascar, no
+// daylight saving). Urška works from Slovenia, so Europe/Ljubljana follows
+// the winter/summer change on its own.
+function formatPlaceTime(timeZone: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+}
+
+function PlaceClock({ timeZone, title }: { timeZone: string; title: string }) {
+  const [label, setLabel] = React.useState("");
+  React.useEffect(() => {
+    const tick = () => setLabel(formatPlaceTime(timeZone));
+    tick();
+    const id = window.setInterval(tick, 15_000);
+    return () => window.clearInterval(id);
+  }, [timeZone]);
+  if (!label) return null;
+  return (
+    <span className="text-[11px] font-medium tabular-nums tracking-normal" title={title}>
+      {label}
+    </span>
+  );
+}
+
 // ============ MAIN APP ============
 export default function KombaCabanaApp() {
   // ALL HOOKS MUST BE AT THE TOP - before any conditional returns
@@ -9474,7 +9502,14 @@ function GuestCard() {
                     personActive ? colorStyles[color] : "bg-white/[0.03] text-[#9dafb5] hover:bg-white/[0.06] hover:text-[#f8f5ef]"
                   }`}
                 >
-                  <PersonIcon className="h-4 w-4" /> {person.label}
+                  <PersonIcon className="h-4 w-4" />
+                  <span>{person.label}</span>
+                  {id === "borut" && (
+                    <PlaceClock timeZone="Indian/Antananarivo" title="Ura na Madagaskarju" />
+                  )}
+                  {id === "urska" && (
+                    <PlaceClock timeZone="Europe/Ljubljana" title="Ura v Sloveniji" />
+                  )}
                 </button>
               );
             }
