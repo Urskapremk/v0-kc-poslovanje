@@ -1675,7 +1675,7 @@ function formatPlaceTime(timeZone: string) {
   }).format(new Date());
 }
 
-function PlaceClock({ timeZone, title }: { timeZone: string; title: string }) {
+function PlaceClock({ timeZone, title, active }: { timeZone: string; title: string; active?: boolean }) {
   const [label, setLabel] = React.useState("");
   React.useEffect(() => {
     const tick = () => setLabel(formatPlaceTime(timeZone));
@@ -1684,8 +1684,11 @@ function PlaceClock({ timeZone, title }: { timeZone: string; title: string }) {
     return () => window.clearInterval(id);
   }, [timeZone]);
   if (!label) return null;
+  // Bright gold on the dark pill. On the filled button the bright gold
+  // disappears into Urška's gold fill, so that state uses the dark gold.
+  const gold = active ? "text-[#6b4f22]" : "text-[#e8c88a]";
   return (
-    <span className="text-[11px] font-medium tabular-nums tracking-normal" title={title}>
+    <span className={`text-[11px] font-medium tabular-nums tracking-normal ${gold}`} title={title}>
       {label}
     </span>
   );
@@ -9505,10 +9508,10 @@ function GuestCard() {
                   <PersonIcon className="h-4 w-4" />
                   <span>{person.label}</span>
                   {id === "borut" && (
-                    <PlaceClock timeZone="Indian/Antananarivo" title="Ura na Madagaskarju" />
+                    <PlaceClock timeZone="Indian/Antananarivo" title="Ura na Madagaskarju" active={personActive} />
                   )}
                   {id === "urska" && (
-                    <PlaceClock timeZone="Europe/Ljubljana" title="Ura v Sloveniji" />
+                    <PlaceClock timeZone="Europe/Ljubljana" title="Ura v Sloveniji" active={personActive} />
                   )}
                 </button>
               );
