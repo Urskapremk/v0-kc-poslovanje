@@ -106,13 +106,36 @@ export function bungalowCardLabel(unitId: string): string {
 }
 
 // Ali rezervacija pripada tej nastanitveni enoti. "Ocean Bungalow I" ne ujame "II"/"IV".
-// Shranjen "Jungle Glamp Village" (in izrecen "... I") pripada prvi enoti, ne drugi.
+// Shranjen "Jungle Glamp Village" (in izrecen "... I" ali Bentralovo "... 1") pripada prvi enoti.
+// Bentralovo "Jungle Glamp Village 2" je druga enota. Ce ista rezervacija ze vsebuje
+// obe (npr. VITOGAZ), ostane na I in se doda se na II. Samo "2" brez prve enote
+// se ne prestavi, da drugi gostje ostanejo, kjer so.
 export function reservationMatchesBungalow(reservationBungalow: string | null | undefined, unitId: string): boolean {
   const hay = String(reservationBungalow || '')
     .toLowerCase()
     .replace(/bungalov\b/g, 'bungalow')
     .replace(/\s+/g, ' ')
-  return bungalowUnitPattern(unitId).test(hay)
+  if (bungalowUnitPattern(unitId).test(hay)) return true
+  const n = unitId.toLowerCase().replace(/bungalov\b/g, 'bungalow').replace(/\s+/g, ' ').trim()
+  if (n !== 'jungle glamp village ii') return false
+  const glamp = glampUnitsIn(hay)
+  return glamp.has('i') && glamp.has('ii')
+}
+
+function glampUnitsIn(hay: string): Set<'i' | 'ii'> {
+  const units = new Set<'i' | 'ii'>()
+  const parts = hay
+    .split(/[;/]/)
+    .map(part => part.replace(/\(\d+\+\d+\)/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  for (const part of parts) {
+    if (!part.includes('jungle') && !part.includes('glamp')) continue
+    // Bentral repeats the bare name before "/", so only an explicit 1 or 2 counts.
+    // "(2+0)" is stripped above and must not look like unit 2.
+    if (/\bvillage\s+(ii|2)\b/.test(part)) units.add('ii')
+    else if (/\bvillage\s+(i|1)\b/.test(part)) units.add('i')
+  }
+  return units
 }
 
 function bungalowUnitPattern(unitId: string): RegExp {
