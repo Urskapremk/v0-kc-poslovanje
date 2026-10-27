@@ -33,6 +33,20 @@ describe("jungle glamp units", () => {
     )
   })
 
+  it("keeps a stay that already has both Bentral glamps on I and II", () => {
+    const vitogaz = "Garden Bungalov III / Garden Bungalov III (2+1); Ocean Bungalow IV - Beach Villa / Ocean Bungalow IV ; Jungle Glamp Village / Jungle Glamp Village 1 (2+0); Jungle Glamp Village / Jungle Glamp Village 2 (2+0)"
+    assert.equal(reservationMatchesBungalow(vitogaz, "Jungle Glamp Village"), true)
+    assert.equal(reservationMatchesBungalow(vitogaz, "Jungle Glamp Village II"), true)
+    assert.equal(reservationMatchesBungalow(vitogaz, "Garden Bungalow III"), true)
+    assert.equal(reservationMatchesBungalow(vitogaz, "Ocean Bungalow IV"), true)
+    assert.equal(reservationMatchesBungalow(vitogaz, "Ocean Bungalow I"), false)
+    assert.equal(reservationMatchesBungalow(vitogaz, "Ocean Bungalow II"), false)
+    assert.equal(reservationMatchesBungalow("Jungle Glamp Village / Jungle Glamp Village 1 (2+0)", "Jungle Glamp Village"), true)
+    assert.equal(reservationMatchesBungalow("Jungle Glamp Village / Jungle Glamp Village 1 (2+0)", "Jungle Glamp Village II"), false)
+    assert.equal(reservationMatchesBungalow("Jungle Glamp Village / Jungle Glamp Village 2 (2+0)", "Jungle Glamp Village"), true)
+    assert.equal(reservationMatchesBungalow("Jungle Glamp Village / Jungle Glamp Village 2 (2+0)", "Jungle Glamp Village II"), false)
+  })
+
   it("does not rename the other bungalows or cross-match their numbers", () => {
     assert.equal(bungalowCardLabel("Ocean Bungalow I"), "Ocean Bungalow I")
     assert.equal(bungalowCardLabel("Ocean Bungalow II"), "Ocean Bungalow II")
