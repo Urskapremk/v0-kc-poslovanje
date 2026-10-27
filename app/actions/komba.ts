@@ -2,6 +2,7 @@
 
 import { db } from '@/lib/db'
 import { bentralCountryForImport } from '@/lib/bentral-country-lock'
+import { cardFieldsFromBentral } from '@/lib/bentral-card-sync'
 import { reservations, transfers, orderItems, settings, boats, routes, supplements, routeSupplements, supplierPricing, sellingPricing, excursions, excursionPricing, excursionSellingPricing, excursionBookings, bentralReservations, guests, payments, agencies, products, lunchProviders, deliveryNotes, deliveryNoteItems, scheduledExcursions, staff, invoiceDiscounts, supplierPayments, marketingExpenses } from '@/lib/db/schema'
 import { eq, and, or, lte, gte, desc, isNull, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
@@ -1456,6 +1457,49 @@ function parseBentralDate(dateStr: string): string {
   return result
 }
 
+// The Bentral row was already matched by its number. Copy the fields a first
+// transfer writes onto the linked guest card. Never insert another card, and
+// never look the card up by name — the name is one of the fields that changes.
+async function syncLinkedReservationFromBentral(bentralRowId: string) {
+  const [bentral] = await db.select().from(bentralReservations).where(eq(bentralReservations.id, bentralRowId)).limit(1)
+  if (!bentral?.transferred || !bentral.reservationId) return
+
+  const [card] = await db.select().from(reservations).where(eq(reservations.id, bentral.reservationId)).limit(1)
+  if (!card) return
+
+  const patch = cardFieldsFromBentral({
+    guestName: bentral.guestName,
+    units: bentral.units,
+    adults: bentral.adults,
+    children: bentral.children,
+    checkIn: bentral.checkIn,
+    checkOut: bentral.checkOut,
+    status: bentral.status,
+    source: bentral.source,
+    country: bentral.country,
+    guestNotes: bentral.guestNotes,
+    ownNotes: bentral.ownNotes,
+    amount: bentral.amount,
+    currency: bentral.currency,
+  }, card.status)
+
+  // Recorded payments own amountPaid. A fresh card still takes the Bentral paid flag.
+  const [payment] = await db.select({ id: payments.id }).from(payments).where(eq(payments.reservationId, card.id)).limit(1)
+  await db.update(reservations).set({
+    ...patch,
+    ...(payment ? { amountPaid: card.amountPaid ?? '0' } : {}),
+    updatedAt: new Date(),
+  }).where(eq(reservations.id, card.id))
+
+  if (card.guestId) {
+    await db.update(guests).set({
+      name: bentral.guestName,
+      country: bentral.country,
+      updatedAt: new Date(),
+    }).where(eq(guests.id, card.guestId))
+  }
+}
+
 export async function importBentralCSV(csvContent: string) {
   const lines = csvContent.split('\n')
   const dataLines: string[] = []
@@ -1521,7 +1565,7 @@ export async function importBentralCSV(csvContent: string) {
       const existing = await db.select().from(bentralReservations).where(eq(bentralReservations.externalId, externalId)).limit(1)
       
       if (existing.length > 0) {
-        // Update existing
+        // Update existing. Match is the Bentral number only, never the guest name.
         await db.update(bentralReservations).set({
           status,
           source: source || null,
@@ -1540,6 +1584,11 @@ export async function importBentralCSV(csvContent: string) {
           ownNotes: ownNotes || null,
           updatedAt: new Date(),
         }).where(eq(bentralReservations.id, existing[0].id))
+        // A booking that was already copied onto a guest card must follow later
+        // CSV changes onto that same card. Do not open a second card.
+        if (existing[0].transferred && existing[0].reservationId) {
+          await syncLinkedReservationFromBentral(existing[0].id)
+        }
         updated++
       } else {
         // Insert new
@@ -1649,30 +1698,13 @@ export async function transferBentralReservation(bentralId: string) {
   
   // Create main reservation
   const reservationId = uid('res')
-  // Determine amount paid based on Bentral status
-  const isPaid = bentral.status.toLowerCase().includes('placano') || bentral.status.toLowerCase().includes('plačano')
-  const amountPaid = isPaid ? bentral.amount : '0'
-  
+  const card = cardFieldsFromBentral(bentral, 'RESERVED')
+
   await db.insert(reservations).values({
     id: reservationId,
     guestId: guest.id,
     bentralReservationId: bentral.id,
-    guestName: bentral.guestName,
-    bungalow: bentral.units || 'TBD',
-    pax: bentral.adults + bentral.children,
-    arrival: bentral.checkIn,
-    departure: bentral.checkOut,
-    checkIn: bentral.checkIn,
-    checkOut: bentral.checkOut,
-    adults: bentral.adults,
-    children: bentral.children,
-    status: bentral.status === 'Preklicano' ? 'CANCELLED' : 'RESERVED',
-    bookingSource: bentral.source || 'Direct',
-    nationality: bentral.country,
-    notes: [bentral.guestNotes, bentral.ownNotes].filter(Boolean).join('\n---\n') || undefined,
-    totalAmount: bentral.amount,
-    amountPaid: amountPaid,
-    currency: bentral.currency || 'EUR',
+    ...card,
   })
   
   // Mark Bentral reservation as transferred
