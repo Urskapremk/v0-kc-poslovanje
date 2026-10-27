@@ -13,7 +13,7 @@ import {
   } from '@/app/actions/delivery'
 import { CHILD_BANDS, childBand } from '@/lib/meal-plan'
 import { toEnglishItemName } from '@/lib/item-name'
-import { bungalowDisplayName } from '@/lib/bungalow'
+import { bungalowDisplayName, reservationMatchesBungalow } from '@/lib/bungalow'
 
 // Types
 interface StaffUser {
@@ -61,7 +61,7 @@ interface DeliveryNote {
 }
 
 // Bungalow short codes and colors for staff recognition
-const BUNGALOWS = ["Ocean Bungalov I", "Ocean Bungalow II", "Garden Bungalov III", "Ocean Bungalow IV", "Jungle Glamp Village"]
+const BUNGALOWS = ["Ocean Bungalov I", "Ocean Bungalow II", "Garden Bungalov III", "Ocean Bungalow IV", "Jungle Glamp Village", "Jungle Glamp Village II"]
 
 const BUNGALOW_CONFIG: Record<string, { code: string; color: string; bgColor: string }> = {
   "Ocean Bungalov I": { code: "I", color: "#7fa8b8", bgColor: "rgba(127,168,184, 0.15)" },
@@ -69,6 +69,7 @@ const BUNGALOW_CONFIG: Record<string, { code: string; color: string; bgColor: st
   "Garden Bungalov III": { code: "III", color: "#c59b5b", bgColor: "rgba(197,155,91, 0.15)" },
   "Ocean Bungalow IV": { code: "IV", color: "#cf937d", bgColor: "rgba(197,155,91, 0.15)" },
   "Jungle Glamp Village": { code: "JGV", color: "#8fae92", bgColor: "rgba(143,174,146, 0.15)" },
+  "Jungle Glamp Village II": { code: "JG2", color: "#8fae92", bgColor: "rgba(143,174,146, 0.15)" },
 }
 
 const getBungalowConfig = (name: string) => {
@@ -358,20 +359,14 @@ function BungalowSelect({
             const todayStr = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().slice(0, 10)
             return BUNGALOWS.flatMap((bungalowName) => {
               const config = getBungalowConfig(bungalowName)
-              // Flexible match: reservation bungalow may contain extra text like
-              // "Ocean Bungalow IV  / Ocean Bungalow IV", so normalize whitespace.
-              // Also unify the "Bungalov"/"Bungalow" spelling difference used in stored data.
-              const normalize = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase().replace(/bungalov\b/g, 'bungalow')
-              const canonical = normalize(bungalowName)
-              // Match the name as a whole token so "Ocean Bungalow I" does NOT match
-              // "Ocean Bungalow IV" (negative lookahead prevents the trailing "i" of "iv" match).
-              const matchRe = new RegExp(canonical.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-z0-9])')
+              // Match the stored name onto this slot. "Ocean Bungalow I" does not take
+              // IV/II, and the unnumbered Jungle Glamp stays on unit I, not Village II.
               // ALL guests currently in this bungalow, not just the first. On a
               // changeover day one guest checks out while the next has already
               // checked in (e.g. Stefan + Lukas in Ocean Bungalow II) — each needs
               // their own card + delivery note. claimed still prevents a two-room
               // reservation from showing twice across different bungalow slots.
-              const slotGuests = bungalows.filter(b => !claimed.has(b) && matchRe.test(normalize(b.bungalow)))
+              const slotGuests = bungalows.filter(b => !claimed.has(b) && reservationMatchesBungalow(b.bungalow, bungalowName))
               slotGuests.forEach(g => claimed.add(g))
 
               // Vacant slot — keep the disabled placeholder card.

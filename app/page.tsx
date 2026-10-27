@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import useSWR, { mutate } from "swr";
   import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart } from "lucide-react";
-  import { bungalowDisplayName } from "@/lib/bungalow";
+  import { bungalowCardLabel, bungalowDisplayName, reservationMatchesBungalow } from "@/lib/bungalow";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
@@ -67,7 +67,14 @@ import VremeTab from "@/components/vreme-tab";
   import { VisitorCountries } from "@/components/visitor-countries";
 
 const DEFAULT_RATE = 4800;
-const BUNGALOWS = ["Ocean Bungalow I", "Ocean Bungalow II", "Garden Bungalow III", "Ocean Bungalow IV", "Jungle Glamp Village"];
+// Stored id of the first glamp stays "Jungle Glamp Village" so existing reservations
+// keep pointing at unit I. The card and the offer list show that unit as "... I".
+const BUNGALOWS = ["Ocean Bungalow I", "Ocean Bungalow II", "Garden Bungalow III", "Ocean Bungalow IV", "Jungle Glamp Village", "Jungle Glamp Village II"];
+const BUNGALOW_OPTIONS = BUNGALOWS.map((b) => {
+  const label = bungalowCardLabel(b);
+  return label === b ? b : { value: b, label };
+});
+const isGlampReserve = (bungalow: string) => bungalow === "Jungle Glamp Village" || bungalow === "Jungle Glamp Village II";
 const STATUSES = ["ARRIVING_TODAY", "RESERVED", "IN_HOUSE", "DEPARTING_TODAY", "CHECKED_OUT", "CANCELLED"];
 const BOOKING_SOURCES = ["Booking.com", "Airbnb", "Direct Website", "Agency", "Other"];
 const CATEGORIES = ["Pijaca", "Hrana", "Transfer", "Izlet", "Razno"];
@@ -2479,13 +2486,10 @@ async function handleCreateReservation() {
 
   function getBungalowGuest(bungalow: string, when: "now" | "next" | "next2" | "next3" | "next4"): Reservation | undefined {
     const todayStr = today();
-    // Normalize so the "Bungalov"/"Bungalow" spelling difference (and casing) in stored
-    // reservations doesn't break matching. Match as a word boundary to avoid
-    // "Ocean Bungalow I" matching "Ocean Bungalow II".
-    const normalize = (s: string) => s.toLowerCase().replace(/bungalov\b/g, "bungalow");
-    const bungalowRegex = new RegExp(`\\b${normalize(bungalow)}\\b`);
+    // Match the stored bungalow onto this card. "Ocean Bungalow I" does not take "II".
+    // The first glamp keeps the unnumbered stored id and must not take Village II.
     const active = reservations.filter(r => 
-      bungalowRegex.test(normalize(r.bungalow || "")) && 
+      reservationMatchesBungalow(r.bungalow, bungalow) && 
       r.status !== "CANCELLED" && 
       r.status !== "CHECKED_OUT"
     );
@@ -2575,9 +2579,9 @@ async function handleCreateReservation() {
           
           // Check if guest is checked in (In house)
           const isInHouse = now?.checkedInAt && !now?.checkedOutAt;
-          // The glamp village is only a fallback unit, so its name stays quiet
+          // Both glamp villages are only fallback units, so their names stay quiet
           // instead of competing with the four real bungalows.
-          const isReserve = bungalow === "Jungle Glamp Village";
+          const isReserve = isGlampReserve(bungalow);
 
           // Countdown to arrival, shown next to the pax marker. Only for guests who are
           // still coming — once they arrive (or leave today) the status label says it.
@@ -3073,7 +3077,7 @@ async function handleCreateReservation() {
                           : "text-[17px] font-semibold tracking-[0.01em] text-[#0f2e3a] sm:text-[22px]"
                       }`}
                     >
-                      {bungalow}
+                      {bungalowCardLabel(bungalow)}
                     </h3>
                     {/* Gold hairline under the name — same signature motif as the NOW/NEXT
                         overlines; quieter for the reserve unit. */}
@@ -4062,7 +4066,7 @@ function GuestCard() {
             </div>
             <LuxuryCheckbox label="Honeymoon" checked={reservation.honeymoon || false} onChange={v => handleUpdateReservation(reservation.id, { honeymoon: v })} />
             <LuxuryCheckbox label="Ne potrebuje prevoza" checked={(reservation as { noTransferNeeded?: boolean }).noTransferNeeded || false} onChange={v => handleUpdateReservation(reservation.id, { noTransferNeeded: v })} />
-            <LuxurySelect label="Bungalow" value={reservation.bungalow} onChange={v => handleUpdateReservation(reservation.id, { bungalow: v })} options={BUNGALOWS} />
+            <LuxurySelect label="Bungalow" value={reservation.bungalow} onChange={v => handleUpdateReservation(reservation.id, { bungalow: v })} options={BUNGALOW_OPTIONS} />
             <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1.5 block text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-white/40">Pax</label>
@@ -10458,10 +10462,10 @@ function GuestCard() {
   {tab === "koledar" && (
     <section>
       <GlassCard className="p-4 sm:p-6">
-        {/* Jungle Glamp Village je samo rezerva — v koledarju ga ne prikazujemo. */}
+        {/* Jungle Glamp Village I in II sta samo rezerva — v koledarju ju ne prikazujemo. */}
         <TimelineCalendar
           reservations={reservations}
-          bungalows={BUNGALOWS.filter((b) => b !== "Jungle Glamp Village")}
+          bungalows={BUNGALOWS.filter((b) => !isGlampReserve(b))}
           onSelect={(id) => { setSelectedReservationId(id); setTab("guest"); }}
         />
       </GlassCard>
@@ -10698,7 +10702,7 @@ function GuestCard() {
             {/* Form */}
             <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
               {GuestNameInput}
-              <LuxurySelect label="Bungalow" value={reservationDraft.bungalow} onChange={v => setReservationDraft(p => ({ ...p, bungalow: v }))} options={BUNGALOWS} />
+              <LuxurySelect label="Bungalow" value={reservationDraft.bungalow} onChange={v => setReservationDraft(p => ({ ...p, bungalow: v }))} options={BUNGALOW_OPTIONS} />
               <LuxuryInput label="Pax" type="number" value={reservationDraft.pax} onChange={v => setReservationDraft(p => ({ ...p, pax: Number(v) }))} />
               <div className="grid grid-cols-2 gap-3">
                 <LuxuryInput label="Prihod" type="date" value={reservationDraft.arrival} onChange={v => setReservationDraft(p => ({ ...p, arrival: v }))} />

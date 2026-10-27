@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { reservations } from "@/lib/db/schema"
-import { bungalowDisplayName } from "@/lib/bungalow"
+import { bungalowDisplayName, reservationMatchesBungalow } from "@/lib/bungalow"
 import { isNull } from "drizzle-orm"
 
 export const dynamic = "force-dynamic"
@@ -12,16 +12,8 @@ const BUNGALOWS = [
   "Garden Bungalow III",
   "Ocean Bungalow IV",
   "Jungle Glamp Village",
+  "Jungle Glamp Village II",
 ]
-
-function normalizeBungalowName(s: string): string {
-  return s.toLowerCase().replace(/bungalov\b/g, "bungalow")
-}
-
-function bungalowMatchesCanonical(bungalowField: string, canonical: string): boolean {
-  const regex = new RegExp(`\\b${normalizeBungalowName(canonical)}\\b`)
-  return regex.test(normalizeBungalowName(bungalowField || ""))
-}
 
 function todayYmd(): string {
   return new Date().toISOString().slice(0, 10)
@@ -67,7 +59,7 @@ export async function GET(request: Request) {
 
     const claimedNow = new Set<string>()
     const bungalows = BUNGALOWS.map((canonical) => {
-      const bungalowActive = active.filter((r) => bungalowMatchesCanonical(r.bungalow, canonical))
+      const bungalowActive = active.filter((r) => reservationMatchesBungalow(r.bungalow, canonical))
       const covering = bungalowActive.filter((r) => {
         const a = toYmd(r.arrival)
         const d = toYmd(r.departure)
