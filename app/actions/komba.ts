@@ -9,6 +9,7 @@ import { revalidatePath } from 'next/cache'
 import { unpaySupplier } from './supplier-payment'
 import { unpayFanja } from './fanja-payment'
 import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
+import { replaceBungalowPeople, type BungalowPeopleMap, type BungalowPerson } from '@/lib/bungalow-people'
 
 // Generate unique ID
 function uid(prefix: string) {
@@ -140,8 +141,39 @@ export async function getReservationById(reservationId: string) {
 
 // ============ RESERVATIONS ============
 
+let bungalowPeopleColumnReady = false
+async function ensureBungalowPeopleColumn() {
+  if (bungalowPeopleColumnReady) return
+  await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS "bungalowPeople" jsonb`)
+  bungalowPeopleColumnReady = true
+}
+
 export async function getReservations() {
+  await ensureBungalowPeopleColumn()
   return db.select().from(reservations).orderBy(desc(reservations.arrival))
+}
+
+// Saves the people of ONE bungalow. The holder name, price, dates, guest count
+// and every other bungalow's people stay as they are.
+export async function saveBungalowUnitPeople(
+  reservationId: string,
+  key: string,
+  people: BungalowPerson[],
+) {
+  if (!reservationId || !key) return { error: 'Manjka bungalov.' }
+  await ensureBungalowPeopleColumn()
+  const [row] = await db
+    .select({ bungalowPeople: reservations.bungalowPeople })
+    .from(reservations)
+    .where(eq(reservations.id, reservationId))
+    .limit(1)
+  if (!row) return { error: 'Rezervacija ne obstaja.' }
+  const next = replaceBungalowPeople(row.bungalowPeople as BungalowPeopleMap | null, key, people)
+  await db.update(reservations)
+    .set({ bungalowPeople: next, updatedAt: new Date() })
+    .where(eq(reservations.id, reservationId))
+  revalidatePath('/')
+  return { ok: true }
 }
 
 export async function getReservationWithDetails(id: string) {
@@ -815,6 +847,7 @@ export async function setOrderItemTransferOrdered(id: string, which: 'dilip' | '
 
 export async function getDashboardData(includeReservationId?: string) {
   await ensureSkipBoatPayColumn()
+  await ensureBungalowPeopleColumn()
   const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
   await ensureSupplierPaymentCostColumns()
   // Only fetch ACTIVE reservations (not checked out) for dashboard performance.
@@ -2427,6 +2460,7 @@ export async function checkOutReservation(reservationId: string) {
 }
 
 export async function getArchivedReservations(page: number = 1, limit: number = 20) {
+  await ensureBungalowPeopleColumn()
   const offset = (page - 1) * limit
   
   // Get archived reservations (with checkedOutAt)

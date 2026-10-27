@@ -149,6 +149,48 @@ function bungalowUnitPattern(unitId: string): RegExp {
   return new RegExp(`\\b${escaped}\\b`, 'i')
 }
 
+const STAY_UNIT_LABELS: Record<string, string> = {
+  'ocean-i': 'Ocean Bungalow I',
+  'ocean-ii': 'Ocean Bungalow II',
+  'garden-iii': 'Garden Bungalow III',
+  'ocean-iv': 'Ocean Bungalow IV',
+  'jungle': 'Jungle Glamp Village I',
+  'jungle-ii': 'Jungle Glamp Village II',
+}
+
+// Physical units on one booking, in the order Bentral lists them. A glamp
+// written as "Village 1" and "Village 2" stays two units. Card names are unchanged.
+export function stayUnits(raw: string | null | undefined): { key: string; label: string }[] {
+  if (!raw) return []
+  const seen = new Set<string>()
+  const units: { key: string; label: string }[] = []
+  const add = (key: string) => {
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    units.push({ key, label: STAY_UNIT_LABELS[key] || key })
+  }
+  for (const seg of raw.split(';').map(s => s.trim()).filter(Boolean)) {
+    const full = seg.toLowerCase().replace(/bungalov/g, 'bungalow')
+    if (full.includes('jungle') || full.includes('glamp')) {
+      const parts = full.split('/').map(p => p.replace(/\(\s*\d+\s*\+\s*\d+\s*\)/g, ' ').replace(/\s+/g, ' ').trim())
+      let numbered = false
+      for (const part of parts) {
+        if (/\bvillage\s+ii\b/.test(part) || /\bvillage\s+2\b/.test(part)) {
+          add('jungle-ii')
+          numbered = true
+        } else if (/\bvillage\s+i\b/.test(part) || /\bvillage\s+1\b/.test(part)) {
+          add('jungle')
+          numbered = true
+        }
+      }
+      if (!numbered) add('jungle')
+      continue
+    }
+    add(segmentKey(seg))
+  }
+  return units
+}
+
 // VSI kljuci enot v sestavljenem nizu (rezervacija cez VEC bungalovov).
 // Bentral loci vec bungalovov s ';', npr.
 //   "Ocean Bungalow II / Ocean Bungalow II (2+0); Garden Bungalov III"

@@ -83,6 +83,9 @@ export const reservations = pgTable('reservations', {
   guestId: text('guestId').references(() => guests.id),
   bentralReservationId: text('bentralReservationId'),
   guestName: text('guestName').notNull(),
+  // People in each bungalow when one booking covers several units. Keyed by bungalow key.
+  // The holder (nosilec) stays on guestName. Price, dates and pax stay on this row.
+  bungalowPeople: jsonb('bungalowPeople'),
   // Naziv gosta za vljudno nagovarjanje na vaucerjih in v posti ("Mr." / "Mrs." / "Ms.").
   // Prazno = brez naziva; imena v bazi so brez njega, ker se izpisujejo tudi drugod.
   guestTitle: text('guestTitle'),
