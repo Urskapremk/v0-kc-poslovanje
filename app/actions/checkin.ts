@@ -2,11 +2,19 @@
 
 import { db } from '@/lib/db'
 import { reservations } from '@/lib/db/schema'
-import { eq, and, isNull, or } from 'drizzle-orm'
+import { eq, and, isNull, or, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { randomBytes } from 'crypto'
 import { logSentEmail } from './sent-emails'
 import { bungalowDistinctDisplayNames } from '@/lib/bungalow'
+import { mergeGuestFieldsIntoPeople, multiStayUnitForSlot, policePerson, type BungalowPeopleMap } from '@/lib/bungalow-people'
+
+let bungalowPeopleColumnReady = false
+async function ensureBungalowPeopleColumn() {
+  if (bungalowPeopleColumnReady) return
+  await db.execute(sql`ALTER TABLE reservations ADD COLUMN IF NOT EXISTS "bungalowPeople" jsonb`)
+  bungalowPeopleColumnReady = true
+}
 
 // ============ GUEST SELF CHECK-IN ============
 
@@ -126,6 +134,7 @@ export async function getCheckinLink(
 // Returns null if token invalid or guest already checked out.
 export async function getReservationByToken(token: string) {
   if (!token) return null
+  await ensureBungalowPeopleColumn()
 
   const rows = await db
     .select()
@@ -150,9 +159,20 @@ export async function getReservationByToken(token: string) {
   if (!slot) return null
 
   // Map each unified key to the correct slot column value.
+  // A multi-bungalow booking keeps the company on guestName. This slot's
+  // police form reads the person stored for that bungalow.
   const guest: Record<string, unknown> = {}
+  const unitKey = multiStayUnitForSlot(res.bungalow as string, slot)
+  const bungalowPerson = unitKey
+    ? policePerson(res.bungalowPeople as BungalowPeopleMap | null, unitKey, 0)
+    : null
   for (const base of GUEST_FIELDS) {
-    guest[base] = res[col(slot, base)] ?? null
+    if (unitKey) {
+      if (base === 'guestName') guest.guestName = bungalowPerson?.name || ''
+      else guest[base] = bungalowPerson?.[base as keyof typeof bungalowPerson] ?? null
+    } else {
+      guest[base] = res[col(slot, base)] ?? null
+    }
   }
 
   return {
@@ -200,11 +220,14 @@ export async function submitCheckinByToken(
   }
 ) {
   if (!token) return { success: false, error: 'Invalid link' }
+  await ensureBungalowPeopleColumn()
 
   // Verify the token maps to an active reservation and detect the slot
   const rows = await db
     .select({
       id: reservations.id,
+      bungalow: reservations.bungalow,
+      bungalowPeople: reservations.bungalowPeople,
       checkinToken: reservations.checkinToken,
       secondCheckinToken: reservations.secondCheckinToken,
       thirdCheckinToken: reservations.thirdCheckinToken,
@@ -231,6 +254,24 @@ export async function submitCheckinByToken(
 
   const slot = slotForToken(row, token)
   if (!slot) return { success: false, error: 'Link expired or invalid' }
+
+  // A multi-bungalow booking stores this person on their bungalow. The holder
+  // name, price, dates and the other bungalows stay untouched.
+  const unitKey = multiStayUnitForSlot(row.bungalow, slot)
+  if (unitKey) {
+    const fields: Record<string, string> = {}
+    for (const [key, value] of Object.entries(data)) {
+      if (value && (GUEST_FIELDS as readonly string[]).includes(key)) fields[key] = value
+    }
+    if (Object.keys(fields).length > 0) {
+      const next = mergeGuestFieldsIntoPeople(row.bungalowPeople as BungalowPeopleMap | null, unitKey, fields)
+      await db.update(reservations)
+        .set({ bungalowPeople: next, updatedAt: new Date() })
+        .where(eq(reservations.id, row.id))
+    }
+    revalidatePath('/')
+    return { success: true }
+  }
 
   // Only write the fields the guest actually provided (non-empty), mapped to
   // the right column for this slot.
@@ -373,6 +414,7 @@ async function buildCheckinEmail(
   toEmail?: string,
   guestData?: GuestDataOverrides
 ): Promise<{ html: string; to: string; guestName: string; bungalow: string } | { error: string }> {
+  await ensureBungalowPeopleColumn()
   const rows = await db
     .select({
       id: reservations.id,
@@ -381,6 +423,7 @@ async function buildCheckinEmail(
       arrival: reservations.arrival,
       departure: reservations.departure,
       guestName: reservations.guestName,
+      bungalowPeople: reservations.bungalowPeople,
       secondGuestName: reservations.secondGuestName,
       thirdGuestName: reservations.thirdGuestName,
       fourthGuestName: reservations.fourthGuestName,
@@ -395,9 +438,28 @@ async function buildCheckinEmail(
   // Persist any operator-provided police-form fields (all slots, all fields),
   // mapped to the correct column per slot. Only non-undefined values are written,
   // so unchanged fields keep their stored value.
-  if (guestData) {
+  const staySlots = ['first', 'second', 'third', 'fourth'] as GuestSlot[]
+  const multiStay = staySlots.some(slot => multiStayUnitForSlot(res.bungalow as string, slot))
+  if (guestData && multiStay) {
+    let people = res.bungalowPeople as BungalowPeopleMap | null
+    for (const slot of staySlots) {
+      const unitKey = multiStayUnitForSlot(res.bungalow as string, slot)
+      const gd = guestData[slot]
+      if (!unitKey || !gd) continue
+      const fields: Record<string, string> = {}
+      for (const base of GUEST_FIELDS) {
+        const v = gd[base as keyof GuestFieldValues]
+        if (v !== undefined) fields[base] = v.trim()
+      }
+      people = mergeGuestFieldsIntoPeople(people, unitKey, fields)
+    }
+    await db.update(reservations)
+      .set({ bungalowPeople: people, updatedAt: new Date() })
+      .where(eq(reservations.id, reservationId))
+    res.bungalowPeople = people
+  } else if (guestData) {
     const upd: Record<string, string> = {}
-    for (const slot of ['first', 'second', 'third', 'fourth'] as GuestSlot[]) {
+    for (const slot of staySlots) {
       const gd = guestData[slot]
       if (!gd) continue
       for (const base of GUEST_FIELDS) {
@@ -412,6 +474,14 @@ async function buildCheckinEmail(
 
   // Effective names = override (if provided) else the stored value.
   const effName = (slot: 'first' | 'second' | 'third' | 'fourth', stored?: string | null): string => {
+    if (multiStay) {
+      const unitKey = multiStayUnitForSlot(res.bungalow as string, slot)
+      const storedPerson = unitKey
+        ? policePerson(res.bungalowPeople as BungalowPeopleMap | null, unitKey, 0)?.name
+        : ''
+      const o = guestData?.[slot]?.guestName
+      return ((o !== undefined ? o : storedPerson) || '').trim()
+    }
     const o = guestData?.[slot]?.guestName
     return ((o !== undefined ? o : stored) || '').trim()
   }
@@ -427,7 +497,8 @@ async function buildCheckinEmail(
 
   // Build links for every guest present on this reservation (slot included when
   // it has a name — including names the operator just entered above).
-  const slots: { slot: GuestSlot; name: string }[] = [{ slot: 'first', name: names.first }]
+  const slots: { slot: GuestSlot; name: string }[] = []
+  if (!multiStay || names.first) slots.push({ slot: 'first', name: names.first })
   if (names.second) slots.push({ slot: 'second', name: names.second })
   if (names.third) slots.push({ slot: 'third', name: names.third })
   if (names.fourth) slots.push({ slot: 'fourth', name: names.fourth })
@@ -442,14 +513,14 @@ async function buildCheckinEmail(
   const bungalowLine = bungalowDistinctDisplayNames((res.bungalow as string) || '')
 
   const html = buildCheckinEmailHtml({
-    guestName: names.first || 'Guest',
+    guestName: multiStay ? ((res.guestName as string) || 'Guest') : (names.first || 'Guest'),
     bungalow: bungalowLine,
     arrival: formatEmailDate(res.arrival as string | null),
     departure: formatEmailDate(res.departure as string | null),
     guests,
   })
 
-  return { html, to, guestName: names.first || 'Guest', bungalow: bungalowLine }
+  return { html, to, guestName: multiStay ? ((res.guestName as string) || 'Guest') : (names.first || 'Guest'), bungalow: bungalowLine }
 }
 
 // Returns the rendered HTML + recipient so the UI can show a preview before sending.

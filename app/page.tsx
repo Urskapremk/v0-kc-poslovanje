@@ -5,7 +5,9 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import useSWR, { mutate } from "swr";
   import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart } from "lucide-react";
-  import { bungalowCardLabel, bungalowDisplayName, reservationMatchesBungalow } from "@/lib/bungalow";
+  import { bungalowCardLabel, bungalowDisplayName, reservationMatchesBungalow, stayUnits } from "@/lib/bungalow";
+import { BungalowPeopleEditor } from "@/components/bungalow-people-editor";
+import type { BungalowPeopleMap, BungalowPerson } from "@/lib/bungalow-people";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
@@ -41,6 +43,7 @@ import {
   deleteScheduledExcursion,
   searchReservations,
   getReminderChecks,
+  saveBungalowUnitPeople,
 } from "./actions/komba";
 import { closeAllDeliveryNotesForReservation, removeItemFromDeliveryNote, toggleItemFree, toggleItemMealPlanCovered, updateDeliveryNoteItemQuantity } from "./actions/delivery";
 import { addExcursion, deleteExcursion } from "./actions/pricing";
@@ -218,6 +221,7 @@ interface ExcursionBooking {
 interface Reservation {
   id: string;
   guestName: string;
+  bungalowPeople?: BungalowPeopleMap | null;
   guestTitle?: string | null; // Mr. / Mrs. / Ms. — izpiše se na vaučerju za transport
   secondGuestName?: string | null; // Ime drugega gosta
   bungalow: string;
@@ -994,6 +998,9 @@ const PAYMENT_METHODS = [
       fourthValiditeVisa?: string | null;
       fourthAllantA?: string | null;
       pax?: number | null;
+      id?: string;
+      bungalow?: string;
+      bungalowPeople?: BungalowPeopleMap | null;
       arrival: string; 
       departure: string;
     }; 
@@ -1022,41 +1029,55 @@ const PAYMENT_METHODS = [
       aliantA: '',
       modeTransport: 'Avion'
     });
+    const policeUnits = stayUnits(reservation.bungalow);
+    const policeMulti = policeUnits.length > 1;
+    const [policeUnit, setPoliceUnit] = React.useState(policeUnits[0]?.key || '');
+    const [policeIndex, setPoliceIndex] = React.useState(0);
     
     React.useEffect(() => {
       if (isOpen) {
-        // Pick the correct guest's data based on the selected slot (1st/2nd/3rd)
+        // Pick the correct guest's data based on the selected slot (1st/2nd/3rd).
+        // On a multi-bungalow booking the form uses that bungalow's person, never the holder.
         const pick = (first?: string | null, second?: string | null, third?: string | null, fourth?: string | null) =>
           (slot === 'fourth' ? fourth : slot === 'third' ? third : slot === 'second' ? second : first) || '';
-        const guestName = pick(reservation.guestName, reservation.secondGuestName, reservation.thirdGuestName, reservation.fourthGuestName);
+        const bungalowPerson = policeMulti ? (reservation.bungalowPeople?.[policeUnit] || [])[policeIndex] : null;
+        const guestName = policeMulti
+          ? (bungalowPerson?.name || '')
+          : pick(reservation.guestName, reservation.secondGuestName, reservation.thirdGuestName, reservation.fourthGuestName);
         const nameParts = guestName.trim().split(' ');
+        const fromPerson = (key: keyof BungalowPerson, shared: string) =>
+          policeMulti ? ((bungalowPerson?.[key] as string) || '') : shared;
         setFormData(prev => ({
           ...prev,
           nom: nameParts.slice(1).join(' ') || '',
           prenom: nameParts[0] || '',
-          nationalite: pick(reservation.nationality, reservation.secondNationality, reservation.thirdNationality, reservation.fourthNationality),
-          passportNo: pick(reservation.passport, reservation.secondPassport, reservation.thirdPassport, reservation.fourthPassport),
-          dateNaissance: pick(reservation.dateOfBirth, reservation.secondDateOfBirth, reservation.thirdDateOfBirth, reservation.fourthDateOfBirth),
-          lieuNaissance: pick(reservation.placeOfBirth, reservation.secondPlaceOfBirth, reservation.thirdPlaceOfBirth, reservation.fourthPlaceOfBirth),
-          pere: pick(reservation.fatherName, reservation.secondFatherName, reservation.thirdFatherName, reservation.fourthFatherName),
-          mere: pick(reservation.motherName, reservation.secondMotherName, reservation.thirdMotherName, reservation.fourthMotherName),
-          profession: pick(reservation.profession, reservation.secondProfession, reservation.thirdProfession, reservation.fourthProfession),
-          domicile: pick(reservation.domicile, reservation.secondDomicile, reservation.thirdDomicile, reservation.fourthDomicile),
-          passportDate: pick(reservation.passportDate, reservation.secondPassportDate, reservation.thirdPassportDate, reservation.fourthPassportDate),
-          passportLieu: pick(reservation.passportLieu, reservation.secondPassportLieu, reservation.thirdPassportLieu, reservation.fourthPassportLieu),
-          venantDe: pick(reservation.venantDe, reservation.secondVenantDe, reservation.thirdVenantDe, reservation.fourthVenantDe),
-          validiteVisa: pick(reservation.validiteVisa, reservation.secondValiditeVisa, reservation.thirdValiditeVisa, reservation.fourthValiditeVisa),
-          aliantA: pick(reservation.allantA, reservation.secondAllantA, reservation.thirdAllantA, reservation.fourthAllantA),
+          nationalite: fromPerson('nationality', pick(reservation.nationality, reservation.secondNationality, reservation.thirdNationality, reservation.fourthNationality)),
+          passportNo: fromPerson('passport', pick(reservation.passport, reservation.secondPassport, reservation.thirdPassport, reservation.fourthPassport)),
+          dateNaissance: fromPerson('dateOfBirth', pick(reservation.dateOfBirth, reservation.secondDateOfBirth, reservation.thirdDateOfBirth, reservation.fourthDateOfBirth)),
+          lieuNaissance: fromPerson('placeOfBirth', pick(reservation.placeOfBirth, reservation.secondPlaceOfBirth, reservation.thirdPlaceOfBirth, reservation.fourthPlaceOfBirth)),
+          pere: fromPerson('fatherName', pick(reservation.fatherName, reservation.secondFatherName, reservation.thirdFatherName, reservation.fourthFatherName)),
+          mere: fromPerson('motherName', pick(reservation.motherName, reservation.secondMotherName, reservation.thirdMotherName, reservation.fourthMotherName)),
+          profession: fromPerson('profession', pick(reservation.profession, reservation.secondProfession, reservation.thirdProfession, reservation.fourthProfession)),
+          domicile: fromPerson('domicile', pick(reservation.domicile, reservation.secondDomicile, reservation.thirdDomicile, reservation.fourthDomicile)),
+          passportDate: fromPerson('passportDate', pick(reservation.passportDate, reservation.secondPassportDate, reservation.thirdPassportDate, reservation.fourthPassportDate)),
+          passportLieu: fromPerson('passportLieu', pick(reservation.passportLieu, reservation.secondPassportLieu, reservation.thirdPassportLieu, reservation.fourthPassportLieu)),
+          venantDe: fromPerson('venantDe', pick(reservation.venantDe, reservation.secondVenantDe, reservation.thirdVenantDe, reservation.fourthVenantDe)),
+          validiteVisa: fromPerson('validiteVisa', pick(reservation.validiteVisa, reservation.secondValiditeVisa, reservation.thirdValiditeVisa, reservation.fourthValiditeVisa)),
+          aliantA: fromPerson('allantA', pick(reservation.allantA, reservation.secondAllantA, reservation.thirdAllantA, reservation.fourthAllantA)),
           dateArrivee: reservation.arrival,
           dateDepart: reservation.departure,
         }));
       }
-    }, [isOpen, reservation, slot]);
+    }, [isOpen, reservation, slot, policeMulti, policeUnit, policeIndex]);
 
-    // Reset to first guest whenever the modal is opened
+    // Reset to the first bungalow person whenever the modal is opened
     React.useEffect(() => {
-      if (isOpen) setSlot('first');
-    }, [isOpen]);
+      if (isOpen) {
+        setSlot('first');
+        setPoliceUnit(stayUnits(reservation.bungalow)[0]?.key || '');
+        setPoliceIndex(0);
+      }
+    }, [isOpen, reservation.bungalow]);
     
     const printForm = (d: typeof formData) => {
       const printWindow = window.open('', '_blank');
@@ -1211,14 +1232,80 @@ const PAYMENT_METHODS = [
                 <Printer className="w-3.5 h-3.5" />
                 Natisni
               </button>
+              {policeMulti && reservation.id ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const fullName = `${formData.prenom} ${formData.nom}`.trim()
+                    const current = [...(reservation.bungalowPeople?.[policeUnit] || [])]
+                    while (current.length <= policeIndex) current.push({ name: '' })
+                    current[policeIndex] = {
+                      ...current[policeIndex],
+                      name: fullName,
+                      nationality: formData.nationalite,
+                      passport: formData.passportNo,
+                      dateOfBirth: formData.dateNaissance,
+                      placeOfBirth: formData.lieuNaissance,
+                      fatherName: formData.pere,
+                      motherName: formData.mere,
+                      profession: formData.profession,
+                      domicile: formData.domicile,
+                      passportDate: formData.passportDate,
+                      passportLieu: formData.passportLieu,
+                      venantDe: formData.venantDe,
+                      validiteVisa: formData.validiteVisa,
+                      allantA: formData.aliantA,
+                    }
+                    await saveBungalowUnitPeople(reservation.id!, policeUnit, current)
+                    refresh()
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#8fae92]/10 text-[#8fae92] hover:bg-[#8fae92]/20 transition-all text-xs font-medium"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Shrani osebo
+                </button>
+              ) : null}
               <button onClick={onClose} className="p-1.5 rounded-lg bg-white/5 text-white/40 hover:bg-white/10 hover:text-white transition-all">
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
           
-          {/* Tabs — one per guest (up to four) */}
-          {reservation.secondGuestName || reservation.thirdGuestName || reservation.fourthGuestName ? (
+          {policeMulti ? (
+            <div className="flex flex-wrap gap-2 px-5 pt-4">
+              {policeUnits.map(unit => (
+                <button
+                  key={unit.key}
+                  type="button"
+                  onClick={() => { setPoliceUnit(unit.key); setPoliceIndex(0); }}
+                  className={`rounded-lg border px-3 py-2 text-xs font-medium transition-all ${
+                    policeUnit === unit.key
+                      ? 'border-[#7fa8b8] bg-[#7fa8b8]/10 text-[#7fa8b8]'
+                      : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                  }`}
+                >
+                  {unit.label}
+                </button>
+              ))}
+              {(reservation.bungalowPeople?.[policeUnit] || [{ name: '' }]).map((person, index) => (
+                <button
+                  key={`${policeUnit}-${index}`}
+                  type="button"
+                  onClick={() => setPoliceIndex(index)}
+                  className={`rounded-lg border px-3 py-2 text-xs font-medium transition-all ${
+                    policeIndex === index
+                      ? 'border-[#d9a68f] bg-[#d9a68f]/10 text-[#d9a68f]'
+                      : 'border-white/10 text-white/40'
+                  }`}
+                >
+                  {person.name?.trim() || `Oseba ${index + 1}`}
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          {/* Tabs — one per guest (up to four). Hidden when people are per bungalow. */}
+          {!policeMulti && (reservation.secondGuestName || reservation.thirdGuestName || reservation.fourthGuestName) ? (
             <div className="flex gap-2 px-5 pt-4">
               <button
                 type="button"
@@ -3443,6 +3530,9 @@ function GuestCard() {
 
   if (!reservation) return <GlassCard className="p-4"><p className="text-white/40 text-center py-8">Izberi gosta iz seznama rezervacij.</p></GlassCard>;
 
+  const stayUnitList = stayUnits(reservation.bungalow);
+  const multiStay = stayUnitList.length > 1;
+
     return (
       <section className="space-y-4">
         <GlassCard className="p-4 sm:p-6">
@@ -3721,18 +3811,29 @@ function GuestCard() {
           // guest already entered) before sending. Show a row per guest up to
           // the party size.
           const namedCount = [reservation.secondGuestName, reservation.thirdGuestName, reservation.fourthGuestName].filter((n) => (n || "").trim()).length + 1;
-          const slotsToShow = Math.min(4, Math.max(reservation.pax || 1, namedCount));
+          const slotsToShow = multiStay ? Math.min(4, stayUnitList.length) : Math.min(4, Math.max(reservation.pax || 1, namedCount));
           const r = reservation as unknown as Record<string, unknown>;
           // Column name for a slot + base field ("first" = raw column, others prefixed).
           const colOf = (slot: 'first' | 'second' | 'third' | 'fourth', base: CheckinGuestField) =>
             slot === 'first' ? base : `${slot}${base.charAt(0).toUpperCase()}${base.slice(1)}`;
           const fieldKeys: CheckinGuestField[] = ['guestName', 'dateOfBirth', ...CHECKIN_EXTRA_FIELDS.map((f) => f.key)];
-          const buildData = (slot: 'first' | 'second' | 'third' | 'fourth') => {
+          const buildData = (slot: 'first' | 'second' | 'third' | 'fourth', unitKey?: string) => {
             const d = {} as Record<CheckinGuestField, string>;
+            if (unitKey) {
+              const person = (reservation.bungalowPeople?.[unitKey] || [])[0];
+              fieldKeys.forEach((k) => {
+                const value = k === 'guestName' ? person?.name : person?.[k as keyof BungalowPerson];
+                d[k] = (value || "").toString().trim();
+              });
+              return d;
+            }
             fieldKeys.forEach((k) => { d[k] = ((r[colOf(slot, k)] as string) || "").toString().trim(); });
             return d;
           };
-          const allSlots = ([
+          const slotNames = ['first', 'second', 'third', 'fourth'] as const;
+          const allSlots = multiStay
+            ? stayUnitList.slice(0, 4).map((unit, i) => ({ slot: slotNames[i], label: unit.label, expanded: false, data: buildData(slotNames[i], unit.key) }))
+            : ([
             { slot: 'first', label: 'Guest 1' },
             { slot: 'second', label: 'Guest 2' },
             { slot: 'third', label: 'Guest 3' },
@@ -4013,7 +4114,7 @@ function GuestCard() {
               {showGuestData && (
                 <div className="space-y-4">
             <div>
-              <label className="mb-1.5 flex items-center gap-1.5 text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-white/40"><Users className="h-3.5 w-3.5" />Naziv in ime</label>
+              <label className="mb-1.5 flex items-center gap-1.5 text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-white/40"><Users className="h-3.5 w-3.5" />{multiStay ? "Nosilec" : "Naziv in ime"}</label>
               {/* Naziv je LOCEN od imena: ime se izpisuje na karticah, v koledarju in na racunih,
                   kjer bi "Mrs." samo delal gnec; vaucer pa gosta nagovori vljudno. */}
               <div className="flex gap-2">
@@ -4078,7 +4179,8 @@ function GuestCard() {
   />
   </div>
   
-  {/* Ime drugega gosta */}
+  {/* Ime drugega gosta — na vecbungalovni rezervaciji so osebe locene po bungalovih */}
+  {!multiStay ? (
   <div>
   <label className="mb-1.5 block text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-white/40">Drugi gost</label>
   <input
@@ -4099,10 +4201,11 @@ function GuestCard() {
     {CHILD_BANDS.map(b => <option key={b.id} value={b.id}>{b.label}</option>)}
   </select>
   </div>
+  ) : null}
   </div>
 
-  {/* Ime tretjega gosta ��������� prikazano pri rezervacijah za 3+ oseb */}
-  {(reservation.pax >= 3 || reservation.thirdGuestName) ? (
+  {/* Ime tretjega gosta — prikazano pri rezervacijah za 3+ oseb */}
+  {!multiStay && (reservation.pax >= 3 || reservation.thirdGuestName) ? (
     <div>
       <label className="mb-1.5 block text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-white/40">Tretji gost</label>
       <input
@@ -4126,7 +4229,7 @@ function GuestCard() {
   ) : null}
 
   {/* Ime cetrtega gosta — prikazano pri rezervacijah za 4 osebe */}
-  {(reservation.pax >= 4 || reservation.fourthGuestName) ? (
+  {!multiStay && (reservation.pax >= 4 || reservation.fourthGuestName) ? (
     <div>
       <label className="mb-1.5 block text-[10px] sm:text-[11px] font-medium uppercase tracking-wider text-white/40">Cetrti gost</label>
       <input
@@ -4189,7 +4292,14 @@ function GuestCard() {
                 </span>
                 <ChevronDown className={`h-4 w-4 flex-shrink-0 text-white/40 transition-transform ${showPolice ? "rotate-180" : ""}`} />
               </button>
-              {showPolice && (
+              {showPolice && (multiStay ? (
+                <BungalowPeopleEditor
+                  reservationId={reservation.id}
+                  units={stayUnitList}
+                  people={reservation.bungalowPeople}
+                  onSaved={() => { void refresh(); }}
+                />
+              ) : (
                 <div className="space-y-4 px-3 pb-3">
             {/* Osebni podatki prvega gosta (za policijski zapisnik) — zložljivo */}
             <div className="rounded-xl border border-[#7fa8b8]/20 bg-[#7fa8b8]/[0.04]">
@@ -4710,7 +4820,7 @@ function GuestCard() {
               </div>
             ) : null}
                 </div>
-              )}
+              ))}
             </div>
 
   {/* Collapsible Dates Section */}

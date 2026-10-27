@@ -2,7 +2,9 @@
 
 import React from 'react'
 import { Printer, X, Save, Check } from 'lucide-react'
-import { updateReservation } from '@/app/actions/komba'
+import { saveBungalowUnitPeople, updateReservation } from '@/app/actions/komba'
+import { stayUnits } from '@/lib/bungalow'
+import type { BungalowPeopleMap, BungalowPerson } from '@/lib/bungalow-people'
 
 export interface PoliceFormReservation {
   id?: string
@@ -63,6 +65,9 @@ export interface PoliceFormReservation {
   fourthVenantDe?: string | null
   fourthValiditeVisa?: string | null
   fourthAllantA?: string | null
+  id?: string
+  bungalow?: string
+  bungalowPeople?: BungalowPeopleMap | null
   arrival: string
   departure: string
 }
@@ -75,6 +80,10 @@ export function PoliceFormModal({ reservation, isOpen, onClose, onSaved }: {
   onSaved?: () => void
 }) {
   const [slot, setSlot] = React.useState<'first' | 'second' | 'third' | 'fourth'>('first')
+  const policeUnits = stayUnits(reservation.bungalow)
+  const policeMulti = policeUnits.length > 1
+  const [policeUnit, setPoliceUnit] = React.useState(policeUnits[0]?.key || '')
+  const [policeIndex, setPoliceIndex] = React.useState(0)
   const [saveState, setSaveState] = React.useState<'idle' | 'saving' | 'saved'>('idle')
   const [formData, setFormData] = React.useState({
     nom: '',
@@ -103,35 +112,44 @@ export function PoliceFormModal({ reservation, isOpen, onClose, onSaved }: {
       // Pick the correct guest's data based on the selected slot (1st/2nd/3rd)
       const pick = (first?: string | null, second?: string | null, third?: string | null, fourth?: string | null) =>
         (slot === 'fourth' ? fourth : slot === 'third' ? third : slot === 'second' ? second : first) || ''
-      const guestName = pick(reservation.guestName, reservation.secondGuestName, reservation.thirdGuestName, reservation.fourthGuestName)
+      const bungalowPerson = policeMulti ? (reservation.bungalowPeople?.[policeUnit] || [])[policeIndex] : null
+      const guestName = policeMulti
+        ? (bungalowPerson?.name || '')
+        : pick(reservation.guestName, reservation.secondGuestName, reservation.thirdGuestName, reservation.fourthGuestName)
+      const fromPerson = (key: keyof BungalowPerson, shared: string) =>
+        policeMulti ? ((bungalowPerson?.[key] as string) || '') : shared
       const nameParts = guestName.trim().split(' ')
       setFormData(prev => ({
         ...prev,
         nom: nameParts.slice(1).join(' ') || '',
         prenom: nameParts[0] || '',
-        nationalite: pick(reservation.nationality, reservation.secondNationality, reservation.thirdNationality, reservation.fourthNationality),
-        passportNo: pick(reservation.passport, reservation.secondPassport, reservation.thirdPassport, reservation.fourthPassport),
-        dateNaissance: pick(reservation.dateOfBirth, reservation.secondDateOfBirth, reservation.thirdDateOfBirth, reservation.fourthDateOfBirth),
-        lieuNaissance: pick(reservation.placeOfBirth, reservation.secondPlaceOfBirth, reservation.thirdPlaceOfBirth, reservation.fourthPlaceOfBirth),
-        pere: pick(reservation.fatherName, reservation.secondFatherName, reservation.thirdFatherName, reservation.fourthFatherName),
-        mere: pick(reservation.motherName, reservation.secondMotherName, reservation.thirdMotherName, reservation.fourthMotherName),
-        profession: pick(reservation.profession, reservation.secondProfession, reservation.thirdProfession, reservation.fourthProfession),
-        domicile: pick(reservation.domicile, reservation.secondDomicile, reservation.thirdDomicile, reservation.fourthDomicile),
-        passportDate: pick(reservation.passportDate, reservation.secondPassportDate, reservation.thirdPassportDate, reservation.fourthPassportDate),
-        passportLieu: pick(reservation.passportLieu, reservation.secondPassportLieu, reservation.thirdPassportLieu, reservation.fourthPassportLieu),
-        venantDe: pick(reservation.venantDe, reservation.secondVenantDe, reservation.thirdVenantDe, reservation.fourthVenantDe),
-        validiteVisa: pick(reservation.validiteVisa, reservation.secondValiditeVisa, reservation.thirdValiditeVisa, reservation.fourthValiditeVisa),
-        aliantA: pick(reservation.allantA, reservation.secondAllantA, reservation.thirdAllantA, reservation.fourthAllantA),
+        nationalite: fromPerson('nationality', pick(reservation.nationality, reservation.secondNationality, reservation.thirdNationality, reservation.fourthNationality)),
+        passportNo: fromPerson('passport', pick(reservation.passport, reservation.secondPassport, reservation.thirdPassport, reservation.fourthPassport)),
+        dateNaissance: fromPerson('dateOfBirth', pick(reservation.dateOfBirth, reservation.secondDateOfBirth, reservation.thirdDateOfBirth, reservation.fourthDateOfBirth)),
+        lieuNaissance: fromPerson('placeOfBirth', pick(reservation.placeOfBirth, reservation.secondPlaceOfBirth, reservation.thirdPlaceOfBirth, reservation.fourthPlaceOfBirth)),
+        pere: fromPerson('fatherName', pick(reservation.fatherName, reservation.secondFatherName, reservation.thirdFatherName, reservation.fourthFatherName)),
+        mere: fromPerson('motherName', pick(reservation.motherName, reservation.secondMotherName, reservation.thirdMotherName, reservation.fourthMotherName)),
+        profession: fromPerson('profession', pick(reservation.profession, reservation.secondProfession, reservation.thirdProfession, reservation.fourthProfession)),
+        domicile: fromPerson('domicile', pick(reservation.domicile, reservation.secondDomicile, reservation.thirdDomicile, reservation.fourthDomicile)),
+        passportDate: fromPerson('passportDate', pick(reservation.passportDate, reservation.secondPassportDate, reservation.thirdPassportDate, reservation.fourthPassportDate)),
+        passportLieu: fromPerson('passportLieu', pick(reservation.passportLieu, reservation.secondPassportLieu, reservation.thirdPassportLieu, reservation.fourthPassportLieu)),
+        venantDe: fromPerson('venantDe', pick(reservation.venantDe, reservation.secondVenantDe, reservation.thirdVenantDe, reservation.fourthVenantDe)),
+        validiteVisa: fromPerson('validiteVisa', pick(reservation.validiteVisa, reservation.secondValiditeVisa, reservation.thirdValiditeVisa, reservation.fourthValiditeVisa)),
+        aliantA: fromPerson('allantA', pick(reservation.allantA, reservation.secondAllantA, reservation.thirdAllantA, reservation.fourthAllantA)),
         dateArrivee: reservation.arrival,
         dateDepart: reservation.departure,
       }))
     }
-  }, [isOpen, reservation, slot])
+  }, [isOpen, reservation, slot, policeMulti, policeUnit, policeIndex])
 
-  // Reset to first guest whenever the modal is opened
+  // Reset to the first bungalow person whenever the modal is opened
   React.useEffect(() => {
-    if (isOpen) setSlot('first')
-  }, [isOpen])
+    if (isOpen) {
+      setSlot('first')
+      setPoliceUnit(stayUnits(reservation.bungalow)[0]?.key || '')
+      setPoliceIndex(0)
+    }
+  }, [isOpen, reservation.bungalow])
 
   // Clear the "saved" badge when switching guest or reopening
   React.useEffect(() => {
@@ -143,6 +161,35 @@ export function PoliceFormModal({ reservation, isOpen, onClose, onSaved }: {
     if (!reservation.id) return
     setSaveState('saving')
     const fullName = `${formData.prenom} ${formData.nom}`.trim()
+    if (policeMulti && reservation.id) {
+      const current = [...(reservation.bungalowPeople?.[policeUnit] || [])]
+      while (current.length <= policeIndex) current.push({ name: '' })
+      current[policeIndex] = {
+        ...current[policeIndex],
+        name: fullName,
+        nationality: formData.nationalite,
+        passport: formData.passportNo,
+        dateOfBirth: formData.dateNaissance,
+        placeOfBirth: formData.lieuNaissance,
+        fatherName: formData.pere,
+        motherName: formData.mere,
+        profession: formData.profession,
+        domicile: formData.domicile,
+        passportDate: formData.passportDate,
+        passportLieu: formData.passportLieu,
+        venantDe: formData.venantDe,
+        validiteVisa: formData.validiteVisa,
+        allantA: formData.aliantA,
+      }
+      try {
+        await saveBungalowUnitPeople(reservation.id, policeUnit, current)
+        setSaveState('saved')
+        onSaved?.()
+      } catch {
+        setSaveState('idle')
+      }
+      return
+    }
     const payload = slot === 'fourth'
       ? {
           fourthGuestName: fullName,
@@ -391,8 +438,27 @@ export function PoliceFormModal({ reservation, isOpen, onClose, onSaved }: {
           </div>
         </div>
 
+        {policeMulti ? (
+          <div className="flex flex-wrap gap-2 px-5 pt-4">
+            {policeUnits.map(unit => (
+              <button
+                key={unit.key}
+                type="button"
+                onClick={() => { setPoliceUnit(unit.key); setPoliceIndex(0); }}
+                className={`rounded-lg border px-3 py-2 text-xs font-medium transition-all ${
+                  policeUnit === unit.key
+                    ? 'border-[#7fa8b8] bg-[#7fa8b8]/10 text-[#7fa8b8]'
+                    : 'border-white/10 text-white/40 hover:border-white/20 hover:text-white/60'
+                }`}
+              >
+                {unit.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
         {/* Tabs — one per guest (up to three); shown when 2+ guests or pax indicates it */}
-        {reservation.secondGuestName || reservation.thirdGuestName || (reservation.pax ?? 1) >= 2 ? (
+        {!policeMulti && (reservation.secondGuestName || reservation.thirdGuestName || (reservation.pax ?? 1) >= 2) ? (
           <div className="flex gap-2 px-5 pt-4">
             <button
               type="button"
