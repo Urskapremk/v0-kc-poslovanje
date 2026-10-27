@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import Link from 'next/link'
 import { ArrowLeft, Plus, Trash2, Save, Check, Palmtree, Ship, Utensils, Sparkles } from 'lucide-react'
 import { getBackfillOptions, backfillPastReservation, type BackfillInput } from '@/app/actions/backfill'
+import { bungalowCardLabel } from '@/lib/bungalow'
 
 const fetcher = async () => await getBackfillOptions()
 const ar = (v: number) => `${Math.round(v || 0).toLocaleString('de-DE')} Ar`
@@ -227,7 +228,7 @@ export default function PretekleRezervacijePage() {
                 <label className={labelCls}>Bungalov</label>
                 <select className={inputCls} value={bungalow} onChange={e => setBungalow(e.target.value)}>
                   <option value="">— izberi —</option>
-                  {opts?.bungalows.map(b => <option key={b} value={b}>{b}</option>)}
+                  {opts?.bungalows.map(b => <option key={b} value={b}>{bungalowCardLabel(b)}</option>)}
                 </select>
               </div>
               <div>

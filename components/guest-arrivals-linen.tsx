@@ -13,7 +13,8 @@ const BUNGALOW_ROWS: { key: string; sl: string; fr: string }[] = [
   { key: 'ocean-ii', sl: 'Ocean II', fr: 'Océan II' },
   { key: 'garden-iii', sl: 'Garden III', fr: 'Jardin III' },
   { key: 'ocean-iv', sl: 'Beach Villa IV', fr: 'Beach Villa IV' },
-  { key: 'jungle', sl: 'Jungle Glamp', fr: 'Jungle Glamp' },
+  { key: 'jungle', sl: 'Jungle Glamp I', fr: 'Jungle Glamp I' },
+  { key: 'jungle-ii', sl: 'Jungle Glamp II', fr: 'Jungle Glamp II' },
 ]
 
 const T = {

@@ -11,7 +11,7 @@ import { addCashIncome } from './banka'
 // (and can be found/removed later without touching real live reservations).
 const BACKFILL_MARKER = '[Zgodovinski vnos]'
 
-const BUNGALOWS = ['Ocean Bungalow I', 'Ocean Bungalow II', 'Garden Bungalow III', 'Ocean Bungalow IV', 'Jungle Glamp Village']
+const BUNGALOWS = ['Ocean Bungalow I', 'Ocean Bungalow II', 'Garden Bungalow III', 'Ocean Bungalow IV', 'Jungle Glamp Village', 'Jungle Glamp Village II']
 
 // Canonical products for extra services logged on past reservations.
 // Massage → category 'Wellness' (wellness revenue, fixed cost per unit → one row per massage).

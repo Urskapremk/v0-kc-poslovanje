@@ -12,8 +12,12 @@ export function bungalowLabel(raw: string | null | undefined): string {
 
 // Posebna prikazna imena bungalovov (marketinski/gostom prijazni nazivi).
 // Kljuci so bungalowKey (glej spodaj). Kar ni v tabeli, uporabi ocisceno ime.
+// Prvi Jungle Glamp ostane shranjen kot "Jungle Glamp Village" (stabilen id),
+// na karticah in povsod, kjer se ime prikazuje, pa pise "Jungle Glamp Village I".
 const BUNGALOW_DISPLAY_NAMES: Record<string, string> = {
   'ocean-iv': 'Bungalow IV - Beach Villa',
+  'jungle': 'Jungle Glamp Village I',
+  'jungle-ii': 'Jungle Glamp Village II',
 }
 
 // Ocisceno ENKRATNO ime enote za prikaz gostu (brez podvajanja in "- za N").
@@ -62,16 +66,14 @@ export function bungalowDistinctDisplayNames(raw: string | null | undefined): st
 // Normaliziran kljuc enote za ROBUSTNO ujemanje razlicnih zapisov istega bungalova.
 // Bentral zapise npr. "Ocean Bungalov I – za 4 / Ocean Bungalov I – za 4 (4+0)",
 // aplikacija pa uporablja kratke angleske nazive "Ocean Bungalow I".
-// Vrne npr. "ocean-i", "garden-iii", "ocean-iv", "jungle".
+// Vrne npr. "ocean-i", "garden-iii", "ocean-iv", "jungle", "jungle-ii".
+// "jungle" ostane kljuc prvega Glampa (tudi brez rimske stevilke), da stare
+// rezervacije se vedno kazejo na enoto I. "jungle-ii" je nova enota.
 export function bungalowKey(raw: string | null | undefined): string {
   const s = bungalowLabel(raw)
     .toLowerCase()
     .replace(/bungalov/g, 'bungalow')
-  if (s.includes('jungle') || s.includes('glamp')) return 'jungle'
-  const type = s.includes('garden') ? 'garden' : s.includes('ocean') ? 'ocean' : 'other'
-  // rimska stevilka kot samostojna beseda (daljse pred krajsimi)
-  const roman = s.match(/\b(viii|vii|vi|iv|iii|ii|i|v)\b/)
-  return `${type}-${roman ? roman[1] : '?'}`
+  return unitKeyFromNormalized(s)
 }
 
 // Normaliziran kljuc iz ENEGA segmenta (brez razdelitve po ';').
@@ -80,10 +82,48 @@ function segmentKey(seg: string): string {
     .trim()
     .toLowerCase()
     .replace(/bungalov/g, 'bungalow')
-  if (s.includes('jungle') || s.includes('glamp')) return 'jungle'
+  return unitKeyFromNormalized(s)
+}
+
+function unitKeyFromNormalized(s: string): string {
+  if (s.includes('jungle') || s.includes('glamp')) {
+    if (/\bii\b/.test(s)) return 'jungle-ii'
+    return 'jungle'
+  }
   const type = s.includes('garden') ? 'garden' : s.includes('ocean') ? 'ocean' : 'other'
+  // rimska stevilka kot samostojna beseda (daljse pred krajsimi)
   const roman = s.match(/\b(viii|vii|vi|iv|iii|ii|i|v)\b/)
   return `${type}-${roman ? roman[1] : '?'}`
+}
+
+// Ime na rezervacijski kartici. Ostali bungalovi ostanejo tocno taksni, kot so.
+// Prvi Glamp ima stabilen id "Jungle Glamp Village", kartica pa pise "... I".
+export function bungalowCardLabel(unitId: string): string {
+  if (unitId === 'Jungle Glamp Village' || unitId === 'Jungle Glamp Village II') {
+    return bungalowDisplayName(unitId)
+  }
+  return unitId
+}
+
+// Ali rezervacija pripada tej nastanitveni enoti. "Ocean Bungalow I" ne ujame "II"/"IV".
+// Shranjen "Jungle Glamp Village" (in izrecen "... I") pripada prvi enoti, ne drugi.
+export function reservationMatchesBungalow(reservationBungalow: string | null | undefined, unitId: string): boolean {
+  const hay = String(reservationBungalow || '')
+    .toLowerCase()
+    .replace(/bungalov\b/g, 'bungalow')
+    .replace(/\s+/g, ' ')
+  return bungalowUnitPattern(unitId).test(hay)
+}
+
+function bungalowUnitPattern(unitId: string): RegExp {
+  const n = unitId.toLowerCase().replace(/bungalov\b/g, 'bungalow').replace(/\s+/g, ' ').trim()
+  const escaped = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // Brez stevilke je ime predpona "... Village II". Meja besede za "village"
+  // bi drugo enoto pripisala prvi, zato II izlocimo, izrecen " I" pa ostane.
+  if (n === 'jungle glamp village') {
+    return new RegExp(`\\b${escaped}(?:\\s+i)?\\b(?!\\s*ii\\b)`, 'i')
+  }
+  return new RegExp(`\\b${escaped}\\b`, 'i')
 }
 
 // VSI kljuci enot v sestavljenem nizu (rezervacija cez VEC bungalovov).
