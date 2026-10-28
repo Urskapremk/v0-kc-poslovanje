@@ -357,7 +357,7 @@ async function copyToClipboard(text: string): Promise<boolean> {
 function BirthdayGift({ label }: { label: string }) {
   return (
     <span title={label} className="inline-flex shrink-0">
-      <Gift className="animate-arriving h-4 w-4 text-[#8f6d3a]" aria-label={label} />
+      <Gift className="animate-birthday-gift h-4 w-4" aria-label={label} />
     </span>
   );
 }

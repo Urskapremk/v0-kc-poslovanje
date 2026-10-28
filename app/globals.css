@@ -185,6 +185,40 @@ select option {
   }
 }
 
+/* Darilo na kartici bungalova: isti utrip kot "Arriving" (1,1 s), vsak
+   svetel utrip pa je druge barve. Barva se zamenja v temnem delu, da skok
+   ni viden. */
+@keyframes birthday-gift-blink {
+  0% { color: #b0203a; opacity: 1; }
+  8% { color: #b0203a; opacity: 0.12; }
+  10% { color: #c59b5b; opacity: 0.12; }
+  18%,
+  25% { color: #c59b5b; opacity: 1; }
+  33% { color: #c59b5b; opacity: 0.12; }
+  35% { color: #4f7a54; opacity: 0.12; }
+  43%,
+  50% { color: #4f7a54; opacity: 1; }
+  58% { color: #4f7a54; opacity: 0.12; }
+  60% { color: #3f6b7d; opacity: 0.12; }
+  68%,
+  75% { color: #3f6b7d; opacity: 1; }
+  83% { color: #3f6b7d; opacity: 0.12; }
+  85% { color: #b0203a; opacity: 0.12; }
+  93%,
+  100% { color: #b0203a; opacity: 1; }
+}
+.animate-birthday-gift {
+  color: #b0203a;
+  animation: birthday-gift-blink 4.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-birthday-gift {
+    animation: none;
+    color: #8f6d3a;
+    opacity: 1;
+  }
+}
+
 /* Trak gosta, ki prihaja DANES: bordo obroba utripa, da opravilo za danes
    izstopa med peščenimi trakovi. Isti ritem (1.1 s) kot napis na kartici. */
 @keyframes arriving-border-blink {
