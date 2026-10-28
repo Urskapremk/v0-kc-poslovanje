@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import useSWR from 'swr'
-import { ClipboardPaste, Download, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
+import { ChevronDown, ClipboardPaste, Download, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
 import { COMPANIES, type CompanyId } from '@/lib/payroll'
 import {
   NOTHING_TO_SAVE,
@@ -122,6 +122,7 @@ function CompanyCard({
   const [dragOver, setDragOver] = useState(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [documentsOpen, setDocumentsOpen] = useState(true)
   const name = COMPANIES[company].name
 
   const uploadFiles = useCallback(async (files: File[]) => {
@@ -179,8 +180,22 @@ function CompanyCard({
 
   return (
     <div className="rounded-xl border border-white/[0.12] bg-white/[0.07] px-4 py-4">
-      <h3 className="text-[15px] font-medium tracking-[0.02em] text-[#f8f5ef]">
-        {name}
+      <h3>
+        <button
+          type="button"
+          onClick={() => setDocumentsOpen((open) => !open)}
+          aria-expanded={documentsOpen}
+          aria-controls={`dokumenti-${company}`}
+          className="flex w-full cursor-pointer items-center justify-between gap-3 text-left"
+        >
+          <span className="text-[15px] font-medium tracking-[0.02em] text-[#f8f5ef]">
+            {name}
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-white/40 transition-transform ${documentsOpen ? 'rotate-180' : ''}`}
+            aria-hidden
+          />
+        </button>
       </h3>
       <p className="mt-1 text-[11px] tracking-[0.04em] text-[#9dafb5]/75">
         Posnetki dokumentov
@@ -251,15 +266,17 @@ function CompanyCard({
       ) : null}
       {error ? <p className="mt-3 text-[11px] text-[#c8846b]">{error}</p> : null}
 
-      {documents && documents.length === 0 && !uploading ? (
-        <p className="mt-3 text-[11px] font-light italic text-white/35">
-          Še ni posnetkov dokumentov.
-        </p>
-      ) : null}
+      {documentsOpen ? (
+        <div id={`dokumenti-${company}`}>
+          {documents && documents.length === 0 && !uploading ? (
+            <p className="mt-3 text-[11px] font-light italic text-white/35">
+              Še ni posnetkov dokumentov.
+            </p>
+          ) : null}
 
-      {documents && documents.length > 0 ? (
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {documents.map((doc) => (
+          {documents && documents.length > 0 ? (
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {documents.map((doc) => (
             <div
               key={doc.id}
               className="overflow-hidden rounded-xl border border-white/[0.10] bg-white/[0.03]"
@@ -313,7 +330,9 @@ function CompanyCard({
                 )}
               </div>
             </div>
-          ))}
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
