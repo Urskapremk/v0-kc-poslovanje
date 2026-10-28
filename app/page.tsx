@@ -59,6 +59,7 @@ import { GuestReplyAssistant } from "@/components/guest-reply-assistant";
   import { SentEmailsBox } from "@/components/sent-emails-box";
   import { SurveyResponsesBox } from "@/components/survey-responses-box";
   import MessageShotsBox from "@/components/message-shots-box";
+  import PodatkiPodjetij from "@/components/podatki-podjetij";
   import { PushNotificationsBox } from "@/components/push-notifications-box";
 import { StaffLoginsTab } from "@/components/staff-logins-tab";
 import RazporedTab from "@/components/razpored-tab";
@@ -10458,6 +10459,12 @@ function GuestCard() {
             Opomnik
           </button>
         </header>
+
+        {tab === "urska" && (
+          <div className="mt-9">
+            <PodatkiPodjetij />
+          </div>
+        )}
 
         <div className="mt-9">
           {person.sections.map((section, si) => (
