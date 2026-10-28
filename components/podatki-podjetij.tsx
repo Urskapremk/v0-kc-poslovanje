@@ -17,7 +17,6 @@ import {
   getCompanyDocuments,
   type CompanyDocument,
 } from '@/app/actions/company-documents'
-import PrequalificationForm from '@/components/prequalification-form'
 
 const COMPANIES_IN_ORDER: CompanyId[] = ['tourism', 'sarl']
 
@@ -317,8 +316,6 @@ function CompanyCard({
           ))}
         </div>
       ) : null}
-
-      <PrequalificationForm company={company} />
 
       {lightbox && typeof document !== 'undefined'
         ? createPortal(
