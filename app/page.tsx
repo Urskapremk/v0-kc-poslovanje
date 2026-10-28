@@ -10460,12 +10460,6 @@ function GuestCard() {
           </button>
         </header>
 
-        {tab === "urska" && (
-          <div className="mt-9">
-            <PodatkiPodjetij />
-          </div>
-        )}
-
         <div className="mt-9">
           {person.sections.map((section, si) => (
             <div key={section.label || `s${si}`} className={si > 0 ? "mt-9" : ""}>
@@ -10530,6 +10524,12 @@ function GuestCard() {
             </div>
           ))}
         </div>
+
+        {tab === "urska" && (
+          <div className="mt-9">
+            <PodatkiPodjetij />
+          </div>
+        )}
 
         {/* The reminder panel is reached via the "Opomnik" button in the header
             (it opens the same PushNotificationsBox as a modal), so it is not
