@@ -1,16 +1,23 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import useSWR from 'swr'
-import { ClipboardPaste, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
+import { ClipboardPaste, Download, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
 import { COMPANIES, type CompanyId } from '@/lib/payroll'
+import {
+  NOTHING_TO_SAVE,
+  PDF_FILENAME,
+  buildCompanyDocumentsPdf,
+  documentsForPdf,
+} from '@/lib/company-documents-pdf'
 import {
   addCompanyDocument,
   deleteCompanyDocument,
   getCompanyDocuments,
   type CompanyDocument,
 } from '@/app/actions/company-documents'
+import PrequalificationForm from '@/components/prequalification-form'
 
 const COMPANIES_IN_ORDER: CompanyId[] = ['tourism', 'sarl']
 
@@ -311,6 +318,8 @@ function CompanyCard({
         </div>
       ) : null}
 
+      <PrequalificationForm company={company} />
+
       {lightbox && typeof document !== 'undefined'
         ? createPortal(
             <div
@@ -342,8 +351,82 @@ function CompanyCard({
   )
 }
 
+async function rasterizeDocument(pathname: string): Promise<{ dataUrl: string; width: number; height: number }> {
+  const res = await fetch(`/api/image?pathname=${encodeURIComponent(pathname)}`)
+  if (!res.ok) throw new Error('image')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const im = new Image()
+      im.onload = () => resolve(im)
+      im.onerror = reject
+      im.src = url
+    })
+    const width = img.naturalWidth || img.width
+    const height = img.naturalHeight || img.height
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx || !width || !height) throw new Error('image')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, width, height)
+    ctx.drawImage(img, 0, 0)
+    return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), width, height }
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+function downloadPdf(bytes: Uint8Array) {
+  const blob = new Blob([bytes], { type: 'application/pdf' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = PDF_FILENAME
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
 export default function PodatkiPodjetij() {
   const { data, error, mutate } = useSWR('company-documents', getCompanyDocuments, { refreshInterval: 0 })
+  const [saving, setSaving] = useState(false)
+  const [pdfNote, setPdfNote] = useState<{ tone: 'muted' | 'error'; text: string } | null>(null)
+  const count = data?.length ?? -1
+
+  useEffect(() => {
+    setPdfNote(null)
+  }, [count])
+
+  async function savePdf() {
+    if (!data) return
+    const pages = documentsForPdf(data)
+    if (pages.length === 0) {
+      setPdfNote({ tone: 'muted', text: NOTHING_TO_SAVE })
+      return
+    }
+    setSaving(true)
+    setPdfNote(null)
+    try {
+      const images = []
+      for (const page of pages) {
+        images.push(await rasterizeDocument(page.pathname))
+      }
+      const bytes = await buildCompanyDocumentsPdf(images)
+      if (!bytes) {
+        setPdfNote({ tone: 'muted', text: NOTHING_TO_SAVE })
+        return
+      }
+      downloadPdf(bytes)
+    } catch {
+      setPdfNote({ tone: 'error', text: 'PDF-ja ni bilo mogoče pripraviti.' })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <section aria-labelledby="podatki-podjetij-title">
@@ -366,6 +449,22 @@ export default function PodatkiPodjetij() {
             onChange={() => mutate()}
           />
         ))}
+        <div>
+          <button
+            type="button"
+            onClick={() => void savePdf()}
+            disabled={saving || !data}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#c59b5b]/40 bg-[#c59b5b]/10 px-3 py-2 text-xs font-medium text-[#e8c88a] transition-colors hover:bg-[#c59b5b]/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            Shrani PDF
+          </button>
+          {pdfNote ? (
+            <p className={`mt-2 text-[11px] ${pdfNote.tone === 'error' ? 'text-[#c8846b]' : 'text-white/45'}`}>
+              {pdfNote.text}
+            </p>
+          ) : null}
+        </div>
       </div>
     </section>
   )

@@ -38,7 +38,7 @@ export async function getCompanyDocuments(): Promise<CompanyDocument[]> {
   const result = await db.execute(sql`
     SELECT id, company, pathname, "fileName", "createdAt"
     FROM company_documents
-    ORDER BY "createdAt" ASC
+    ORDER BY "createdAt" ASC, id ASC
   `)
   return result.rows.flatMap((r) => {
     const company = String(r.company ?? '')
