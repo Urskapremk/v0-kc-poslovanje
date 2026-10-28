@@ -4,8 +4,9 @@ import React from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import useSWR, { mutate } from "swr";
-  import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart } from "lucide-react";
+  import { Home, LogIn, LogOut, UserRound, ReceiptText, Truck, Settings, RefreshCw, Leaf, Heart, Ship, Plus, Database, Car, Mail, ExternalLink, Calendar, ChevronDown, FileText, Printer, X, Wine, Archive, BarChart3, Sparkles, CreditCard, Sofa, Users, Link2, Unlink, HelpCircle, Palmtree, Check, Landmark, Save, StickyNote, Pencil, Trash2, Pin, PinOff, MessageSquare, Compass, UserCog, Search, Utensils, Cookie, Receipt, User, ArrowRight, BellRing, Baby, Wind, Phone, ShoppingCart, Gift } from "lucide-react";
   import { bungalowCardLabel, bungalowDisplayName, reservationMatchesBungalow, stayUnits } from "@/lib/bungalow";
+  import { birthdayGuestsOnCard, birthdayLabel, unitStayDates, type StaySegment } from "@/lib/birthday-stay";
 import { BungalowPeopleEditor } from "@/components/bungalow-people-editor";
 import type { BungalowPeopleMap, BungalowPerson } from "@/lib/bungalow-people";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
@@ -226,6 +227,7 @@ interface Reservation {
   guestTitle?: string | null; // Mr. / Mrs. / Ms. — izpiše se na vaučerju za transport
   secondGuestName?: string | null; // Ime drugega gosta
   bungalow: string;
+  bungalowSegments?: StaySegment[] | null;
   pax: number;
   arrival: string;
   departure: string;
@@ -350,6 +352,14 @@ async function copyToClipboard(text: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function BirthdayGift({ label }: { label: string }) {
+  return (
+    <span title={label} className="inline-flex shrink-0">
+      <Gift className="animate-arriving h-4 w-4 text-[#8f6d3a]" aria-label={label} />
+    </span>
+  );
 }
 
 function GlassCard({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -3034,6 +3044,46 @@ async function handleCreateReservation() {
               countdown: buildArrivalCountdown(g.arrival),
             }));
 
+          // Birthday during this bungalow's nights. A multi-unit booking uses the
+          // person stored on this card, not the company holder.
+          const birthdayOn = (guest: Reservation | undefined) => {
+            if (!guest) return [] as { name: string }[];
+            return birthdayGuestsOnCard({
+              cardBungalow: bungalow,
+              bungalow: guest.bungalow,
+              arrival: guest.arrival,
+              departure: guest.departure,
+              bungalowSegments: guest.bungalowSegments,
+              bungalowPeople: guest.bungalowPeople,
+              guestName: guest.guestName,
+              secondGuestName: guest.secondGuestName,
+              thirdGuestName: guest.thirdGuestName,
+              fourthGuestName: guest.fourthGuestName,
+              dateOfBirth: guest.dateOfBirth,
+              secondDateOfBirth: guest.secondDateOfBirth,
+              thirdDateOfBirth: guest.thirdDateOfBirth,
+              fourthDateOfBirth: guest.fourthDateOfBirth,
+            });
+          };
+          const nowBirthday = birthdayOn(now);
+          const nextBirthday = birthdayOn(next);
+          // In-house on another card of the same booking (the balance stays on the
+          // first bungalow). The gift still belongs on the bungalow where that person sleeps.
+          const shownIds = new Set([now, next, next2, next3, next4].filter((g): g is Reservation => !!g).map((g) => g.id));
+          const todayStrCard = today();
+          const asideBirthday = reservations.flatMap((r) => {
+            if (shownIds.has(r.id) || r.status === "CANCELLED" || r.status === "CHECKED_OUT") return [];
+            if (!reservationMatchesBungalow(r.bungalow, bungalow)) return [];
+            const stay = unitStayDates({
+              cardBungalow: bungalow,
+              arrival: r.arrival,
+              departure: r.departure,
+              bungalowSegments: r.bungalowSegments,
+            });
+            if (!stay.arrival || !stay.departure || stay.arrival > todayStrCard || stay.departure < todayStrCard) return [];
+            return birthdayOn(r);
+          });
+
           // One upcoming-guest card — reused for both the first (NEXT) and the second
           // (ZATEM) upcoming guest, so the receptionist sees two guests ahead per bungalow.
           const renderUpcomingCard = (
@@ -3058,6 +3108,7 @@ async function handleCreateReservation() {
                     <span className="flex items-center gap-1.5 text-[15px] font-light tracking-[0.01em] text-[#0f2e3a] group-hover/next:text-[#8f6d3a]">
                       <GuestFlag nationalities={[guest.nationality, guest.secondNationality, guest.thirdNationality, guest.fourthNationality]} />
                       {guest.guestName}
+                      {birthdayOn(guest).length > 0 && <BirthdayGift label={birthdayLabel(birthdayOn(guest))} />}
                       <ArrowRight aria-hidden className="h-3.5 w-3.5 flex-shrink-0 text-[#8f6d3a]/50 transition-transform duration-300 group-hover/next:translate-x-1" />
                     </span>
                     <span className="mt-1 flex items-center gap-2 text-[11px] tabular-nums tracking-[0.06em] text-[#2b2622]/50">
@@ -3159,13 +3210,14 @@ async function handleCreateReservation() {
                 <div className="flex items-start gap-4">
                 <div className="min-w-0 flex-1">
                     <h3
-                      className={`font-[family-name:var(--font-manrope)] leading-tight text-balance ${
+                      className={`flex items-center gap-2 font-[family-name:var(--font-manrope)] leading-tight text-balance ${
                         isReserve
                           ? "text-[13px] font-normal tracking-[0.06em] text-[#2b2622]/60 sm:text-[15px]"
                           : "text-[17px] font-semibold tracking-[0.01em] text-[#0f2e3a] sm:text-[22px]"
                       }`}
                     >
-                      {bungalowCardLabel(bungalow)}
+                      <span className="min-w-0">{bungalowCardLabel(bungalow)}</span>
+                      {asideBirthday.length > 0 && <BirthdayGift label={birthdayLabel(asideBirthday)} />}
                     </h3>
                     {/* Gold hairline under the name — same signature motif as the NOW/NEXT
                         overlines; quieter for the reserve unit. */}
@@ -3174,7 +3226,8 @@ async function handleCreateReservation() {
                       className={`mt-2 block h-px w-full ${isReserve ? "bg-[#8f6d3a]/20" : "bg-[#8f6d3a]/35"}`}
                     />
                     {now ? (
-                      <p className="mt-1 truncate text-[13px] text-[#2b2622]/80">
+                      <p className="mt-1 flex min-w-0 items-center text-[13px] text-[#2b2622]/80">
+                        <span className="min-w-0 truncate">
                         <GuestFlag nationalities={[now.nationality, now.secondNationality, now.thirdNationality, now.fourthNationality]} className="mr-1.5" />
                         {/* Guest name opens the reservation/profile directly. It lives inside the
                             card-toggle <button>, so it's a role="link" span with stopPropagation
@@ -3197,10 +3250,13 @@ async function handleCreateReservation() {
                           // pulses. Stays still when the system asks for reduced motion.
                           <span className="animate-arriving ml-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#b0203a]">Arriving</span>
                         ) : null}
+                        </span>
+                        {nowBirthday.length > 0 && <span className="ml-1.5"><BirthdayGift label={birthdayLabel(nowBirthday)} /></span>}
                       </p>
                     ) : next ? (
                       <>
-                        <p className="mt-1 truncate text-[13px] text-[#2b2622]/75">
+                        <p className="mt-1 flex min-w-0 items-center text-[13px] text-[#2b2622]/75">
+                          <span className="min-w-0 truncate">
                           <span className="text-[10px] uppercase tracking-[0.16em] text-[#8f6d3a]">Naslednji</span>{" "}
                           <GuestFlag nationalities={[next.nationality, next.secondNationality, next.thirdNationality, next.fourthNationality]} className="mr-1.5" />
                           {/* Clickable like the in-house name ��� opens the reservation directly.
@@ -3216,6 +3272,8 @@ async function handleCreateReservation() {
                           >
                             {next.guestName}
                           </span>
+                          </span>
+                          {nextBirthday.length > 0 && <span className="ml-1.5"><BirthdayGift label={birthdayLabel(nextBirthday)} /></span>}
                         </p>
                         {/* Stay range on its own line under "Naslednji" — no longer truncated
                             by the guest name on narrow screens. */}
