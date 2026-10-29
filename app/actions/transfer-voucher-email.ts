@@ -3,6 +3,7 @@
 import { getReservationWithDetails, getDashboardData } from '@/app/actions/komba'
 import { logSentEmail } from './sent-emails'
 import { bungalowDisplayName } from '@/lib/bungalow'
+import { voucherPortPhoto } from '@/lib/voucher-port-photo'
 
 // ============ TRANSFER VOUCHER EMAIL (Resend) ============
 // Sends a branded HTML transfer voucher email (Komba Cabana dark style) to the guest.
@@ -356,18 +357,24 @@ function buildVoucherEmailHtml(data: VoucherData): string {
       : ''
 
   // Aerial photo of the walk along the pier at Port de Nosy Be. It is a photo of THAT
-  // pier, so it only makes sense when the guest is actually collected there — showing it
-  // for a hotel pick-up would send them to the wrong place. Hence the 'port' test rather
-  // than "print it whenever a pick-up point exists".
-  const showPickupMap = data.type === 'arrival' && /port/i.test(data.pickupPoint)
-  const pickupMapHtml = showPickupMap
+  // pier only. Matching the letters "port" also caught Port Ankify / port ankifi
+  // (and the "port" inside "airport") and sent those guests to the wrong pier.
+  // Ankify has no photo in the app, so those vouchers omit the block entirely,
+  // including the Nosy Be walking directions under the picture.
+  const portPhoto = voucherPortPhoto({
+    type: data.type,
+    pickupPoint: data.pickupPoint,
+    routeName: data.routeName,
+    hermanRouteName: data.hermanRouteName,
+  })
+  const pickupMapHtml = portPhoto
     ? `<tr><td bgcolor="#0a2029" style="background-color:#0a2029;padding:8px 16px 0 16px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${SAND}" style="background-color:${SAND};border:1px solid ${SAND_BORDER};border-left:3px solid ${GOLD_RAIL};border-radius:16px;">
           <tr><td style="padding:14px 14px 12px 14px;">
             <p style="margin:0 0 10px 2px;font-family:${FONT_BODY};font-size:10px;font-weight:400;letter-spacing:1.6px;text-transform:uppercase;color:${GOLD_SAND};">Where we meet you</p>
             <!-- Kratek alt je NAMEREN: oba odstavka pod sliko povesta celo pot in taksi, zato
                  alt ni edini vir. Dolg alt je ob blokirani/nenaloženi sliki izpadel kot packa. -->
-            <img src="${getPublicBaseUrl()}/images/pickup-point-nosy-be.jpg" width="500" alt="Map: our meeting point at Port de Nosy Be" style="display:block;border:0;outline:none;text-decoration:none;width:100%;max-width:500px;height:auto;border-radius:10px;">
+            <img src="${getPublicBaseUrl()}${portPhoto}" width="500" alt="Map: our meeting point at Port de Nosy Be" style="display:block;border:0;outline:none;text-decoration:none;width:100%;max-width:500px;height:auto;border-radius:10px;">
             <p style="margin:10px 2px 0 2px;font-family:${FONT_BODY};font-size:12px;line-height:17px;color:${INK_BODY};">Follow the red arrow &mdash; walk along the pier towards the water. Our boat waits at the far end, near <span style="color:${INK};font-weight:600;">Port de Nosy Be</span>.</p>
             <p style="margin:8px 2px 0 2px;font-family:${FONT_BODY};font-size:12px;line-height:17px;color:${INK_BODY};"><span style="color:${INK};font-weight:600;">Coming by taxi?</span> Taxis are allowed inside the port, so you do not need to walk. Ask your driver to take you all the way to the boats at Port de Nosy Be &mdash; that is our meeting point.</p>
           </td></tr>
