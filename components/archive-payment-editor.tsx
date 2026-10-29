@@ -56,6 +56,7 @@ export default function ArchivePaymentEditor({
     omAmountAr: '',
     cashCompany: 'tourism',
     writeToRegister: true,
+    unit: 'Ar' as 'EUR' | 'Ar',
   })
 
   async function load() {
@@ -68,28 +69,28 @@ export default function ArchivePaymentEditor({
 
   const paid = rows.reduce((s, p) => s + Number(p.amount), 0)
   const remaining = totalOwedEur - paid
-  const isCash = form.method === 'cash'
-  const cashAr = isCash ? Math.round(Number(form.amount) || 0) : 0
-  const cashEur = isCash ? cashAriaryToEurAmount(cashAr, rate > 0 ? rate : 4800) : ''
+  const inAr = form.unit === 'Ar'
+  const enteredAr = inAr ? Math.round(Number(form.amount) || 0) : 0
+  const enteredEur = inAr ? cashAriaryToEurAmount(enteredAr, rate > 0 ? rate : 4800) : form.amount
 
   async function handleAdd() {
-    if (isCash) {
-      if (cashAr <= 0 || Number(cashEur) <= 0) return
+    if (inAr) {
+      if (enteredAr <= 0 || Number(enteredEur) <= 0) return
     } else if (!form.amount || Number(form.amount) <= 0) {
       return
     }
     setSaving(true)
     await addPayment({
       reservationId,
-      amount: isCash ? cashEur : form.amount,
+      amount: inAr ? enteredEur : form.amount,
       method: form.method,
       paidAt: form.paidAt,
       notes: form.notes || undefined,
       omAmountAr: form.method === 'orange_money' && form.omAmountAr ? Number(form.omAmountAr) : undefined,
-      cashAmountAr: isCash ? cashAr : undefined,
+      cashAmountAr: inAr ? enteredAr : undefined,
       cashCompany: form.method === 'cash' && form.writeToRegister ? form.cashCompany : undefined,
     })
-    setForm({ amount: '', method: 'cash', paidAt: today, notes: '', omAmountAr: '', cashCompany: 'tourism', writeToRegister: true })
+    setForm({ amount: '', method: 'cash', paidAt: today, notes: '', omAmountAr: '', cashCompany: 'tourism', writeToRegister: true, unit: 'Ar' })
     setShowAdd(false)
     await load()
     setSaving(false)
@@ -152,7 +153,7 @@ export default function ArchivePaymentEditor({
                   <div className="flex flex-wrap items-center gap-3">
                     <div>
                       <p className="text-sm font-medium text-[#8fae92]">{Number(p.amount).toFixed(2)} EUR</p>
-                      {p.method === 'cash' && p.cashAmountAr ? <p className="text-xs text-[#c59b5b]">{fmtAr(p.cashAmountAr)} gotovina</p> : null}
+                      {p.cashAmountAr ? <p className="text-xs text-[#c59b5b]">{fmtAr(p.cashAmountAr)}</p> : null}
                       <p className="text-xs text-white/40">{p.paidAt}</p>
                     </div>
                     <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-white/70">{methodLabel(p.method)}</span>
@@ -178,22 +179,33 @@ export default function ArchivePaymentEditor({
               <p className="text-xs font-medium text-[#c59b5b]">Novo placilo</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>{isCash ? 'Znesek' : 'Znesek (EUR)'}</label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      step={isCash ? '1' : '0.01'}
-                      min="0"
-                      autoFocus
-                      placeholder={isCash ? 'npr. 480000' : undefined}
-                      className={`${inputCls} ${isCash ? 'pr-10' : ''}`}
-                      value={form.amount}
-                      onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                    />
-                    {isCash ? <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40">Ar</span> : null}
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label className="text-xs text-white/40">Znesek</label>
+                    <div className="flex gap-0.5 rounded-lg bg-white/5 p-0.5">
+                      {(['Ar', 'EUR'] as const).map((unit) => (
+                        <button
+                          key={unit}
+                          type="button"
+                          onClick={() => setForm(f => f.unit === unit ? f : { ...f, unit, amount: '' })}
+                          className={`rounded-md px-2 py-0.5 text-[10px] font-medium ${form.unit === unit ? 'bg-[#c59b5b]/20 text-[#c59b5b]' : 'text-white/40 hover:text-white/70'}`}
+                        >
+                          {unit}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                  {isCash && cashAr > 0 && (
-                    <p className="mt-1 text-[10px] text-white/40">= {cashEur} EUR</p>
+                  <input
+                    type="number"
+                    step={inAr ? '1' : '0.01'}
+                    min="0"
+                    autoFocus
+                    placeholder={inAr ? 'npr. 480000' : undefined}
+                    className={inputCls}
+                    value={form.amount}
+                    onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                  />
+                  {inAr && enteredAr > 0 && (
+                    <p className="mt-1 text-[10px] text-white/40">= {enteredEur} EUR</p>
                   )}
                 </div>
                 <div>
@@ -203,10 +215,12 @@ export default function ArchivePaymentEditor({
                     value={form.method}
                     onChange={e => {
                       const method = e.target.value
+                      const unit = method === 'cash' ? 'Ar' as const : 'EUR' as const
                       setForm(f => ({
                         ...f,
                         method,
-                        amount: (f.method === 'cash') !== (method === 'cash') ? '' : f.amount,
+                        unit,
+                        amount: f.unit === unit ? f.amount : '',
                       }))
                     }}
                   >
@@ -256,7 +270,7 @@ export default function ArchivePaymentEditor({
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleAdd}
-                  disabled={saving || (isCash ? Number(cashEur) <= 0 : !form.amount)}
+                  disabled={saving || (inAr ? Number(enteredEur) <= 0 : !form.amount)}
                   className="rounded-xl bg-[#c59b5b] px-4 py-2 text-sm font-semibold text-[#0a2029] hover:bg-[#c59b5b]/90 disabled:opacity-50"
                 >
                   {saving ? 'Shranjujem...' : 'Shrani placilo'}

@@ -446,7 +446,7 @@ async function syncAccommodationItem(reservationId: string) {
     const method =
       p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method === 'kompenzacija' ? 'Kompenzacija' : p.method
     const date = new Date(p.paidAt).toLocaleDateString('sl-SI')
-    const cashAr = p.method === 'cash' && p.cashAmountAr ? ` / ${Math.round(p.cashAmountAr).toLocaleString('de-DE')} Ar` : ''
+    const cashAr = p.cashAmountAr ? ` / ${Math.round(p.cashAmountAr).toLocaleString('de-DE')} Ar` : ''
     return `${amt.toFixed(2)} EUR${cashAr} (${method}, ${date})`
   })
   const paymentInfo = paymentInfoParts.length > 0 ? ` | Placano: ${paymentInfoParts.join(', ')}` : ''
@@ -1833,17 +1833,17 @@ export async function addPayment(data: {
   notes?: string
   omAmountAr?: number // Pri Orange Money: znesek v Ar, ki je prišel na OM denarnico
   cashCompany?: string // Pri gotovini: podjetje (tourism/sarl) → vpiše priliv v blagajno
-  cashAmountAr?: number // Pri gotovini: znesek vpisan v Ar; amount se shrani kot EUR ekvivalent
+  cashAmountAr?: number // Znesek vpisan v Ar; amount se shrani kot EUR ekvivalent
 }) {
   await ensureCashAmountColumn()
   const id = uid('pay')
   const method = data.method === 'kompenzacija' ? 'kompenzacija' : data.method
 
-  // Gotovina, vpisana v ariarijih: v blagajno in na panel gre isti Ar, na račun
-  // pa evrski ekvivalent po tečaju, ki ga aplikacija že uporablja.
+  // Znesek v ariarijih: na panelu ostane isti Ar, na račun pa evrski ekvivalent
+  // po tečaju, ki ga aplikacija že uporablja. V evrih amount ostane, kot je vpisan.
   let amount = data.amount
   let cashAmountAr: number | null = null
-  if (method === 'cash' && data.cashAmountAr && data.cashAmountAr > 0) {
+  if (data.cashAmountAr && data.cashAmountAr > 0) {
     const rate = await getExchangeRate()
     cashAmountAr = Math.round(data.cashAmountAr)
     amount = cashAriaryToEurAmount(cashAmountAr, rate)
