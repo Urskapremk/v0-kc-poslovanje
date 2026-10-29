@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react'
 import { X, Trash2, Plus } from 'lucide-react'
 import { getPayments, addPayment, deletePayment } from '@/app/actions/komba'
+import { cashAriaryToEurAmount } from '@/lib/cash-payment'
 
 const PAYMENT_METHODS = [
   { value: 'card', label: 'Kreditna kartica' },
@@ -19,6 +20,7 @@ type PaymentRow = {
   paidAt: string
   notes: string | null
   omAmountAr?: number | null
+  cashAmountAr?: number | null
   cashCompany?: string | null
 }
 
@@ -66,17 +68,25 @@ export default function ArchivePaymentEditor({
 
   const paid = rows.reduce((s, p) => s + Number(p.amount), 0)
   const remaining = totalOwedEur - paid
+  const isCash = form.method === 'cash'
+  const cashAr = isCash ? Math.round(Number(form.amount) || 0) : 0
+  const cashEur = isCash ? cashAriaryToEurAmount(cashAr, rate > 0 ? rate : 4800) : ''
 
   async function handleAdd() {
-    if (!form.amount || Number(form.amount) <= 0) return
+    if (isCash) {
+      if (cashAr <= 0 || Number(cashEur) <= 0) return
+    } else if (!form.amount || Number(form.amount) <= 0) {
+      return
+    }
     setSaving(true)
     await addPayment({
       reservationId,
-      amount: form.amount,
+      amount: isCash ? cashEur : form.amount,
       method: form.method,
       paidAt: form.paidAt,
       notes: form.notes || undefined,
       omAmountAr: form.method === 'orange_money' && form.omAmountAr ? Number(form.omAmountAr) : undefined,
+      cashAmountAr: isCash ? cashAr : undefined,
       cashCompany: form.method === 'cash' && form.writeToRegister ? form.cashCompany : undefined,
     })
     setForm({ amount: '', method: 'cash', paidAt: today, notes: '', omAmountAr: '', cashCompany: 'tourism', writeToRegister: true })
@@ -142,6 +152,7 @@ export default function ArchivePaymentEditor({
                   <div className="flex flex-wrap items-center gap-3">
                     <div>
                       <p className="text-sm font-medium text-[#8fae92]">{Number(p.amount).toFixed(2)} EUR</p>
+                      {p.method === 'cash' && p.cashAmountAr ? <p className="text-xs text-[#c59b5b]">{fmtAr(p.cashAmountAr)} gotovina</p> : null}
                       <p className="text-xs text-white/40">{p.paidAt}</p>
                     </div>
                     <span className="rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-white/70">{methodLabel(p.method)}</span>
@@ -167,12 +178,35 @@ export default function ArchivePaymentEditor({
               <p className="text-xs font-medium text-[#c59b5b]">Novo placilo</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>Znesek (EUR)</label>
-                  <input type="number" step="0.01" autoFocus className={inputCls} value={form.amount} onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+                  <label className={labelCls}>{isCash ? 'Znesek (Ar)' : 'Znesek (EUR)'}</label>
+                  <input
+                    type="number"
+                    step={isCash ? '1' : '0.01'}
+                    min="0"
+                    autoFocus
+                    placeholder={isCash ? 'npr. 480000' : undefined}
+                    className={inputCls}
+                    value={form.amount}
+                    onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                  />
+                  {isCash && cashAr > 0 && (
+                    <p className="mt-1 text-[10px] text-white/40">= {cashEur} EUR na racunu (tecaj {(rate > 0 ? rate : 4800).toLocaleString('de-DE')})</p>
+                  )}
                 </div>
                 <div>
                   <label className={labelCls}>Nacin placila</label>
-                  <select className={inputCls} value={form.method} onChange={e => setForm(f => ({ ...f, method: e.target.value }))}>
+                  <select
+                    className={inputCls}
+                    value={form.method}
+                    onChange={e => {
+                      const method = e.target.value
+                      setForm(f => ({
+                        ...f,
+                        method,
+                        amount: (f.method === 'cash') !== (method === 'cash') ? '' : f.amount,
+                      }))
+                    }}
+                  >
                     {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                   </select>
                 </div>
@@ -219,7 +253,7 @@ export default function ArchivePaymentEditor({
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleAdd}
-                  disabled={saving || !form.amount}
+                  disabled={saving || (isCash ? Number(cashEur) <= 0 : !form.amount)}
                   className="rounded-xl bg-[#c59b5b] px-4 py-2 text-sm font-semibold text-[#0a2029] hover:bg-[#c59b5b]/90 disabled:opacity-50"
                 >
                   {saving ? 'Shranjujem...' : 'Shrani placilo'}
