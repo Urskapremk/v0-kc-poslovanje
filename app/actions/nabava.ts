@@ -7,6 +7,7 @@ import { addCashExpense, updateCashExpense, deleteCashExpense } from "./banka"
 import { addOmTransaction, deleteOmTransaction, updateOmTransaction } from "./orange-money"
 import { getExchangeRate } from "./komba"
 import { STROSEK_CATEGORIES, type StrosekCategory } from "@/lib/stroski-categories"
+import { hvNeroPriceAr } from "@/lib/hv-nero-price"
 
 // Nabava = ko gre Borut po nakupih BREZ gostov. Vsak vnos je "izlet v nabavo" z datumom
 // in opisom; plačila (voznik čolna / nosači / tuc tuc) gredo skozi obstoječi mehanizem
@@ -34,6 +35,8 @@ async function ensureTable() {
   // Nabava brez čolna: Borut gre po nakupih brez naročenega čolna (npr. se pelje z gosti) →
   // beležijo se le ostali stroški (voznik/nosači/tuc tuc) in nakupi, čoln (Dilip) se skrije.
   await db.execute(sql`ALTER TABLE nabava_trips ADD COLUMN IF NOT EXISTS "noBoat" boolean NOT NULL DEFAULT false`)
+  // Nabava HV: cena Dilipu za čoln Nero. 120.000 Ar ostane privzeta; 180.000 Ar je druga izbira.
+  await db.execute(sql`ALTER TABLE nabava_trips ADD COLUMN IF NOT EXISTS "boatCostAr" integer NOT NULL DEFAULT 120000`)
   // Vrsta nabave: 'hv' = Nabava HV (čoln/voznik/nosači/tuc tuc + nakupi), 'komba' = Nabava Komba
   // (samo nakupi robe — brez čolna, brez voznika).
   await db.execute(sql`ALTER TABLE nabava_trips ADD COLUMN IF NOT EXISTS site text NOT NULL DEFAULT 'hv'`)
@@ -162,13 +165,14 @@ export type NabavaTrip = {
   boatOrderedAt: string
   noBoat: boolean
   site: string
+  boatCostAr: number
   createdAt: string
 }
 
 export async function getNabavaTrips(): Promise<NabavaTrip[]> {
   await ensureTable()
   const res = await db.execute(
-    sql`SELECT id, date, note, "boatId", "routeId", "boatOrderedAt", "noBoat", site, "createdAt" FROM nabava_trips ORDER BY date DESC, "createdAt" DESC`
+    sql`SELECT id, date, note, "boatId", "routeId", "boatOrderedAt", "noBoat", site, "boatCostAr", "createdAt" FROM nabava_trips ORDER BY date DESC, "createdAt" DESC`
   )
   return (res.rows as Record<string, unknown>[]).map((r) => ({
     id: String(r.id),
@@ -179,6 +183,7 @@ export async function getNabavaTrips(): Promise<NabavaTrip[]> {
     boatOrderedAt: r.boatOrderedAt ? String(r.boatOrderedAt) : "",
     noBoat: r.noBoat === true || r.noBoat === "true",
     site: r.site ? String(r.site) : "hv",
+    boatCostAr: hvNeroPriceAr(r.boatCostAr),
     createdAt: r.createdAt ? String(r.createdAt) : "",
   }))
 }
@@ -225,6 +230,19 @@ export async function setNabavaNoBoat(params: { id: string; noBoat: boolean }) {
     await db.execute(sql`UPDATE nabava_trips SET "noBoat" = false WHERE id = ${params.id}`)
   }
   return { ok: true }
+}
+
+// Nabava HV: izbira cene čolna Nero. Dovoljeni sta samo 120.000 in 180.000 Ar.
+// Komba nima tega čolna. Že zabeleženo plačilo se tu ne prepiše.
+export async function setNabavaBoatCost(params: { id: string; amountAr: number }) {
+  await ensureTable()
+  const amountAr = hvNeroPriceAr(params.amountAr)
+  await db.execute(sql`
+    UPDATE nabava_trips
+    SET "boatCostAr" = ${amountAr}
+    WHERE id = ${params.id} AND COALESCE(site, 'hv') <> 'komba'
+  `)
+  return { ok: true, amountAr }
 }
 
 export async function setNabavaBoatOrdered(params: { id: string; ordered: boolean }) {
