@@ -2,7 +2,7 @@
 
 import React from "react"
 import { createPortal } from "react-dom"
-import { Mail, FileText, Ship, ShieldCheck, RefreshCw, Trash2, Eye, X, Compass } from "lucide-react"
+import { Mail, FileText, Ship, ShieldCheck, RefreshCw, Trash2, Eye, X, Compass, Banknote } from "lucide-react"
 import {
   getSentEmailsForReservation,
   getAllSentEmails,
@@ -40,6 +40,11 @@ const TYPE_META: Record<
     label: "Ponudba izletov",
     className: "bg-[#7fa8b8]/15 border-[#7fa8b8]/25 text-[#7fa8b8]",
     Icon: Compass,
+  },
+  "cash-receipt": {
+    label: "Potrdilo o gotovini",
+    className: "bg-[#c59b5b]/15 border-[#c59b5b]/25 text-[#c59b5b]",
+    Icon: Banknote,
   },
 }
 

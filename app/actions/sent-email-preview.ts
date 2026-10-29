@@ -8,6 +8,8 @@ import { getInvoiceEmailPreview } from './invoice-email'
 import { getTransferVoucherEmailPreview } from './transfer-voucher-email'
 import { getFeedbackEmailPreview } from './feedback-email'
 import { getExcursionOfferPreview } from './excursion-offer-email'
+import { getCashReceiptEmailPreview } from './cash-receipt-email'
+import { isCashReceiptLang } from '@/lib/cash-receipt'
 
 // Reconstruct the HTML preview of a previously sent email from its stored record.
 // The email body is not stored, so we rebuild it from the reservation + type.
@@ -55,6 +57,22 @@ export async function getSentEmailPreview(
     }
     if (rec.type === 'excursion-offer') {
       const r = await getExcursionOfferPreview(rec.reservationId, rec.recipientEmail)
+      return r.html ? { html: r.html } : { error: r.error || 'Predogleda ni bilo mogoce obnoviti.' }
+    }
+    if (rec.type === 'cash-receipt') {
+      let lang: 'sl' | 'en' | 'fr' = 'sl'
+      let paymentId = ''
+      if (rec.metadata) {
+        try {
+          const meta = JSON.parse(rec.metadata) as { lang?: string; paymentId?: string }
+          if (meta.lang && isCashReceiptLang(meta.lang)) lang = meta.lang
+          if (meta.paymentId) paymentId = meta.paymentId
+        } catch {
+          /* ignore malformed metadata */
+        }
+      }
+      if (!paymentId) return { error: 'Predogleda ni bilo mogoce obnoviti.' }
+      const r = await getCashReceiptEmailPreview(rec.reservationId, paymentId, lang)
       return r.html ? { html: r.html } : { error: r.error || 'Predogleda ni bilo mogoce obnoviti.' }
     }
     return { error: 'Neznana vrsta emaila.' }
