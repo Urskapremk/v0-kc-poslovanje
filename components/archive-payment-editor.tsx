@@ -178,19 +178,22 @@ export default function ArchivePaymentEditor({
               <p className="text-xs font-medium text-[#c59b5b]">Novo placilo</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={labelCls}>{isCash ? 'Znesek (Ar)' : 'Znesek (EUR)'}</label>
-                  <input
-                    type="number"
-                    step={isCash ? '1' : '0.01'}
-                    min="0"
-                    autoFocus
-                    placeholder={isCash ? 'npr. 480000' : undefined}
-                    className={inputCls}
-                    value={form.amount}
-                    onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                  />
+                  <label className={labelCls}>{isCash ? 'Znesek' : 'Znesek (EUR)'}</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step={isCash ? '1' : '0.01'}
+                      min="0"
+                      autoFocus
+                      placeholder={isCash ? 'npr. 480000' : undefined}
+                      className={`${inputCls} ${isCash ? 'pr-10' : ''}`}
+                      value={form.amount}
+                      onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                    />
+                    {isCash ? <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40">Ar</span> : null}
+                  </div>
                   {isCash && cashAr > 0 && (
-                    <p className="mt-1 text-[10px] text-white/40">= {cashEur} EUR na racunu (tecaj {(rate > 0 ? rate : 4800).toLocaleString('de-DE')})</p>
+                    <p className="mt-1 text-[10px] text-white/40">= {cashEur} EUR</p>
                   )}
                 </div>
                 <div>
