@@ -1575,12 +1575,12 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
     id: string; amount: string; method: string; paidAt: string; notes: string | null; omAmountAr?: number | null; cashAmountAr?: number | null;
   }[]>([]);
   const [showAddForm, setShowAddForm] = React.useState(false);
-  const [newPayment, setNewPayment] = React.useState({ amount: '', method: 'card', paidAt: new Date().toISOString().split('T')[0], notes: '', omAmountAr: '' });
+  const [newPayment, setNewPayment] = React.useState({ amount: '', method: 'card', paidAt: new Date().toISOString().split('T')[0], notes: '', omAmountAr: '', unit: 'EUR' as 'EUR' | 'Ar' });
   const [saving, setSaving] = React.useState(false);
   const rate = exchangeRate > 0 ? exchangeRate : DEFAULT_RATE;
-  const isCash = newPayment.method === 'cash';
-  const cashAr = isCash ? Math.round(Number(newPayment.amount) || 0) : 0;
-  const cashEur = isCash ? cashAriaryToEurAmount(cashAr, rate) : '';
+  const inAr = newPayment.unit === 'Ar';
+  const enteredAr = inAr ? Math.round(Number(newPayment.amount) || 0) : 0;
+  const enteredEur = inAr ? cashAriaryToEurAmount(enteredAr, rate) : newPayment.amount;
   
   async function loadPayments() {
     const { getPayments } = await import("@/app/actions/komba");
@@ -1601,8 +1601,8 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
   }, [remaining, onRemainingChange]);
   
   async function handleAddPayment() {
-    if (isCash) {
-      if (cashAr <= 0 || Number(cashEur) <= 0) return;
+    if (inAr) {
+      if (enteredAr <= 0 || Number(enteredEur) <= 0) return;
     } else if (!newPayment.amount || Number(newPayment.amount) <= 0) {
       return;
     }
@@ -1610,14 +1610,14 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
     const { addPayment } = await import("@/app/actions/komba");
   await addPayment({
     reservationId,
-    amount: isCash ? cashEur : newPayment.amount,
+    amount: inAr ? enteredEur : newPayment.amount,
     method: newPayment.method,
     paidAt: newPayment.paidAt,
     notes: newPayment.notes,
     omAmountAr: newPayment.method === 'orange_money' && newPayment.omAmountAr ? Number(newPayment.omAmountAr) : undefined,
-    cashAmountAr: isCash ? cashAr : undefined,
+    cashAmountAr: inAr ? enteredAr : undefined,
   });
-  setNewPayment({ amount: '', method: 'card', paidAt: new Date().toISOString().split('T')[0], notes: '', omAmountAr: '' });
+  setNewPayment({ amount: '', method: 'card', paidAt: new Date().toISOString().split('T')[0], notes: '', omAmountAr: '', unit: 'EUR' });
   setShowAddForm(false);
   loadPayments();
   onPaymentChange?.();
@@ -1667,19 +1667,30 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
           <p className="text-xs font-medium text-[#c59b5b]">Novo placilo</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-white/40 mb-1">Znesek</label>
-              <div className="relative">
-                <input 
-                  type="number" step={isCash ? '1' : '0.01'} min="0" autoFocus
-                  placeholder={isCash ? 'npr. 480000' : undefined}
-                  className={`w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c59b5b]/50 focus:outline-none ${isCash ? 'pr-10' : ''}`}
-                  value={newPayment.amount}
-                  onChange={e => setNewPayment(p => ({ ...p, amount: e.target.value }))}
-                />
-                {isCash ? <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40">Ar</span> : null}
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <label className="text-xs text-white/40">Znesek</label>
+                <div className="flex gap-0.5 rounded-lg bg-white/5 p-0.5">
+                  {(['Ar', 'EUR'] as const).map((unit) => (
+                    <button
+                      key={unit}
+                      type="button"
+                      onClick={() => setNewPayment(p => p.unit === unit ? p : { ...p, unit, amount: '' })}
+                      className={`rounded-md px-2 py-0.5 text-[10px] font-medium ${newPayment.unit === unit ? 'bg-[#c59b5b]/20 text-[#c59b5b]' : 'text-white/40 hover:text-white/70'}`}
+                    >
+                      {unit}
+                    </button>
+                  ))}
+                </div>
               </div>
-              {isCash && cashAr > 0 && (
-                <p className="mt-1 text-[10px] text-white/40">= {cashEur} EUR</p>
+              <input 
+                type="number" step={inAr ? '1' : '0.01'} min="0" autoFocus
+                placeholder={inAr ? 'npr. 480000' : undefined}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c59b5b]/50 focus:outline-none"
+                value={newPayment.amount}
+                onChange={e => setNewPayment(p => ({ ...p, amount: e.target.value }))}
+              />
+              {inAr && enteredAr > 0 && (
+                <p className="mt-1 text-[10px] text-white/40">= {enteredEur} EUR</p>
               )}
             </div>
             <div>
@@ -1689,10 +1700,12 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
                 value={newPayment.method}
                 onChange={e => {
                   const method = e.target.value
+                  const unit = method === 'cash' ? 'Ar' as const : 'EUR' as const
                   setNewPayment(p => ({
                     ...p,
                     method,
-                    amount: (p.method === 'cash') !== (method === 'cash') ? '' : p.amount,
+                    unit,
+                    amount: p.unit === unit ? p.amount : '',
                   }))
                 }}
               >
@@ -1740,7 +1753,7 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
               </div>
             )}
           </div>
-          <LuxuryButton variant="gold" onClick={handleAddPayment} disabled={saving || (isCash ? Number(cashEur) <= 0 : !newPayment.amount)}>
+          <LuxuryButton variant="gold" onClick={handleAddPayment} disabled={saving || (inAr ? Number(enteredEur) <= 0 : !newPayment.amount)}>
             {saving ? 'Shranjujem...' : 'Shrani placilo'}
           </LuxuryButton>
         </div>
@@ -1771,8 +1784,8 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
               <div className="flex items-center gap-4">
                 <div>
                   <p className="text-sm font-medium text-[#8fae92]">{p.amount} {currency}</p>
-                  {p.method === 'cash' && p.cashAmountAr ? (
-                    <p className="text-xs text-[#c59b5b]">{ar(p.cashAmountAr)} gotovina</p>
+                  {p.cashAmountAr ? (
+                    <p className="text-xs text-[#c59b5b]">{ar(p.cashAmountAr)}</p>
                   ) : null}
                   <p className="text-xs text-white/40">{p.paidAt}</p>
                 </div>
@@ -2135,7 +2148,7 @@ export default function KombaCabanaApp() {
       const amt = Number(p.amount);
       const method = p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method === 'kompenzacija' ? 'Kompenzacija' : p.method;
       const date = new Date(p.paidAt).toLocaleDateString('sl-SI');
-      const cashAr = p.method === 'cash' && p.cashAmountAr ? ` / ${Math.round(p.cashAmountAr).toLocaleString('de-DE')} Ar` : '';
+      const cashAr = p.cashAmountAr ? ` / ${Math.round(p.cashAmountAr).toLocaleString('de-DE')} Ar` : '';
       return `${amt.toFixed(2)} EUR${cashAr} (${method}, ${date})`;
     });
     const paymentInfo = paymentInfoParts.length > 0 ? ` | Placano: ${paymentInfoParts.join(', ')}` : '';
