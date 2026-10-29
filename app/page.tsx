@@ -50,7 +50,8 @@ import { closeAllDeliveryNotesForReservation, removeItemFromDeliveryNote, toggle
 import { addExcursion, deleteExcursion } from "./actions/pricing";
 import { payFanja, unpayFanja } from "./actions/fanja-payment";
 import { paySupplier, unpaySupplier } from "./actions/supplier-payment";
-import { getNabavaTrips, addNabavaTrip, updateNabavaTrip, deleteNabavaTrip, setNabavaBoat, setNabavaBoatOrdered, setNabavaNoBoat } from "./actions/nabava";
+import { getNabavaTrips, addNabavaTrip, updateNabavaTrip, deleteNabavaTrip, setNabavaBoat, setNabavaBoatOrdered, setNabavaNoBoat, setNabavaBoatCost } from "./actions/nabava";
+import { HV_NERO_BOAT, HV_NERO_PRICES_AR, hvNeroPriceAr } from "@/lib/hv-nero-price";
 import { NabavaPurchasesSection } from "@/components/nabava-purchases-section";
 import { DilipBoatCostMark, DilipBoatCostSummary, EMPTY_DILIP_BOAT_COST, dilipCostDraftFromPayment, dilipCostFieldsFromDraft } from "@/components/dilip-boat-cost-mark";
 import { boatCostDraftDiffers, boatCostMarkError, transportPayCancelConfirm, transportPayConfirm, transportPaySaveLabel, WIP_CAT } from "@/lib/dilip-boat-cost";
@@ -9891,14 +9892,35 @@ function GuestCard() {
                           );
                         })()}
                         {!trip.noBoat && (() => {
-                          // Nabava HV: čoln je VEDNO Nero, cena Dilipu je FIKSNA 120.000 Ar (brez izbire, brez odštevanja).
-                          const boatName = 'Nero';
-                          const boatCostAr = 120000;
+                          // Nabava HV (Hell-Ville): čoln ostane Nero. Cena Dilipu je 120.000 ali 180.000 Ar.
+                          const boatName = HV_NERO_BOAT;
+                          const boatCostAr = hvNeroPriceAr(trip.boatCostAr);
+                          const boatPaid = supplierPayByKey[`nabava:${trip.id}:boat`];
+                          const paidDiffers = !!boatPaid && Math.round(boatPaid.amountAr || 0) !== boatCostAr;
                           return (
                             <div className="rounded-lg border border-[#3f6b7d]/20 bg-[#3f6b7d]/[0.05] p-2">
                               <p className="mb-1.5 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#3f6b7d]"><Ship className="h-3.5 w-3.5" /> Čoln (Dilip)</p>
+                              <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                                {HV_NERO_PRICES_AR.map((price) => (
+                                  <button
+                                    key={price}
+                                    type="button"
+                                    onClick={async () => {
+                                      if (price === boatCostAr) return;
+                                      await setNabavaBoatCost({ id: trip.id, amountAr: price });
+                                      await mutateNabava();
+                                    }}
+                                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold transition ${price === boatCostAr ? 'bg-[#3f6b7d] text-white' : 'bg-[#3f6b7d]/10 text-[#3f6b7d]'}`}
+                                  >
+                                    {boatName} · {ar(price)}
+                                  </button>
+                                ))}
+                              </div>
                               <div className="rounded-lg border border-[#3f6b7d]/30 bg-[#3f6b7d]/10 px-2 py-1">
                                 <p className="text-[10px] font-semibold text-[#3f6b7d]">Za plačilo Dilipu (čoln {boatName}): {ar(boatCostAr)}</p>
+                                {boatPaid && paidDiffers && (
+                                  <p className="mt-0.5 text-[10px] text-[#8f6d3a]">Zabeleženo plačilo je {ar(boatPaid.amountAr)}. Uredi plačilo, da zapišeš {ar(boatCostAr)}.</p>
+                                )}
                               </div>
                               {renderSupplierPay(`nabava:${trip.id}:boat`, 'dilip', boatCostAr, `Dilip (čoln ${boatName})`, trip.note || 'nabava', '#3f6b7d', { costMark: true })}
                             </div>
