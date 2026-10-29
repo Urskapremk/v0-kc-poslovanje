@@ -9,6 +9,7 @@ import { revalidatePath } from 'next/cache'
 import { unpaySupplier } from './supplier-payment'
 import { unpayFanja } from './fanja-payment'
 import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
+import { cashAriaryToEurAmount } from '@/lib/cash-payment'
 import { replaceBungalowPeople, type BungalowPeopleMap, type BungalowPerson } from '@/lib/bungalow-people'
 
 // Generate unique ID
@@ -86,6 +87,7 @@ export async function setInvoiceNote(reservationId: string, note: string) {
 
 // Get a single reservation by ID (including archived)
 export async function getReservationById(reservationId: string) {
+  await ensureCashAmountColumn()
   const [res] = await db.select().from(reservations).where(eq(reservations.id, reservationId)).limit(1)
   if (!res) return null
   
@@ -127,7 +129,8 @@ export async function getReservationById(reservationId: string) {
       currency: p.currency,
       method: p.method,
       paidAt: p.paidAt ? (typeof p.paidAt === 'string' ? p.paidAt : p.paidAt.toISOString()) : '',
-      notes: p.notes
+      notes: p.notes,
+      cashAmountAr: p.cashAmountAr ?? null,
     })),
     transfers: resTransfers.map(t => ({
       id: t.id,
@@ -417,6 +420,7 @@ export async function updateReservation(id: string, data: Partial<{
 // Re-computes the existing "Bivanje" order item from the current reservation state.
 // Does nothing if the accommodation item does not exist yet (guest not checked in).
 async function syncAccommodationItem(reservationId: string) {
+  await ensureCashAmountColumn()
   const existing = await db
     .select()
     .from(orderItems)
@@ -442,7 +446,8 @@ async function syncAccommodationItem(reservationId: string) {
     const method =
       p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method === 'kompenzacija' ? 'Kompenzacija' : p.method
     const date = new Date(p.paidAt).toLocaleDateString('sl-SI')
-    return `${amt.toFixed(2)} EUR (${method}, ${date})`
+    const cashAr = p.method === 'cash' && p.cashAmountAr ? ` / ${Math.round(p.cashAmountAr).toLocaleString('de-DE')} Ar` : ''
+    return `${amt.toFixed(2)} EUR${cashAr} (${method}, ${date})`
   })
   const paymentInfo = paymentInfoParts.length > 0 ? ` | Placano: ${paymentInfoParts.join(', ')}` : ''
 
@@ -846,6 +851,7 @@ export async function setOrderItemTransferOrdered(id: string, which: 'dilip' | '
 // ============ DASHBOARD DATA ============
 
 export async function getDashboardData(includeReservationId?: string) {
+  await ensureCashAmountColumn()
   await ensureSkipBoatPayColumn()
   await ensureBungalowPeopleColumn()
   const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
@@ -987,7 +993,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
         currency: p.currency,
         method: p.method,
         paidAt: p.paidAt ? (typeof p.paidAt === 'string' ? p.paidAt : (p.paidAt instanceof Date ? p.paidAt.toISOString() : String(p.paidAt))) : '',
-        notes: p.notes
+        notes: p.notes,
+        cashAmountAr: p.cashAmountAr ?? null,
       })),
       deliveryNotesTotal: resDeliveryNotes.reduce((sum, dn) => sum + (dn.totalAr || 0), 0),
       invoiceDiscounts: resDiscounts.map(d => ({
@@ -1794,7 +1801,25 @@ async function ensureKompenzacijaColumns() {
   await db.execute(sql`ALTER TABLE marketing_expenses ADD COLUMN IF NOT EXISTS "compensationPaymentId" text`)
 }
 
+// Gotovina na panelu Placila se vpisuje v ariarijih. Stolpec hrani vpisani Ar;
+// `amount` ostane evrski ekvivalent. ALTER teče pred vsakim branjem payments,
+// da obstoječa baza dobi stolpec brez ločene migracije.
+let cashAmountColumnReady: Promise<void> | null = null
+function ensureCashAmountColumn() {
+  if (!cashAmountColumnReady) {
+    cashAmountColumnReady = db
+      .execute(sql`ALTER TABLE payments ADD COLUMN IF NOT EXISTS "cashAmountAr" integer`)
+      .then(() => undefined)
+      .catch((err) => {
+        cashAmountColumnReady = null
+        throw err
+      })
+  }
+  return cashAmountColumnReady
+}
+
 export async function getPayments(reservationId: string) {
+  await ensureCashAmountColumn()
   return db.select().from(payments)
     .where(eq(payments.reservationId, reservationId))
     .orderBy(desc(payments.paidAt))
@@ -1808,9 +1833,21 @@ export async function addPayment(data: {
   notes?: string
   omAmountAr?: number // Pri Orange Money: znesek v Ar, ki je prišel na OM denarnico
   cashCompany?: string // Pri gotovini: podjetje (tourism/sarl) → vpiše priliv v blagajno
+  cashAmountAr?: number // Pri gotovini: znesek vpisan v Ar; amount se shrani kot EUR ekvivalent
 }) {
+  await ensureCashAmountColumn()
   const id = uid('pay')
   const method = data.method === 'kompenzacija' ? 'kompenzacija' : data.method
+
+  // Gotovina, vpisana v ariarijih: v blagajno in na panel gre isti Ar, na račun
+  // pa evrski ekvivalent po tečaju, ki ga aplikacija že uporablja.
+  let amount = data.amount
+  let cashAmountAr: number | null = null
+  if (method === 'cash' && data.cashAmountAr && data.cashAmountAr > 0) {
+    const rate = await getExchangeRate()
+    cashAmountAr = Math.round(data.cashAmountAr)
+    amount = cashAriaryToEurAmount(cashAmountAr, rate)
+  }
 
   // Kompenzacija poravna račun in hkrati knjiži kontra strošek reklama.
   // Denar ne vstopi v blagajno, banko ali Orange Money in iz njih tudi ne izstopi.
@@ -1823,7 +1860,7 @@ export async function addPayment(data: {
     const parts = String(data.paidAt || '').split('-')
     const year = Number(parts[0]) || new Date().getUTCFullYear()
     const month = Number(parts[1]) || 1
-    const eur = Number(data.amount)
+    const eur = Number(amount)
     contraExpenseId = uid('mkt')
     const description = `${guestName} — reklamni material za Komba Cabana (kontra strošek)`
     await db.insert(marketingExpenses).values({
@@ -1858,14 +1895,15 @@ export async function addPayment(data: {
   }
 
   // Če je plačilo z gotovino in je izbrano podjetje → priliv v blagajno (bank_cash_income).
-  // Znesek plačila je v EUR, blagajna hrani Ar → pretvorba prek tečaja.
+  // Blagajna hrani Ar. Če je znesek vpisan v Ar, gre noter točno ta znesek;
+  // sicer (starejši vnos v EUR) pretvorba prek tečaja.
   let cashLedgerId: string | null = null
   const cashCompany = method === 'cash' && data.cashCompany ? data.cashCompany : null
   if (cashCompany) {
     const [res] = await db.select().from(reservations).where(eq(reservations.id, data.reservationId))
     const guestName = res?.guestName || 'stranka'
     const rate = await getExchangeRate()
-    const amountAr = Math.round((Number(data.amount) || 0) * rate)
+    const amountAr = cashAmountAr ?? Math.round((Number(amount) || 0) * rate)
     const { addCashIncome } = await import('./banka')
     const ci = await addCashIncome({
       company: cashCompany,
@@ -1880,12 +1918,13 @@ export async function addPayment(data: {
     await db.insert(payments).values({
       id,
       reservationId: data.reservationId,
-      amount: data.amount,
+      amount,
       method,
       paidAt: data.paidAt,
       notes,
       omAmountAr,
       omLedgerId,
+      cashAmountAr,
       cashCompany,
       cashLedgerId,
       contraExpenseId,
@@ -1908,6 +1947,7 @@ export async function addPayment(data: {
 }
 
 export async function deletePayment(id: string) {
+  await ensureCashAmountColumn()
   await ensureKompenzacijaColumns()
   const [payment] = await db.select().from(payments).where(eq(payments.id, id))
   if (!payment) return
@@ -2395,6 +2435,7 @@ export async function completeCheckout(reservationId: string, checkoutPayments: 
   method: string
   notes?: string
 }>) {
+  await ensureCashAmountColumn()
   // Add all checkout payments
   for (const payment of checkoutPayments) {
     if (String(payment.method || '').toLowerCase() === 'kompenzacija') {
@@ -2460,6 +2501,7 @@ export async function checkOutReservation(reservationId: string) {
 }
 
 export async function getArchivedReservations(page: number = 1, limit: number = 20) {
+  await ensureCashAmountColumn()
   await ensureBungalowPeopleColumn()
   const offset = (page - 1) * limit
   

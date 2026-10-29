@@ -71,6 +71,7 @@ import BarTab from "@/components/bar-tab";
 import VremeTab from "@/components/vreme-tab";
   import { GuestFlag } from "@/components/guest-flag";
   import { VisitorCountries } from "@/components/visitor-countries";
+import { cashAriaryToEurAmount } from "@/lib/cash-payment";
 
 const DEFAULT_RATE = 4800;
 // Stored id of the first glamp stays "Jungle Glamp Village" so existing reservations
@@ -1558,8 +1559,8 @@ function computeGuestInvoiceTotalEur(
   );
 }
 
-function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange, separatePaidItems = [], onRemainingChange }: { 
-  reservationId: string; totalAmount: string; currency: string; onPaymentChange?: () => void;
+function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, onPaymentChange, separatePaidItems = [], onRemainingChange }: { 
+  reservationId: string; totalAmount: string; currency: string; exchangeRate: number; onPaymentChange?: () => void;
   // Reports the real remaining (TOTAL − everything paid) back to the parent so the
   // "Za placilo" summary box can show the same number.
   onRemainingChange?: (remaining: number) => void;
@@ -1571,11 +1572,15 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
   separatePaidItems?: { label: string; eur: number; method: string; date: string }[];
 }) {
   const [paymentsData, setPaymentsData] = React.useState<{
-    id: string; amount: string; method: string; paidAt: string; notes: string | null; omAmountAr?: number | null;
+    id: string; amount: string; method: string; paidAt: string; notes: string | null; omAmountAr?: number | null; cashAmountAr?: number | null;
   }[]>([]);
   const [showAddForm, setShowAddForm] = React.useState(false);
   const [newPayment, setNewPayment] = React.useState({ amount: '', method: 'card', paidAt: new Date().toISOString().split('T')[0], notes: '', omAmountAr: '' });
   const [saving, setSaving] = React.useState(false);
+  const rate = exchangeRate > 0 ? exchangeRate : DEFAULT_RATE;
+  const isCash = newPayment.method === 'cash';
+  const cashAr = isCash ? Math.round(Number(newPayment.amount) || 0) : 0;
+  const cashEur = isCash ? cashAriaryToEurAmount(cashAr, rate) : '';
   
   async function loadPayments() {
     const { getPayments } = await import("@/app/actions/komba");
@@ -1596,16 +1601,21 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
   }, [remaining, onRemainingChange]);
   
   async function handleAddPayment() {
-    if (!newPayment.amount || Number(newPayment.amount) <= 0) return;
+    if (isCash) {
+      if (cashAr <= 0 || Number(cashEur) <= 0) return;
+    } else if (!newPayment.amount || Number(newPayment.amount) <= 0) {
+      return;
+    }
     setSaving(true);
     const { addPayment } = await import("@/app/actions/komba");
   await addPayment({
     reservationId,
-    amount: newPayment.amount,
+    amount: isCash ? cashEur : newPayment.amount,
     method: newPayment.method,
     paidAt: newPayment.paidAt,
     notes: newPayment.notes,
     omAmountAr: newPayment.method === 'orange_money' && newPayment.omAmountAr ? Number(newPayment.omAmountAr) : undefined,
+    cashAmountAr: isCash ? cashAr : undefined,
   });
   setNewPayment({ amount: '', method: 'card', paidAt: new Date().toISOString().split('T')[0], notes: '', omAmountAr: '' });
   setShowAddForm(false);
@@ -1657,20 +1667,31 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
           <p className="text-xs font-medium text-[#c59b5b]">Novo placilo</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-white/40 mb-1">Znesek</label>
+              <label className="block text-xs text-white/40 mb-1">{isCash ? 'Znesek (Ar)' : 'Znesek'}</label>
               <input 
-                type="number" step="0.01" autoFocus
+                type="number" step={isCash ? '1' : '0.01'} min="0" autoFocus
+                placeholder={isCash ? 'npr. 480000' : undefined}
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c59b5b]/50 focus:outline-none"
                 value={newPayment.amount}
                 onChange={e => setNewPayment(p => ({ ...p, amount: e.target.value }))}
               />
+              {isCash && cashAr > 0 && (
+                <p className="mt-1 text-[10px] text-white/40">= {cashEur} EUR na racunu (tecaj {rate.toLocaleString('de-DE')})</p>
+              )}
             </div>
             <div>
               <label className="block text-xs text-white/40 mb-1">Nacin placila</label>
               <select 
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c59b5b]/50 focus:outline-none"
                 value={newPayment.method}
-                onChange={e => setNewPayment(p => ({ ...p, method: e.target.value }))}
+                onChange={e => {
+                  const method = e.target.value
+                  setNewPayment(p => ({
+                    ...p,
+                    method,
+                    amount: (p.method === 'cash') !== (method === 'cash') ? '' : p.amount,
+                  }))
+                }}
               >
                 {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
@@ -1716,7 +1737,7 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
               </div>
             )}
           </div>
-          <LuxuryButton variant="gold" onClick={handleAddPayment} disabled={saving || !newPayment.amount}>
+          <LuxuryButton variant="gold" onClick={handleAddPayment} disabled={saving || (isCash ? Number(cashEur) <= 0 : !newPayment.amount)}>
             {saving ? 'Shranjujem...' : 'Shrani placilo'}
           </LuxuryButton>
         </div>
@@ -1747,6 +1768,9 @@ function PaymentSection({ reservationId, totalAmount, currency, onPaymentChange,
               <div className="flex items-center gap-4">
                 <div>
                   <p className="text-sm font-medium text-[#8fae92]">{p.amount} {currency}</p>
+                  {p.method === 'cash' && p.cashAmountAr ? (
+                    <p className="text-xs text-[#c59b5b]">{ar(p.cashAmountAr)} gotovina</p>
+                  ) : null}
                   <p className="text-xs text-white/40">{p.paidAt}</p>
                 </div>
                 <LuxuryBadge variant={p.method === 'card' ? 'ocean' : p.method === 'transfer' ? 'petrol' : p.method === 'orange_money' ? 'gold' : 'default'}>
@@ -2104,11 +2128,12 @@ export default function KombaCabanaApp() {
     
     // Build payment info text from payments array
     const payments = res.payments || [];
-    const paymentInfoParts = payments.map((p: { amount: number | string; method: string; paidAt: string }) => {
+    const paymentInfoParts = payments.map((p: { amount: number | string; method: string; paidAt: string; cashAmountAr?: number | null }) => {
       const amt = Number(p.amount);
       const method = p.method === 'card' ? 'kartica' : p.method === 'cash' ? 'gotovina' : p.method === 'transfer' ? 'nakazilo' : p.method === 'kompenzacija' ? 'Kompenzacija' : p.method;
       const date = new Date(p.paidAt).toLocaleDateString('sl-SI');
-      return `${amt.toFixed(2)} EUR (${method}, ${date})`;
+      const cashAr = p.method === 'cash' && p.cashAmountAr ? ` / ${Math.round(p.cashAmountAr).toLocaleString('de-DE')} Ar` : '';
+      return `${amt.toFixed(2)} EUR${cashAr} (${method}, ${date})`;
     });
     const paymentInfo = paymentInfoParts.length > 0 ? ` | Placano: ${paymentInfoParts.join(', ')}` : '';
     
@@ -6206,6 +6231,7 @@ function GuestCard() {
         : String(reservation.totalAmount || '0')
     }
     currency={reservation.currency || 'EUR'}
+    exchangeRate={exchangeRate}
     onPaymentChange={refresh}
   />
                 </div>
@@ -7662,6 +7688,7 @@ function GuestCard() {
       totalAmount={invoiceTotalEur.toFixed(2)} 
       separatePaidItems={sepPaidItems}
       currency="EUR" 
+      exchangeRate={exchangeRate}
       onPaymentChange={refresh} 
       onRemainingChange={setBalanceDueEur}
     />

@@ -224,6 +224,11 @@ export const payments = pgTable('payments', {
   // omLedgerId povezuje priliv v orange_money_transactions (izbriše se ob brisanju plačila).
   omAmountAr: integer('omAmountAr'),
   omLedgerId: text('omLedgerId'),
+  // Pri načinu Gotovina: znesek, ki ga je recepcija vpisala v ariarijih.
+  // `amount` ostane evrski ekvivalent po tečaju aplikacije, da Skupaj / Plačano /
+  // Preostanek še vedno seštevajo EUR. Null pri starejših gotovinskih plačilih,
+  // ki so bila vpisana neposredno v evrih, in pri drugih načinih.
+  cashAmountAr: integer('cashAmountAr'),
   // Pri načinu Gotovina: podjetje (tourism/sarl) in povezava na priliv v blagajni
   // (bank_cash_income), ki se izbriše ob brisanju plačila.
   cashCompany: text('cashCompany'),
