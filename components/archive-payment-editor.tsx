@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react'
 import { X, Trash2, Plus } from 'lucide-react'
 import { getPayments, addPayment, deletePayment } from '@/app/actions/komba'
 import { cashAriaryToEurAmount } from '@/lib/cash-payment'
+import { CashReceiptSend } from '@/components/cash-receipt-send'
 
 const PAYMENT_METHODS = [
   { value: 'card', label: 'Kreditna kartica' },
@@ -149,7 +150,7 @@ export default function ArchivePaymentEditor({
           ) : (
             <div className="space-y-2">
               {rows.map(p => (
-                <div key={p.id} className="group flex items-center justify-between rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                <div key={p.id} className="group flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3">
                   <div className="flex flex-wrap items-center gap-3">
                     <div>
                       <p className="text-sm font-medium text-[#8fae92]">{Number(p.amount).toFixed(2)} EUR</p>
@@ -161,13 +162,18 @@ export default function ArchivePaymentEditor({
                     {p.cashCompany ? <span className="text-xs text-[#c59b5b]">v blagajno ({p.cashCompany === 'sarl' ? 'SARL' : 'Tourism'})</span> : null}
                     {p.notes ? <span className="text-xs text-white/50">{p.notes}</span> : null}
                   </div>
-                  <button
-                    onClick={() => handleDelete(p.id)}
-                    className="shrink-0 rounded-lg p-1.5 text-white/30 hover:bg-[#b0203a]/20 hover:text-[#e0687c] transition-colors"
-                    aria-label="Izbrisi placilo"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-3">
+                    {p.method === 'cash' && (
+                      <CashReceiptSend reservationId={reservationId} paymentId={p.id} />
+                    )}
+                    <button
+                      onClick={() => handleDelete(p.id)}
+                      className="shrink-0 rounded-lg p-1.5 text-white/30 hover:bg-[#b0203a]/20 hover:text-[#e0687c] transition-colors"
+                      aria-label="Izbrisi placilo"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

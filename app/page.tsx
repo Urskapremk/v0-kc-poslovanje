@@ -72,6 +72,7 @@ import VremeTab from "@/components/vreme-tab";
   import { GuestFlag } from "@/components/guest-flag";
   import { VisitorCountries } from "@/components/visitor-countries";
 import { cashAriaryToEurAmount } from "@/lib/cash-payment";
+import { CashReceiptSend } from "@/components/cash-receipt-send";
 
 const DEFAULT_RATE = 4800;
 // Stored id of the first glamp stays "Jungle Glamp Village" so existing reservations
@@ -1780,7 +1781,7 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
             </div>
           ))}
           {paymentsData.map(p => (
-            <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-white/[0.02] border border-white/5 group">
+            <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/5 group">
               <div className="flex items-center gap-4">
                 <div>
                   <p className="text-sm font-medium text-[#8fae92]">{p.amount} {currency}</p>
@@ -1795,12 +1796,17 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
                 {p.omAmountAr ? <span className="text-xs text-[#c59b5b]">{ar(p.omAmountAr)} na OM</span> : null}
                 {p.notes && <span className="text-xs text-white/50">{p.notes}</span>}
               </div>
-              <button 
-                onClick={() => handleDeletePayment(p.id)}
-                className="opacity-0 group-hover:opacity-100 text-xs text-[#d7a593] hover:text-[#e0b9aa] transition-all"
-              >
-                Izbrisi
-              </button>
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                {p.method === 'cash' && (
+                  <CashReceiptSend reservationId={reservationId} paymentId={p.id} />
+                )}
+                <button 
+                  onClick={() => handleDeletePayment(p.id)}
+                  className="opacity-0 group-hover:opacity-100 text-xs text-[#d7a593] hover:text-[#e0b9aa] transition-all"
+                >
+                  Izbrisi
+                </button>
+              </div>
             </div>
           ))}
         </div>

@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { sentEmails } from '@/lib/db/schema'
 import { desc, eq } from 'drizzle-orm'
 
-export type SentEmailType = 'checkin' | 'invoice' | 'voucher' | 'feedback' | 'excursion-offer' | 'port-time-request' | 'guest-reply'
+export type SentEmailType = 'checkin' | 'invoice' | 'voucher' | 'feedback' | 'excursion-offer' | 'port-time-request' | 'guest-reply' | 'cash-receipt'
 
 export interface SentEmailRecord {
   id: string
@@ -30,12 +30,14 @@ export async function logSentEmail(entry: {
   bungalow?: string | null
   excludeAccommodation?: boolean
   lang?: string | null
+  paymentId?: string | null
 }): Promise<void> {
   try {
     const meta: Record<string, unknown> = {}
     if (entry.bungalow) meta.bungalow = entry.bungalow
     if (entry.excludeAccommodation) meta.excludeAccommodation = true
     if (entry.lang) meta.lang = entry.lang
+    if (entry.paymentId) meta.paymentId = entry.paymentId
     await db.insert(sentEmails).values({
       id: `mail-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       reservationId: entry.reservationId ?? null,
