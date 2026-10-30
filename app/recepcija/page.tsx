@@ -927,10 +927,10 @@ export default function ReceptionPage() {
                   </div>
                 )}
 
-                {/* Group split breakdown */}
+                {/* Per-bungalow selling price. Same gold card as the group total, with boat, entrance, and lunch each on their own line. */}
                 {groupMode && excursionForm.excursionId && excursionForm.boatId && groupTotalPax > 0 && (
-                  <div className="mt-4 p-4 rounded-xl bg-white/[0.03] border border-white/[0.08]">
-                    <p className="text-white/50 text-[10px] uppercase tracking-wider mb-3">Razdelitev plačila po bungalovih</p>
+                  <div className="mt-4">
+                    <p className="text-white/50 text-[10px] uppercase tracking-wider mb-3">Prodajna cena po bungalovih</p>
                     {(() => {
                       const exc = excursions.find(e => e.id === excursionForm.excursionId);
                       const lunchProvider = lunchProviders.find(l => l.id === excursionForm.lunchProviderId);
@@ -939,38 +939,37 @@ export default function ReceptionPage() {
                       const round2 = (n: number) => Math.round(n * 100) / 100;
                       const parts = activeGuests.filter(g => (groupParts[g.id]?.pax ?? 0) > 0);
                       return (
-                        <div className="space-y-2">
+                        <div className="grid gap-3 sm:grid-cols-2">
                           {parts.map(g => {
                             const part = groupParts[g.id];
                             if (!part) return null;
-                            const boatTotalEur = round2(part.boatEur * part.pax);
-                            const entranceTotalEur = round2(entrancePerEur * part.entrancePax);
-                            const lunchTotalEur = round2(lunchPerEur * part.lunchPax);
+                            const boatTotalEur = round2((Number(part.boatEur) || 0) * part.pax);
+                            const entranceCount = excursionForm.includeEntrance ? part.entrancePax : 0;
+                            const lunchCount = lunchProvider ? part.lunchPax : 0;
+                            const entranceTotalEur = round2(entrancePerEur * entranceCount);
+                            const lunchTotalEur = round2(lunchPerEur * lunchCount);
                             const sumEur = round2(boatTotalEur + entranceTotalEur + lunchTotalEur);
                             const sumAr = Math.round(sumEur * exchangeRate);
+                            const line = (eur: number) => `${eur.toFixed(2)} EUR · ${ar(Math.round(eur * exchangeRate))}`;
                             return (
-                              <div key={g.id} className="flex items-start justify-between gap-2 text-sm">
-                                <div className="min-w-0">
-                                  <span className="text-white/70 truncate">{g.guestName} <span className="text-white/40">({part.pax} os)</span></span>
-                                  <p className="text-white/30 text-[10px]">
-                                    čoln {part.boatEur.toFixed(2)} EUR/os × {part.pax}
-                                    {entrancePerEur > 0 ? ` · vstopnine ${part.entrancePax}` : ""}
-                                    {lunchPerEur > 0 ? ` · kosila ${part.lunchPax}` : ""}
-                                  </p>
+                              <div key={g.id} className="p-4 rounded-xl bg-gradient-to-r from-[#c59b5b]/10 to-[#8f6d3a]/10 border border-[#c59b5b]/20">
+                                <p className="text-white/50 text-xs uppercase tracking-wider mb-1">Prodajna cena · {g.guestName} ({part.pax} os)</p>
+                                <p className="text-2xl font-light text-[#c59b5b]">{sumEur.toFixed(2)} EUR</p>
+                                <p className="text-white/40 text-xs">{ar(sumAr)}</p>
+                                <div className="mt-2 space-y-0.5 text-white/40 text-xs">
+                                  <div className="flex justify-between gap-2"><span>Prevoz ({part.pax} os)</span><span>{line(boatTotalEur)}</span></div>
+                                  <div className="flex justify-between gap-2"><span>Vstopnina ({entranceCount})</span><span>{line(entranceTotalEur)}</span></div>
+                                  <div className="flex justify-between gap-2"><span>Kosilo ({lunchCount})</span><span>{line(lunchTotalEur)}</span></div>
                                 </div>
-                                <span className="text-right whitespace-nowrap">
-                                  <span className="text-[#c59b5b] font-medium">{ar(sumAr)}</span>
-                                  <span className="text-white/40 text-xs ml-2">{sumEur.toFixed(2)} EUR</span>
-                                </span>
                               </div>
                             );
                           })}
-                          <p className="text-white/30 text-[10px] pt-2 border-t border-white/[0.06]">
-                            Cena čolna, število vstopnin in število kosil so posebej za vsak bungalov.
-                          </p>
                         </div>
                       );
                     })()}
+                    <p className="text-white/30 text-[10px] pt-2">
+                      Cena čolna, število vstopnin in število kosil so posebej za vsak bungalov.
+                    </p>
                   </div>
                 )}
                 
