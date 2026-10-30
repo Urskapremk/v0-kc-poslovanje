@@ -49,6 +49,8 @@ export function GuestReplyAssistant({
   const [cLunch, setCLunch] = useState('')
   const [cEntrance, setCEntrance] = useState(true)
   const [cPax, setCPax] = useState(2)
+  const [cEntrancePax, setCEntrancePax] = useState(2)
+  const [cLunchPax, setCLunchPax] = useState(2)
 
   // Mini transfer kalkulator (recepcija izbere relacijo + čoln + smer → cena iz cenika).
   const [tCalcOpen, setTCalcOpen] = useState(false)
@@ -191,6 +193,8 @@ export function GuestReplyAssistant({
         const data = await getExcursionCalcData(reservationId)
         setCalc(data)
         setCPax(data.pax)
+        setCEntrancePax(data.pax)
+        setCLunchPax(data.pax)
       } catch {
         flash('err', 'Cenika ni bilo mogoče naložiti.')
       }
@@ -208,23 +212,23 @@ export function GuestReplyAssistant({
   const transportPer = selBoat ? selBoat.pricePax[paxIdx] : 0
   const entrancePer = cEntrance && selExc?.entranceFeeAr ? selExc.entranceFeeAr / rate : 0
   const lunchPer = selLunch ? selLunch.pricePerPersonAr / rate : 0
-  const calcTotal = (transportPer + entrancePer + lunchPer) * cPax
+  const calcTotal = transportPer * cPax + entrancePer * cEntrancePax + lunchPer * cLunchPax
   const calcReady = !!selExc && !!selBoat && transportPer > 0
 
   const insertExcursionPrice = () => {
     if (!calcReady || !selExc || !selBoat) return
     // Samo skupna cena + št. oseb + kaj vsebuje (BREZ cen po postavkah). Izlet je VEDNO z vodičem.
     const includes = ['boat transport', 'a guide']
-    if (entrancePer > 0) includes.push('park entrance')
-    if (lunchPer > 0) includes.push('lunch')
+    if (entrancePer > 0 && cEntrancePax > 0) includes.push(cEntrancePax === cPax ? 'park entrance' : `park entrance for ${cEntrancePax}`)
+    if (lunchPer > 0 && cLunchPax > 0) includes.push(cLunchPax === cPax ? 'lunch' : `lunch for ${cLunchPax}`)
     const last = includes.pop()!
     const incStr = includes.length ? `${includes.join(', ')} and ${last}` : last
     const line = `${selExc.name} excursion: ${eur2(calcTotal)} EUR total for ${cPax} ${cPax === 1 ? 'person' : 'people'} (includes ${incStr}).`
     setReply(prev => (prev.trim() ? `${prev.replace(/\s+$/, '')}\n\n${line}` : line))
     // Interni zapis: čoln + kje kosilo (+ vstopnina) za recepcijski arhiv — gost tega NE vidi.
     const intParts = [`boat: ${selBoat.boatName}`]
-    intParts.push(selLunch ? `lunch: ${selLunch.name}${selLunch.location ? ` (${selLunch.location})` : ''}` : 'lunch: none')
-    if (cEntrance && entrancePer > 0) intParts.push('entrance included')
+    intParts.push(selLunch ? `lunch: ${selLunch.name}${selLunch.location ? ` (${selLunch.location})` : ''}${cLunchPax === cPax ? '' : ` for ${cLunchPax}`}` : 'lunch: none')
+    if (cEntrance && entrancePer > 0 && cEntrancePax > 0) intParts.push(cEntrancePax === cPax ? 'entrance included' : `entrance for ${cEntrancePax}`)
     setInternalLines(prev => [...prev, `${selExc.name} — ${eur2(calcTotal)} EUR / ${cPax}p · ${intParts.join(' · ')}`])
     flash('ok', 'Cena izleta je vstavljena v odgovor.')
   }
@@ -500,7 +504,32 @@ export function GuestReplyAssistant({
                         min={1}
                         max={6}
                         value={cPax}
-                        onChange={e => setCPax(Math.min(Math.max(Number(e.target.value) || 1, 1), 6))}
+                        onChange={e => {
+                          const next = Math.min(Math.max(Number(e.target.value) || 1, 1), 6)
+                          setCEntrancePax(cur => cur === cPax ? next : cur)
+                          setCLunchPax(cur => cur === cPax ? next : cur)
+                          setCPax(next)
+                        }}
+                        className="w-full rounded-lg border border-white/10 bg-[#0a2029] px-2 py-2 text-xs text-white focus:border-[#4e8296]/50 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-white/50">Osebe za vstopnino</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={cEntrancePax}
+                        onChange={e => setCEntrancePax(Math.max(0, Number(e.target.value) || 0))}
+                        className="w-full rounded-lg border border-white/10 bg-[#0a2029] px-2 py-2 text-xs text-white focus:border-[#4e8296]/50 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-white/50">Osebe za kosilo</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={cLunchPax}
+                        onChange={e => setCLunchPax(Math.max(0, Number(e.target.value) || 0))}
                         className="w-full rounded-lg border border-white/10 bg-[#0a2029] px-2 py-2 text-xs text-white focus:border-[#4e8296]/50 focus:outline-none"
                       />
                     </div>
@@ -514,8 +543,8 @@ export function GuestReplyAssistant({
                   {calcReady && (
                     <div className="mt-2 rounded-lg border border-[#c59b5b]/20 bg-[#0a2029] px-3 py-2 text-xs text-white/70">
                       <div className="flex justify-between"><span>Transport ({cPax} × {eur2(transportPer)}):</span><span>{eur2(transportPer * cPax)} EUR</span></div>
-                      {entrancePer > 0 && <div className="mt-1 flex justify-between"><span>Vstopnina ({cPax} × {eur2(entrancePer)}):</span><span>{eur2(entrancePer * cPax)} EUR</span></div>}
-                      {lunchPer > 0 && <div className="mt-1 flex justify-between"><span>Kosilo ({cPax} × {eur2(lunchPer)}):</span><span>{eur2(lunchPer * cPax)} EUR</span></div>}
+                      {entrancePer > 0 && <div className="mt-1 flex justify-between"><span>Vstopnina ({cEntrancePax} × {eur2(entrancePer)}):</span><span>{eur2(entrancePer * cEntrancePax)} EUR</span></div>}
+                      {lunchPer > 0 && <div className="mt-1 flex justify-between"><span>Kosilo ({cLunchPax} × {eur2(lunchPer)}):</span><span>{eur2(lunchPer * cLunchPax)} EUR</span></div>}
                       <div className="mt-2 flex justify-between border-t border-[#c59b5b]/20 pt-2 font-semibold text-[#c59b5b]"><span>SKUPAJ:</span><span>{eur2(calcTotal)} EUR</span></div>
                     </div>
                   )}
