@@ -29,13 +29,16 @@ export async function GET(request: NextRequest) {
       })
     }
 
-    return new NextResponse(result.stream, {
-      headers: {
-        'Content-Type': result.blob.contentType,
-        ETag: result.blob.etag,
-        'Cache-Control': 'private, no-cache',
-      },
-    })
+    const contentType = result.blob.contentType || 'application/octet-stream'
+    const pdf = contentType === 'application/pdf' || pathname.toLowerCase().endsWith('.pdf')
+    const headers: Record<string, string> = {
+      'Content-Type': pdf ? 'application/pdf' : contentType,
+      ETag: result.blob.etag,
+      'Cache-Control': 'private, no-cache',
+    }
+    if (pdf) headers['Content-Disposition'] = 'inline'
+
+    return new NextResponse(result.stream, { headers })
   } catch (error) {
     console.error('Error serving file:', error)
     return NextResponse.json({ error: 'Failed to serve file' }, { status: 500 })
