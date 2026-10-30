@@ -1,7 +1,9 @@
 import { put } from '@vercel/blob'
 import { type NextRequest, NextResponse } from 'next/server'
+import { isPdfUpload, safeCompanyFileName } from '@/lib/company-document-file'
 
-// Posnetki dokumentov podjetij. Zasebna blob shramba; prikaz prek /api/image?pathname=...
+// Posnetki dokumentov podjetij in PDF, izbran na računalniku.
+// Zasebna blob shramba; prikaz prek /api/image?pathname=...
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -14,17 +16,16 @@ export async function POST(request: NextRequest) {
     if (company !== 'tourism' && company !== 'sarl') {
       return NextResponse.json({ error: 'Unknown company' }, { status: 400 })
     }
-    if (file.type && !file.type.startsWith('image/')) {
-      return NextResponse.json({ error: 'Only images are accepted' }, { status: 400 })
+    const pdf = isPdfUpload(file)
+    if (!pdf && file.type && !file.type.startsWith('image/')) {
+      return NextResponse.json({ error: 'Only images and PDF are accepted' }, { status: 400 })
     }
 
-    const safeName = (file.name || 'dokument')
-      .replace(/[^\w.\-]+/g, '_')
-      .replace(/^\.+/, '')
-      .slice(0, 80) || 'dokument'
+    const safeName = safeCompanyFileName(file.name, pdf)
 
     const blob = await put(`company-documents/${company}/${Date.now()}-${safeName}`, file, {
       access: 'private',
+      ...(pdf ? { contentType: 'application/pdf' } : {}),
     })
 
     return NextResponse.json({ pathname: blob.pathname })

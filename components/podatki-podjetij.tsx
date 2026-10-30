@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import useSWR from 'swr'
-import { ChevronDown, ClipboardPaste, Download, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
+import { ChevronDown, ClipboardPaste, Download, FileText, ImagePlus, Loader2, Trash2, X } from 'lucide-react'
 import { COMPANIES, type CompanyId } from '@/lib/payroll'
+import { isPdfCompanyDocument, isPdfUpload, pdfStorageName } from '@/lib/company-document-file'
+import { openPdfDocument, rasterizePdfBytes } from '@/lib/pdfjs-browser'
 import {
   NOTHING_TO_SAVE,
   PDF_FILENAME,
@@ -108,6 +110,114 @@ async function readClipboardImage(): Promise<File | null> {
   return null
 }
 
+function PdfFirstPage({ src }: { src: string }) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let pdf: { destroy: () => Promise<void> } | null = null
+    setPreviewUrl(null)
+    setFailed(false)
+    ;(async () => {
+      try {
+        const res = await fetch(src)
+        if (!res.ok) throw new Error('pdf')
+        const data = new Uint8Array(await res.arrayBuffer())
+        const doc = await openPdfDocument(data)
+        pdf = doc
+        if (cancelled) return
+        const page = await doc.getPage(1)
+        const base = page.getViewport({ scale: 1 })
+        const viewport = page.getViewport({ scale: 720 / Math.max(base.width, 1) })
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.max(1, Math.ceil(viewport.width))
+        canvas.height = Math.max(1, Math.ceil(viewport.height))
+        const ctx = canvas.getContext('2d')
+        if (!ctx) throw new Error('pdf')
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        await page.render({ canvasContext: ctx, viewport }).promise
+        const url = canvas.toDataURL('image/jpeg', 0.86)
+        page.cleanup()
+        if (cancelled) return
+        setPreviewUrl(url)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+      void pdf?.destroy()
+    }
+  }, [src])
+
+  return (
+    <div className="relative h-36 w-full overflow-hidden bg-white">
+      {previewUrl ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={previewUrl} alt="" className="block w-full h-auto" />
+      ) : null}
+      {!previewUrl && !failed ? <div className="absolute inset-0 animate-pulse bg-[#f4f1ea]" /> : null}
+      {failed ? (
+        <div className="absolute inset-0 flex items-end bg-white p-2 text-left text-[11px] font-medium text-neutral-700">
+          PDF
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function PdfFrame({ src, title }: { src: string; title: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl: string | null = null
+    setUrl(null)
+    setFailed(false)
+    ;(async () => {
+      try {
+        const res = await fetch(src)
+        if (!res.ok) throw new Error('pdf')
+        const bytes = await res.arrayBuffer()
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl)
+          return
+        }
+        setUrl(objectUrl)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [src])
+
+  if (failed) {
+    return (
+      <p className="text-sm text-white/70" onClick={(e) => e.stopPropagation()}>
+        PDF-ja ni bilo mogoče odpreti.
+      </p>
+    )
+  }
+  if (!url) {
+    return <Loader2 className="h-6 w-6 animate-spin text-white/70" />
+  }
+  return (
+    <iframe
+      src={url}
+      title={title}
+      className="h-[90vh] w-full max-w-5xl rounded-lg bg-white"
+      onClick={(e) => e.stopPropagation()}
+    />
+  )
+}
+
 function CompanyCard({
   company,
   documents,
@@ -120,34 +230,44 @@ function CompanyCard({
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState(false)
-  const [lightbox, setLightbox] = useState<string | null>(null)
+  const [lightbox, setLightbox] = useState<{ src: string; kind: 'image' | 'pdf' } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [documentsOpen, setDocumentsOpen] = useState(true)
   const name = COMPANIES[company].name
 
   const uploadFiles = useCallback(async (files: File[]) => {
-    const images = files.filter(isImageFile)
-    if (images.length === 0) {
+    const accepted = files.filter((file) => isImageFile(file) || isPdfUpload(file))
+    if (accepted.length === 0) {
       setError('V odložišču ni slike. Najprej naredi posnetek zaslona.')
       return
     }
+    const onlyPdf = accepted.every((file) => isPdfUpload(file))
     setUploading(true)
     setError(null)
     try {
-      for (const file of images) {
-        const blob = await fileToDownscaledBlob(file)
-        const uploadName = blob.type === 'image/jpeg' ? 'dokument.jpg' : (file.name || 'dokument.jpg')
+      for (const file of accepted) {
+        const pdf = isPdfUpload(file)
+        const blob = pdf ? file : await fileToDownscaledBlob(file)
+        const uploadName = pdf
+          ? pdfStorageName(file.name)
+          : blob.type === 'image/jpeg' ? 'dokument.jpg' : (file.name || 'dokument.jpg')
         const body = new FormData()
         body.append('file', blob, uploadName)
         body.append('company', company)
         const res = await fetch('/api/upload-company-document', { method: 'POST', body })
         if (!res.ok) throw new Error('upload')
         const { pathname } = (await res.json()) as { pathname: string }
-        await addCompanyDocument({ company, pathname, fileName: file.name })
+        await addCompanyDocument({
+          company,
+          pathname,
+          fileName: pdf ? pdfStorageName(file.name) : file.name,
+        })
       }
       await onChange()
     } catch {
-      setError('Slike ni bilo mogoče naložiti. Poskusi znova.')
+      setError(onlyPdf
+        ? 'PDF-ja ni bilo mogoče naložiti. Poskusi znova.'
+        : 'Slike ni bilo mogoče naložiti. Poskusi znova.')
     } finally {
       setUploading(false)
     }
@@ -257,6 +377,26 @@ function CompanyCard({
             }}
           />
         </label>
+        <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/12 bg-white/[0.04] px-3 py-2 text-xs text-white/60 transition-colors hover:bg-white/[0.08]">
+          <FileText className="h-3.5 w-3.5" /> Naloži PDF
+          <input
+            type="file"
+            accept="application/pdf,.pdf"
+            multiple
+            className="sr-only"
+            disabled={uploading}
+            onChange={(e) => {
+              const picked = Array.from(e.target.files || [])
+              const pdfs = picked.filter((file) => isPdfUpload(file))
+              if (picked.length > 0 && pdfs.length === 0) {
+                setError('Izberi PDF datoteko.')
+              } else {
+                void uploadFiles(pdfs)
+              }
+              e.target.value = ''
+            }}
+          />
+        </label>
       </div>
 
       {uploading ? (
@@ -276,23 +416,30 @@ function CompanyCard({
 
           {documents && documents.length > 0 ? (
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {documents.map((doc) => (
+              {documents.map((doc) => {
+            const src = `/api/image?pathname=${encodeURIComponent(doc.pathname)}`
+            const pdf = isPdfCompanyDocument(doc)
+            return (
             <div
               key={doc.id}
               className="overflow-hidden rounded-xl border border-white/[0.10] bg-white/[0.03]"
             >
               <button
                 type="button"
-                onClick={() => setLightbox(doc.pathname)}
+                onClick={() => setLightbox({ src, kind: pdf ? 'pdf' : 'image' })}
                 className="block w-full cursor-pointer bg-black/20"
-                aria-label={`Povečaj dokument ${name}`}
+                aria-label={pdf ? `Odpri PDF ${name}` : `Povečaj dokument ${name}`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`/api/image?pathname=${encodeURIComponent(doc.pathname)}`}
-                  alt={doc.fileName || `Dokument ${name}`}
-                  className="h-36 w-full object-contain object-top"
-                />
+                {pdf ? (
+                  <PdfFirstPage src={src} />
+                ) : (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={src}
+                    alt={doc.fileName || `Dokument ${name}`}
+                    className="h-36 w-full object-contain object-top"
+                  />
+                )}
               </button>
               <div className="flex items-center justify-between gap-2 px-2.5 py-2">
                 <span className="text-[9px] uppercase tracking-wider tabular-nums text-white/25">
@@ -330,7 +477,8 @@ function CompanyCard({
                 )}
               </div>
             </div>
-              ))}
+            )
+              })}
             </div>
           ) : null}
         </div>
@@ -347,18 +495,22 @@ function CompanyCard({
               <button
                 type="button"
                 onClick={() => setLightbox(null)}
-                className="absolute right-4 top-4 cursor-pointer rounded-full border border-white/15 bg-white/[0.06] p-2 text-white/70 hover:text-white"
+                className="absolute right-4 top-4 z-10 cursor-pointer rounded-full border border-white/15 bg-white/[0.06] p-2 text-white/70 hover:text-white"
                 aria-label="Zapri"
               >
                 <X className="h-5 w-5" />
               </button>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={`/api/image?pathname=${encodeURIComponent(lightbox)}`}
-                alt={`Dokument ${name}`}
-                className="max-h-[90vh] max-w-full rounded-lg object-contain"
-                onClick={(e) => e.stopPropagation()}
-              />
+              {lightbox.kind === 'pdf' ? (
+                <PdfFrame src={lightbox.src} title={`PDF ${name}`} />
+              ) : (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={lightbox.src}
+                  alt={`Dokument ${name}`}
+                  className="max-h-[90vh] max-w-full rounded-lg object-contain"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )}
             </div>,
             document.body,
           )
@@ -429,7 +581,13 @@ export default function PodatkiPodjetij() {
     try {
       const images = []
       for (const page of pages) {
-        images.push(await rasterizeDocument(page.pathname))
+        if (isPdfCompanyDocument(page)) {
+          const res = await fetch(`/api/image?pathname=${encodeURIComponent(page.pathname)}`)
+          if (!res.ok) throw new Error('pdf')
+          images.push(...await rasterizePdfBytes(new Uint8Array(await res.arrayBuffer())))
+        } else {
+          images.push(await rasterizeDocument(page.pathname))
+        }
       }
       const bytes = await buildCompanyDocumentsPdf(images)
       if (!bytes) {
