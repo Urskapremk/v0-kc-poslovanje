@@ -190,17 +190,20 @@ function logoImg(url: string, fromY: number, toY: number): string {
   </div>`
 }
 
-const SERIF = "'Cormorant Garamond', Palatino, 'Palatino Linotype', Georgia, serif"
+// Same stacks as the transfer voucher, which copies the app: Manrope for titles,
+// Inter for labels and body. Weights already loaded by that email.
+const FONT_DISPLAY = "'Manrope','Segoe UI',Tahoma,Arial,Helvetica,sans-serif"
+const FONT_BODY = "'Inter','Segoe UI',Tahoma,Arial,Helvetica,sans-serif"
 
 function overline(text: string): string {
-  return `<div style="margin:0;font-family:${SERIF};font-size:11px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#c4a15a;">${escapeHtml(text)}</div>`
+  return `<div style="margin:0;font-family:${FONT_BODY};font-size:11px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#c4a15a;">${escapeHtml(text)}</div>`
 }
 
 function detail(label: string, value: string): string {
   if (!value.trim()) return ''
   return `<div style="margin:16px 0 0 0;">
     ${overline(label)}
-    <div style="margin:4px 0 0 0;font-family:${SERIF};font-size:22px;font-weight:600;line-height:1.25;color:#f4efe6;">${escapeHtml(value)}</div>
+    <div style="margin:4px 0 0 0;font-family:${FONT_DISPLAY};font-size:22px;font-weight:600;line-height:1.25;color:#f4efe6;">${escapeHtml(value)}</div>
   </div>`
 }
 
@@ -214,7 +217,7 @@ export function buildCashReceiptHtml(input: CashReceiptInput): string {
     ? `${formatReceiptDate(input.arrival, input.lang)} – ${formatReceiptDate(input.departure, input.lang)}`
     : ''
   const companions = input.companions.map((name) =>
-    `<div style="margin:2px 0 0 0;font-family:${SERIF};font-size:20px;font-weight:500;line-height:1.35;color:#f4efe6;">${escapeHtml(name)}</div>`
+    `<div style="margin:2px 0 0 0;font-family:${FONT_DISPLAY};font-size:20px;font-weight:500;line-height:1.35;color:#f4efe6;">${escapeHtml(name)}</div>`
   ).join('')
   const withBlock = companions
     ? `<div style="margin:22px 0 0 0;">${overline(t.with)}${companions}</div>`
@@ -228,7 +231,7 @@ export function buildCashReceiptHtml(input: CashReceiptInput): string {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(t.title)}</title>
 <!--[if !mso]><!-->
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <!--<![endif]-->
 </head>
 <body style="margin:0;padding:0;background-color:#071c24;">
@@ -244,40 +247,40 @@ export function buildCashReceiptHtml(input: CashReceiptInput): string {
               <div style="position:absolute;bottom:4px;left:4px;width:22px;height:22px;border-bottom:1px solid #c4a15a;border-left:1px solid #c4a15a;"></div>
               <div style="position:absolute;bottom:4px;right:4px;width:22px;height:22px;border-bottom:1px solid #c4a15a;border-right:1px solid #c4a15a;"></div>
               ${logoImg(input.logoUrl, 150, 660)}
-              <div style="margin:8px 0 0 0;font-family:${SERIF};font-size:11px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#d9c7a2;">Nosy Komba · Madagascar</div>
-              <div style="margin:22px 0 0 0;font-family:${SERIF};font-size:32px;font-style:italic;font-weight:500;line-height:1.2;color:#f3eadc;">${escapeHtml(t.title)}</div>
+              <div style="margin:8px 0 0 0;font-family:${FONT_BODY};font-size:11px;font-weight:600;letter-spacing:3px;text-transform:uppercase;color:#d9c7a2;">Nosy Komba · Madagascar</div>
+              <div style="margin:22px 0 0 0;font-family:${FONT_DISPLAY};font-size:32px;font-weight:500;line-height:1.2;color:#f3eadc;">${escapeHtml(t.title)}</div>
               <div style="margin:14px auto 0 auto;width:180px;">
                 <table role="presentation" width="180" cellpadding="0" cellspacing="0" align="center">
                   <tr>
                     <td width="78" style="border-bottom:1px solid #c4a15a;font-size:0;line-height:0;">&nbsp;</td>
-                    <td width="24" align="center" style="font-family:${SERIF};font-size:11px;line-height:11px;color:#c4a15a;">&#9670;</td>
+                    <td width="24" align="center" style="font-family:${FONT_BODY};font-size:11px;line-height:11px;color:#c4a15a;">&#9670;</td>
                     <td width="78" style="border-bottom:1px solid #c4a15a;font-size:0;line-height:0;">&nbsp;</td>
                   </tr>
                 </table>
               </div>
-              <div style="margin:16px 0 0 0;font-family:${SERIF};font-size:18px;font-weight:500;color:#e7eef0;">${escapeHtml(paid)}</div>
+              <div style="margin:16px 0 0 0;font-family:${FONT_BODY};font-size:18px;font-weight:500;color:#e7eef0;">${escapeHtml(paid)}</div>
               <div style="margin:8px 0 0 0;">${overline(t.guest)}</div>
-              <div style="margin:4px 0 0 0;font-family:${SERIF};font-size:36px;font-weight:600;line-height:1.15;color:#f7f4ee;">${escapeHtml(input.guestName)}</div>
+              <div style="margin:4px 0 0 0;font-family:${FONT_DISPLAY};font-size:36px;font-weight:600;line-height:1.15;color:#f7f4ee;">${escapeHtml(input.guestName)}</div>
               <div style="margin:22px 8px 0 8px;border:1px solid #c4a15a;border-radius:18px;background-color:#10262e;padding:22px 16px 20px 16px;">
                 ${overline(t.received)}
-                <div style="margin:8px 0 0 0;font-family:${SERIF};font-size:40px;font-weight:600;line-height:1.1;color:#e6c97a;">${escapeHtml(arLabel)} Ar</div>
-                <div style="margin:10px 0 0 0;font-family:${SERIF};font-size:16px;font-weight:500;color:#d5e2e6;">
+                <div style="margin:8px 0 0 0;font-family:${FONT_DISPLAY};font-size:40px;font-weight:600;line-height:1.1;color:#e6c97a;">${escapeHtml(arLabel)} Ar</div>
+                <div style="margin:10px 0 0 0;font-family:${FONT_BODY};font-size:16px;font-weight:500;color:#d5e2e6;">
                   <span style="letter-spacing:2px;text-transform:uppercase;font-size:12px;color:#c4a15a;">${escapeHtml(t.inEuros)}</span>
-                  <span style="font-size:22px;color:#f4efe6;"> ${escapeHtml(eurLabel)} EUR</span>
+                  <span style="font-family:${FONT_DISPLAY};font-size:22px;font-weight:500;color:#f4efe6;"> ${escapeHtml(eurLabel)} EUR</span>
                 </div>
-                <div style="margin:6px 0 0 0;font-family:${SERIF};font-size:13px;font-weight:500;color:#8fa3a8;">${escapeHtml(t.rate(rateLabel))}</div>
+                <div style="margin:6px 0 0 0;font-family:${FONT_BODY};font-size:13px;font-weight:500;color:#8fa3a8;">${escapeHtml(t.rate(rateLabel))}</div>
               </div>
               ${detail(t.bungalow, input.bungalow)}
               ${detail(t.stay, stay)}
               ${detail(t.booking, input.bookingNumber)}
               <div style="margin:20px 0 0 0;">
-                <span style="display:inline-block;border:1px solid #c4a15a;border-radius:999px;padding:7px 16px;font-family:${SERIF};font-size:12px;font-weight:600;letter-spacing:1.6px;text-transform:uppercase;color:#e6c97a;">${escapeHtml(t.method)}</span>
+                <span style="display:inline-block;border:1px solid #c4a15a;border-radius:999px;padding:7px 16px;font-family:${FONT_BODY};font-size:12px;font-weight:600;letter-spacing:1.6px;text-transform:uppercase;color:#e6c97a;">${escapeHtml(t.method)}</span>
               </div>
               ${withBlock}
-              <div style="margin:26px 12px 0 12px;font-family:${SERIF};font-size:16px;font-style:italic;font-weight:500;line-height:1.45;color:#e7eef0;">${escapeHtml(t.confirm)}</div>
+              <div style="margin:26px 12px 0 12px;font-family:${FONT_BODY};font-size:16px;font-weight:500;line-height:1.45;color:#e7eef0;">${escapeHtml(t.confirm)}</div>
               <div style="margin:26px 0 0 0;">
                 ${logoImg(input.logoUrl, 150, 532)}
-                <div style="margin:6px 0 0 0;font-family:${SERIF};font-size:11px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#8fa3a8;">Pure nature.</div>
+                <div style="margin:6px 0 0 0;font-family:${FONT_BODY};font-size:11px;font-weight:600;letter-spacing:4px;text-transform:uppercase;color:#8fa3a8;">Pure nature.</div>
               </div>
               </div>
             </td></tr>
