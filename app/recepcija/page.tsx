@@ -954,7 +954,7 @@ export default function ReceptionPage() {
                                   <span className="text-white/70 truncate">{g.guestName} <span className="text-white/40">({part.pax} os)</span></span>
                                   <p className="text-white/30 text-[10px]">
                                     čoln {part.boatEur.toFixed(2)} EUR/os × {part.pax}
-                                    {excursionPerEur > 0 ? ` · vstopnine ${part.entrancePax}` : ""}
+                                    {entrancePerEur > 0 ? ` · vstopnine ${part.entrancePax}` : ""}
                                     {lunchPerEur > 0 ? ` · kosila ${part.lunchPax}` : ""}
                                   </p>
                                 </div>
