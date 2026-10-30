@@ -71,6 +71,28 @@ type TransferPricing = {
   pricePax6?: number;
 };
 
+// One bungalow on a shared boat. Counts and the boat rate start from the
+// headcount and the price list, then stay where she puts them.
+type GroupPart = {
+  pax: number;
+  lunchPax: number;
+  entrancePax: number;
+  boatEur: number;
+  lunchTouched: boolean;
+  entranceTouched: boolean;
+  boatTouched: boolean;
+};
+
+const emptyGroupPart = (): GroupPart => ({
+  pax: 0,
+  lunchPax: 0,
+  entrancePax: 0,
+  boatEur: 0,
+  lunchTouched: false,
+  entranceTouched: false,
+  boatTouched: false,
+});
+
 // Formatting helpers
 const ar = (v: number) => `${Math.round(v).toLocaleString("fr-FR")} Ar`;
 const today = () => new Date().toISOString().slice(0, 10);
@@ -104,10 +126,10 @@ export default function ReceptionPage() {
     paymentStatus: "UNPAID"
   });
 
-  // Group excursion (več bungalovov na istem čolnu): cena čolna po skupnem pax,
-  // razdeljena po osebah vsake rezervacije. reservationId -> pax za udeležence.
+  // Group excursion (več bungalovov na istem čolnu). Vsak bungalov ima svoje
+  // kosilo, vstopnine in ceno čolna na osebo.
   const [groupMode, setGroupMode] = useState(false);
-  const [groupParts, setGroupParts] = useState<Record<string, number>>({});
+  const [groupParts, setGroupParts] = useState<Record<string, GroupPart>>({});
   
   const [serviceForm, setServiceForm] = useState({
     productId: "",
@@ -251,15 +273,45 @@ export default function ReceptionPage() {
   }
 
   // Skupni pax vseh udeležencev skupinskega izleta
-  const groupTotalPax = Object.values(groupParts).reduce((sum, n) => sum + (n || 0), 0);
-  // Pax, ki določa cenovno stopnjo (skupinski: skupni pax, sicer pax obrazca)
+  const groupTotalPax = Object.values(groupParts).reduce((sum, part) => sum + (part.pax || 0), 0);
+  // Pax, ki določa cenovno stopnjo cenika (skupinski: skupni pax, sicer pax obrazca)
   const effectivePax = groupMode ? Math.max(groupTotalPax, 1) : excursionForm.pax;
 
-  // Dodaj SKUPINSKI izlet: cena čolna se izračuna po skupnem pax, nato razdeli po osebah.
+  function catalogBoatEur(excursionId: string, boatId: string, pax: number): number {
+    const pricing = excursionPricing.find(ep => ep.excursionId === excursionId && ep.boatId === boatId);
+    if (!pricing || pax < 1) return 0;
+    const safePax = Math.min(pax, 6);
+    const key = `pricePax${safePax}` as keyof ExcursionPricing;
+    return Number(pricing[key]) || 0;
+  }
+
+  // Cenik velja samo za bungalove, kjer cene čolna še ni ročno spremenila.
+  function withCatalogBoat(parts: Record<string, GroupPart>, excursionId: string, boatId: string): Record<string, GroupPart> {
+    const total = Object.values(parts).reduce((sum, part) => sum + (part.pax || 0), 0);
+    const rate = catalogBoatEur(excursionId, boatId, total);
+    const next: Record<string, GroupPart> = {};
+    for (const [id, part] of Object.entries(parts)) {
+      next[id] = part.boatTouched || part.pax <= 0 ? part : { ...part, boatEur: rate };
+    }
+    return next;
+  }
+
+  function patchGroupPart(id: string, patch: (part: GroupPart) => GroupPart) {
+    setGroupParts(prev => {
+      const updated = patch(prev[id] ?? emptyGroupPart());
+      return withCatalogBoat(
+        { ...prev, [id]: updated },
+        excursionForm.excursionId,
+        excursionForm.boatId,
+      );
+    });
+  }
+
+  // Dodaj SKUPINSKI izlet. Čoln, vstopnine in kosila so po bungalovu.
   async function handleAddGroupExcursion() {
     if (!excursionForm.excursionId || !excursionForm.boatId) return;
     const parts = Object.entries(groupParts)
-      .map(([reservationId, pax]) => ({ reservationId, pax: pax || 0 }))
+      .map(([reservationId, part]) => ({ reservationId, ...part }))
       .filter(p => p.pax > 0);
     if (parts.length < 2) return;
 
@@ -269,12 +321,6 @@ export default function ReceptionPage() {
       const exc = excursions.find(e => e.id === excursionForm.excursionId);
       if (!exc) { setSaving(false); return; }
 
-      // Skupna cena čolna po SKUPNEM pax (EUR), cena na osebo = skupna / skupni pax
-      const totalBoatAr = getExcursionSellingPrice(excursionForm.excursionId, excursionForm.boatId, groupTotalPax);
-      const totalBoatEur = exchangeRate > 0 ? totalBoatAr / exchangeRate : 0;
-      const boatPricePerPax = groupTotalPax > 0 ? totalBoatEur / groupTotalPax : 0;
-
-      // Vstopnina/kosilo sta fiksna na osebo (EUR). Vstopnina samo če je kljukica vključena.
       const entranceFeeEur = excursionForm.includeEntrance && exchangeRate > 0 ? (exc.entranceFeeAr || 0) / exchangeRate : 0;
       const lunchProvider = lunchProviders.find(l => l.id === excursionForm.lunchProviderId);
       const hasLunch = !!lunchProvider;
@@ -287,8 +333,13 @@ export default function ReceptionPage() {
         entranceFee: entranceFeeEur,
         lunchPrice: hasLunch ? lunchPriceEur : 0,
         lunchProviderId: excursionForm.lunchProviderId || undefined,
-        boatPricePerPax,
-        parts: parts.map(p => ({ reservationId: p.reservationId, pax: p.pax, lunchPax: hasLunch ? p.pax : 0 })),
+        parts: parts.map(p => ({
+          reservationId: p.reservationId,
+          pax: p.pax,
+          lunchPax: hasLunch ? p.lunchPax : 0,
+          entrancePax: excursionForm.includeEntrance ? p.entrancePax : 0,
+          boatPricePerPax: p.boatEur,
+        })),
       });
 
       setGroupParts({});
@@ -551,8 +602,25 @@ export default function ReceptionPage() {
                     onClick={() => {
                       const next = !groupMode;
                       setGroupMode(next);
-                      // Ob vklopu predizpolni izbranega gosta z njegovimi osebami
-                      setGroupParts(next && selectedGuest ? { [selectedGuest.id]: selectedGuest.pax } : {});
+                      if (next && selectedGuest) {
+                        const pax = selectedGuest.pax;
+                        const seeded: GroupPart = {
+                          pax,
+                          lunchPax: pax,
+                          entrancePax: pax,
+                          boatEur: 0,
+                          lunchTouched: false,
+                          entranceTouched: false,
+                          boatTouched: false,
+                        };
+                        setGroupParts(withCatalogBoat(
+                          { [selectedGuest.id]: seeded },
+                          excursionForm.excursionId,
+                          excursionForm.boatId,
+                        ));
+                      } else {
+                        setGroupParts({});
+                      }
                     }}
                     className={`px-4 py-2 rounded-xl text-xs font-medium transition-colors ${
                       groupMode
@@ -568,7 +636,11 @@ export default function ReceptionPage() {
                     <label className="block text-white/40 text-[10px] uppercase tracking-wider mb-2">Izlet</label>
                     <select
                       value={excursionForm.excursionId}
-                      onChange={e => setExcursionForm(prev => ({ ...prev, excursionId: e.target.value }))}
+                      onChange={e => {
+                        const excursionId = e.target.value;
+                        setExcursionForm(prev => ({ ...prev, excursionId }));
+                        setGroupParts(prev => withCatalogBoat(prev, excursionId, excursionForm.boatId));
+                      }}
                       className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
                     >
                       <option value="">Izberi izlet</option>
@@ -607,34 +679,93 @@ export default function ReceptionPage() {
                     <label className="block text-white/40 text-[10px] uppercase tracking-wider mb-2">
                       Udeleženci (vpiši št. oseb iz vsakega bungalova) — skupaj: {groupTotalPax} oseb
                     </label>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 items-start">
                       {activeGuests.map(g => {
-                        const val = groupParts[g.id] ?? 0;
-                        const selected = val > 0;
+                        const part = groupParts[g.id] ?? emptyGroupPart();
+                        const selected = part.pax > 0;
+                        const countInput = "w-full px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white text-sm text-center focus:outline-none focus:border-[#7fa8b8]/40";
                         return (
                           <div
                             key={g.id}
-                            className={`flex items-center justify-between gap-2 px-3 py-2 rounded-xl border ${
+                            className={`flex flex-col gap-2 px-3 py-2 rounded-xl border ${
                               selected ? "border-[#7fa8b8]/40 bg-[#7fa8b8]/10" : "border-white/[0.08] bg-white/[0.02]"
                             }`}
                           >
-                            <div className="min-w-0">
-                              <p className="text-white text-xs truncate">{g.guestName}</p>
-                              <p className="text-white/40 text-[10px] truncate">{bungalowLabel(g.bungalow)} · {g.pax} os</p>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-white text-xs truncate">{g.guestName}</p>
+                                <p className="text-white/40 text-[10px] truncate">{bungalowLabel(g.bungalow)} · {g.pax} os</p>
+                              </div>
+                              <input
+                                type="number"
+                                min="0"
+                                max={g.pax}
+                                inputMode="numeric"
+                                aria-label={`Osebe, ${g.guestName}`}
+                                value={part.pax === 0 ? "" : part.pax}
+                                placeholder="0"
+                                onChange={e => {
+                                  const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                  patchGroupPart(g.id, cur => ({
+                                    ...cur,
+                                    pax: n,
+                                    lunchPax: cur.lunchTouched ? cur.lunchPax : n,
+                                    entrancePax: cur.entranceTouched ? cur.entrancePax : n,
+                                  }));
+                                }}
+                                className="w-16 shrink-0 px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white text-sm text-center focus:outline-none focus:border-[#7fa8b8]/40"
+                              />
                             </div>
-                            <input
-                              type="number"
-                              min="0"
-                              max={g.pax}
-                              inputMode="numeric"
-                              value={val === 0 ? "" : val}
-                              placeholder="0"
-                              onChange={e => {
-                                const n = e.target.value === "" ? 0 : Number(e.target.value);
-                                setGroupParts(prev => ({ ...prev, [g.id]: n }));
-                              }}
-                              className="w-16 shrink-0 px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white text-sm text-center focus:outline-none focus:border-[#7fa8b8]/40"
-                            />
+                            {selected && (
+                              <div className="grid grid-cols-3 gap-1.5">
+                                <label className="min-w-0">
+                                  <span className="block text-[9px] uppercase tracking-wider text-white/40 mb-1">Kosila</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    inputMode="numeric"
+                                    value={part.lunchPax === 0 ? "" : part.lunchPax}
+                                    placeholder="0"
+                                    onChange={e => {
+                                      const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                      patchGroupPart(g.id, cur => ({ ...cur, lunchPax: n, lunchTouched: true }));
+                                    }}
+                                    className={countInput}
+                                  />
+                                </label>
+                                <label className="min-w-0">
+                                  <span className="block text-[9px] uppercase tracking-wider text-white/40 mb-1">Vstopnine</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    inputMode="numeric"
+                                    value={part.entrancePax === 0 ? "" : part.entrancePax}
+                                    placeholder="0"
+                                    onChange={e => {
+                                      const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                      patchGroupPart(g.id, cur => ({ ...cur, entrancePax: n, entranceTouched: true }));
+                                    }}
+                                    className={countInput}
+                                  />
+                                </label>
+                                <label className="min-w-0">
+                                  <span className="block text-[9px] uppercase tracking-wider text-white/40 mb-1">Coln EUR/os</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    inputMode="decimal"
+                                    value={part.boatEur === 0 ? "" : part.boatEur}
+                                    placeholder="0"
+                                    onChange={e => {
+                                      const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                                      patchGroupPart(g.id, cur => ({ ...cur, boatEur: n, boatTouched: true }));
+                                    }}
+                                    className={countInput}
+                                  />
+                                </label>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -646,7 +777,11 @@ export default function ReceptionPage() {
   <label className="block text-white/40 text-[10px] uppercase tracking-wider mb-2">Coln</label>
   <select
   value={excursionForm.boatId}
-  onChange={e => setExcursionForm(prev => ({ ...prev, boatId: e.target.value }))}
+  onChange={e => {
+    const boatId = e.target.value;
+    setExcursionForm(prev => ({ ...prev, boatId }));
+    setGroupParts(prev => withCatalogBoat(prev, excursionForm.excursionId, boatId));
+  }}
   className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
   >
   <option value="">Izberi coln</option>
@@ -672,21 +807,49 @@ export default function ReceptionPage() {
   {excursionForm.excursionId && excursionForm.boatId && (() => {
     const exc = excursions.find(e => e.id === excursionForm.excursionId);
     const lunchProvider = lunchProviders.find(l => l.id === excursionForm.lunchProviderId);
-    const transportAr = getExcursionSellingPrice(excursionForm.excursionId, excursionForm.boatId, effectivePax);
-    const entranceAr = excursionForm.includeEntrance ? Math.round((exc?.entranceFeeAr || 0) * effectivePax) : 0;
-    const lunchAr = lunchProvider ? Math.round((lunchProvider.pricePerPersonAr || 0) * effectivePax) : 0;
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const toAr = (eurAmount: number) => Math.round(eurAmount * exchangeRate);
+    let transportEur = 0;
+    let entranceEur = 0;
+    let lunchEur = 0;
+    let entranceCount = 0;
+    let lunchCount = 0;
+    let transportPax = effectivePax;
+    if (groupMode) {
+      const entrancePer = excursionForm.includeEntrance && exchangeRate > 0 ? (exc?.entranceFeeAr || 0) / exchangeRate : 0;
+      const lunchPer = lunchProvider && exchangeRate > 0 ? (lunchProvider.pricePerPersonAr || 0) / exchangeRate : 0;
+      transportPax = 0;
+      for (const part of Object.values(groupParts)) {
+        if (part.pax <= 0) continue;
+        transportPax += part.pax;
+        transportEur += round2(part.boatEur * part.pax);
+        entranceCount += part.entrancePax;
+        lunchCount += part.lunchPax;
+        entranceEur += round2(entrancePer * part.entrancePax);
+        lunchEur += round2(lunchPer * part.lunchPax);
+      }
+    } else {
+      transportEur = exchangeRate > 0 ? getExcursionSellingPrice(excursionForm.excursionId, excursionForm.boatId, effectivePax) / exchangeRate : 0;
+      entranceEur = excursionForm.includeEntrance && exchangeRate > 0 ? ((exc?.entranceFeeAr || 0) * effectivePax) / exchangeRate : 0;
+      lunchEur = lunchProvider && exchangeRate > 0 ? ((lunchProvider.pricePerPersonAr || 0) * effectivePax) / exchangeRate : 0;
+      entranceCount = effectivePax;
+      lunchCount = effectivePax;
+    }
+    const transportAr = toAr(transportEur);
+    const entranceAr = toAr(entranceEur);
+    const lunchAr = toAr(lunchEur);
     const totalAr = transportAr + entranceAr + lunchAr;
     const totalEur = exchangeRate > 0 ? totalAr / exchangeRate : 0;
     const toEur = (v: number) => exchangeRate > 0 ? (v / exchangeRate).toFixed(2) : "0";
     return (
   <div className="p-4 rounded-xl bg-gradient-to-r from-[#c59b5b]/10 to-[#8f6d3a]/10 border border-[#c59b5b]/20">
-    <p className="text-white/50 text-xs uppercase tracking-wider mb-1">Prodajna cena {groupMode ? `(skupaj ${effectivePax} oseb)` : ""}</p>
+    <p className="text-white/50 text-xs uppercase tracking-wider mb-1">Prodajna cena {groupMode ? `(skupaj ${transportPax} oseb)` : ""}</p>
     <p className="text-2xl font-light text-[#c59b5b]">{totalEur.toFixed(2)} EUR</p>
     <p className="text-white/40 text-xs">{ar(totalAr)}</p>
     <div className="mt-2 space-y-0.5 text-white/40 text-xs">
-      <div className="flex justify-between gap-2"><span>Prevoz ({effectivePax} os)</span><span>{toEur(transportAr)} EUR · {ar(transportAr)}</span></div>
-      {entranceAr > 0 && <div className="flex justify-between gap-2"><span>Vstopnina ({effectivePax} os)</span><span>{toEur(entranceAr)} EUR · {ar(entranceAr)}</span></div>}
-      {lunchAr > 0 && <div className="flex justify-between gap-2"><span>Kosilo ({effectivePax} os)</span><span>{toEur(lunchAr)} EUR · {ar(lunchAr)}</span></div>}
+      <div className="flex justify-between gap-2"><span>Prevoz ({transportPax} os)</span><span>{toEur(transportAr)} EUR · {ar(transportAr)}</span></div>
+      {entranceAr > 0 && <div className="flex justify-between gap-2"><span>Vstopnina ({entranceCount})</span><span>{toEur(entranceAr)} EUR · {ar(entranceAr)}</span></div>}
+      {lunchAr > 0 && <div className="flex justify-between gap-2"><span>Kosilo ({lunchCount})</span><span>{toEur(lunchAr)} EUR · {ar(lunchAr)}</span></div>}
     </div>
   </div>
     );
@@ -771,20 +934,30 @@ export default function ReceptionPage() {
                     {(() => {
                       const exc = excursions.find(e => e.id === excursionForm.excursionId);
                       const lunchProvider = lunchProviders.find(l => l.id === excursionForm.lunchProviderId);
-                      const totalBoatAr = getExcursionSellingPrice(excursionForm.excursionId, excursionForm.boatId, effectivePax);
-                      const boatPerPaxAr = groupTotalPax > 0 ? totalBoatAr / groupTotalPax : 0;
-                      const entranceAr = excursionForm.includeEntrance ? (exc?.entranceFeeAr || 0) : 0;
-                      const lunchAr = lunchProvider ? (lunchProvider.pricePerPersonAr || 0) : 0;
-                      const parts = activeGuests.filter(g => (groupParts[g.id] ?? 0) > 0);
+                      const entrancePerEur = excursionForm.includeEntrance && exchangeRate > 0 ? (exc?.entranceFeeAr || 0) / exchangeRate : 0;
+                      const lunchPerEur = lunchProvider && exchangeRate > 0 ? (lunchProvider.pricePerPersonAr || 0) / exchangeRate : 0;
+                      const round2 = (n: number) => Math.round(n * 100) / 100;
+                      const parts = activeGuests.filter(g => (groupParts[g.id]?.pax ?? 0) > 0);
                       return (
                         <div className="space-y-2">
                           {parts.map(g => {
-                            const px = groupParts[g.id] || 0;
-                            const sumAr = Math.round(boatPerPaxAr * px + entranceAr * px + lunchAr * px);
-                            const sumEur = exchangeRate > 0 ? sumAr / exchangeRate : 0;
+                            const part = groupParts[g.id];
+                            if (!part) return null;
+                            const boatTotalEur = round2(part.boatEur * part.pax);
+                            const entranceTotalEur = round2(entrancePerEur * part.entrancePax);
+                            const lunchTotalEur = round2(lunchPerEur * part.lunchPax);
+                            const sumEur = round2(boatTotalEur + entranceTotalEur + lunchTotalEur);
+                            const sumAr = Math.round(sumEur * exchangeRate);
                             return (
-                              <div key={g.id} className="flex items-center justify-between gap-2 text-sm">
-                                <span className="text-white/70 truncate">{g.guestName} <span className="text-white/40">({px} os)</span></span>
+                              <div key={g.id} className="flex items-start justify-between gap-2 text-sm">
+                                <div className="min-w-0">
+                                  <span className="text-white/70 truncate">{g.guestName} <span className="text-white/40">({part.pax} os)</span></span>
+                                  <p className="text-white/30 text-[10px]">
+                                    čoln {part.boatEur.toFixed(2)} EUR/os × {part.pax}
+                                    {excursionPerEur > 0 ? ` · vstopnine ${part.entrancePax}` : ""}
+                                    {lunchPerEur > 0 ? ` · kosila ${part.lunchPax}` : ""}
+                                  </p>
+                                </div>
                                 <span className="text-right whitespace-nowrap">
                                   <span className="text-[#c59b5b] font-medium">{ar(sumAr)}</span>
                                   <span className="text-white/40 text-xs ml-2">{sumEur.toFixed(2)} EUR</span>
@@ -793,7 +966,7 @@ export default function ReceptionPage() {
                             );
                           })}
                           <p className="text-white/30 text-[10px] pt-2 border-t border-white/[0.06]">
-                            Cena čolna {ar(totalBoatAr)} ({exchangeRate > 0 ? (totalBoatAr / exchangeRate).toFixed(2) : "0"} EUR, za {effectivePax} oseb) razdeljena po osebah; vstopnina in kosilo sta na osebo.
+                            Cena čolna, število vstopnin in število kosil so posebej za vsak bungalov.
                           </p>
                         </div>
                       );
@@ -804,7 +977,7 @@ export default function ReceptionPage() {
                 {groupMode ? (
                   <button
                     onClick={handleAddGroupExcursion}
-                    disabled={saving || !excursionForm.excursionId || !excursionForm.boatId || Object.values(groupParts).filter(n => n > 0).length < 2}
+                    disabled={saving || !excursionForm.excursionId || !excursionForm.boatId || Object.values(groupParts).filter(p => p.pax > 0).length < 2}
                     className="mt-6 w-full py-4 rounded-xl bg-gradient-to-r from-[#7fa8b8] to-[#66b5d4] text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-lg hover:shadow-[#7fa8b8]/20 transition-all"
                   >
                     {saving ? "Dodajam..." : "Dodaj skupinski izlet (vsem bungalovom)"}

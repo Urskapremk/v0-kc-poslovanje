@@ -2079,33 +2079,34 @@ export async function addExcursionBooking(reservationId: string, data: {
   return id
 }
 
-// Skupinski izlet: cena čolna se izračuna po SKUPNEM številu oseb (groupPax),
-// nato se razdeli po dejanskih osebah vsake rezervacije (čoln cena/os × osebe).
-// Vstopnina in kosilo sta vedno fiksna na osebo (× osebe rezervacije).
+// Skupinski izlet. Čoln je cena/os × osebe tega bungalova (svoja cena/os, sicer skupna).
+// Vstopnina × entrancePax in kosilo × lunchPax — če število ni podano, × osebe bungalova.
 export async function addGroupExcursionBooking(data: {
   excursionId: string
   boatId?: string
   date?: string
-  entranceFee?: number       // EUR na osebo
-  lunchPrice?: number        // EUR na osebo
+  entranceFee?: number       // EUR na vstopnino
+  lunchPrice?: number        // EUR na kosilo
   lunchProviderId?: string
-  boatPricePerPax?: number    // EUR/os pri SKUPINSKI ceni (skupna cena čolna / groupPax)
+  boatPricePerPax?: number    // EUR/os, če bungalov nima svoje
   notes?: string
-  parts: { reservationId: string; pax: number; lunchPax?: number }[]
+  parts: { reservationId: string; pax: number; lunchPax?: number; entrancePax?: number; boatPricePerPax?: number }[]
 }) {
   const groupId = uid('excgrp')
   const groupPax = data.parts.reduce((sum, p) => sum + (p.pax || 0), 0)
 
   for (const part of data.parts) {
     if (!part.pax || part.pax <= 0) continue
-    const guestPrice = Math.round((data.boatPricePerPax || 0) * part.pax * 100) / 100
+    const boatPer = part.boatPricePerPax ?? data.boatPricePerPax ?? 0
+    const guestPrice = Math.round(boatPer * part.pax * 100) / 100
+    const entranceCount = part.entrancePax ?? part.pax
     await addExcursionBooking(part.reservationId, {
       excursionId: data.excursionId,
       boatId: data.boatId,
       date: data.date,
       pax: part.pax,
       guestPrice,
-      entranceFee: Math.round((data.entranceFee || 0) * part.pax * 100) / 100,
+      entranceFee: Math.round((data.entranceFee || 0) * entranceCount * 100) / 100,
       lunchPrice: Math.round((data.lunchPrice || 0) * (part.lunchPax ?? 0) * 100) / 100,
       lunchPax: part.lunchPax ?? 0,
       lunchProviderId: data.lunchProviderId,
