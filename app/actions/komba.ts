@@ -2081,6 +2081,7 @@ export async function addExcursionBooking(reservationId: string, data: {
 
 // Skupinski izlet. Čoln je cena/os × osebe tega bungalova (svoja cena/os, sicer skupna).
 // Vstopnina × entrancePax in kosilo × lunchPax — če število ni podano, × osebe bungalova.
+// transportEur / entranceEur / lunchEur, ko so podani, so že končni zneski vrstice.
 export async function addGroupExcursionBooking(data: {
   excursionId: string
   boatId?: string
@@ -2090,15 +2091,16 @@ export async function addGroupExcursionBooking(data: {
   lunchProviderId?: string
   boatPricePerPax?: number    // EUR/os, če bungalov nima svoje
   notes?: string
-  parts: { reservationId: string; pax: number; lunchPax?: number; entrancePax?: number; boatPricePerPax?: number }[]
+  parts: { reservationId: string; pax: number; lunchPax?: number; entrancePax?: number; boatPricePerPax?: number; transportEur?: number; entranceEur?: number; lunchEur?: number }[]
 }) {
   const groupId = uid('excgrp')
   const groupPax = data.parts.reduce((sum, p) => sum + (p.pax || 0), 0)
+  const round2 = (n: number) => Math.round(n * 100) / 100
 
   for (const part of data.parts) {
     if (!part.pax || part.pax <= 0) continue
     const boatPer = part.boatPricePerPax ?? data.boatPricePerPax ?? 0
-    const guestPrice = Math.round(boatPer * part.pax * 100) / 100
+    const guestPrice = part.transportEur != null ? round2(part.transportEur) : round2(boatPer * part.pax)
     const entranceCount = part.entrancePax ?? part.pax
     await addExcursionBooking(part.reservationId, {
       excursionId: data.excursionId,
@@ -2106,8 +2108,8 @@ export async function addGroupExcursionBooking(data: {
       date: data.date,
       pax: part.pax,
       guestPrice,
-      entranceFee: Math.round((data.entranceFee || 0) * entranceCount * 100) / 100,
-      lunchPrice: Math.round((data.lunchPrice || 0) * (part.lunchPax ?? 0) * 100) / 100,
+      entranceFee: part.entranceEur != null ? round2(part.entranceEur) : round2((data.entranceFee || 0) * entranceCount),
+      lunchPrice: part.lunchEur != null ? round2(part.lunchEur) : round2((data.lunchPrice || 0) * (part.lunchPax ?? 0)),
       lunchPax: part.lunchPax ?? 0,
       lunchProviderId: data.lunchProviderId,
       notes: data.notes,
