@@ -82,7 +82,11 @@ describe('buildCashReceiptHtml', () => {
     assert.match(html, /To potrdilo potrjuje, da je Komba Cabana prejela navedeno gotovino\./)
     assert.equal(html.split(LOGO).length - 1, 2)
     assert.equal(/font-family:[^;"]*cursive/i.test(html), false)
-    assert.equal(/Great Vibes|Allura|Pacifico|Dancing Script|Sacramento/i.test(html), false)
+    assert.equal(/Great Vibes|Allura|Pacifico|Dancing Script|Sacramento|Cormorant|Palatino|Georgia/i.test(html), false)
+    assert.match(html, /family=Manrope:wght@500;600&family=Inter:wght@400;500;600/)
+    assert.match(html, /font-family:'Manrope','Segoe UI',Tahoma,Arial,Helvetica,sans-serif/)
+    assert.match(html, /font-family:'Inter','Segoe UI',Tahoma,Arial,Helvetica,sans-serif/)
+    assert.equal(/font-style:italic/.test(html), false)
   })
 
   it('matches the English and French titles and confirmation lines', () => {
