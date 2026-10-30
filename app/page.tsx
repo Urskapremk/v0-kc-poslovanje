@@ -1925,6 +1925,8 @@ export default function KombaCabanaApp() {
     excursionId: "",
     boatId: "",
     pax: 2,
+    entrancePax: 2,
+    lunchPax: 2,
     includeEntrance: true,
     lunchProviderId: "",
     routeId: "",
@@ -11444,8 +11446,21 @@ function GuestCard() {
                       inputMode="numeric"
                       className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#7fa8b8]/50 focus:outline-none"
                       value={pricingCalc.pax === 0 ? '' : pricingCalc.pax}
-                      onChange={e => setPricingCalc(p => ({ ...p, pax: e.target.value === '' ? 0 : Number(e.target.value) }))}
-                      onBlur={e => { if (e.target.value === '' || Number(e.target.value) < 1) setPricingCalc(p => ({ ...p, pax: 1 })) }}
+                      onChange={e => setPricingCalc(p => {
+                        const next = e.target.value === '' ? 0 : Number(e.target.value)
+                        return {
+                          ...p,
+                          pax: next,
+                          entrancePax: p.entrancePax === p.pax ? next : p.entrancePax,
+                          lunchPax: p.lunchPax === p.pax ? next : p.lunchPax,
+                        }
+                      })}
+                      onBlur={e => { if (e.target.value === '' || Number(e.target.value) < 1) setPricingCalc(p => ({
+                        ...p,
+                        pax: 1,
+                        entrancePax: p.entrancePax === p.pax ? 1 : p.entrancePax,
+                        lunchPax: p.lunchPax === p.pax ? 1 : p.lunchPax,
+                      })) }}
                     />
                   </div>
                   
@@ -11500,6 +11515,34 @@ function GuestCard() {
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="block text-[10px] text-white/40 mb-1">Osebe za vstopnino</label>
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#7fa8b8]/50 focus:outline-none"
+                      value={pricingCalc.entrancePax === 0 ? '' : pricingCalc.entrancePax}
+                      placeholder="0"
+                      onChange={e => setPricingCalc(p => ({ ...p, entrancePax: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0) }))}
+                      onBlur={e => { if (e.target.value === '' || Number(e.target.value) < 0) setPricingCalc(p => ({ ...p, entrancePax: 0 })) }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] text-white/40 mb-1">Osebe za kosilo</label>
+                    <input
+                      type="number"
+                      min="0"
+                      inputMode="numeric"
+                      className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c4744a]/50 focus:outline-none"
+                      value={pricingCalc.lunchPax === 0 ? '' : pricingCalc.lunchPax}
+                      placeholder="0"
+                      onChange={e => setPricingCalc(p => ({ ...p, lunchPax: e.target.value === '' ? 0 : Math.max(0, Number(e.target.value) || 0) }))}
+                      onBlur={e => { if (e.target.value === '' || Number(e.target.value) < 0) setPricingCalc(p => ({ ...p, lunchPax: 0 })) }}
+                    />
+                  </div>
                 </div>
                 
                 {/* Total for excursion */}
@@ -11519,8 +11562,8 @@ function GuestCard() {
                       const lunchPerPerson = lunchProvider ? arToEur(lunchProvider.pricePerPersonAr, exchangeRate) : 0;
                       
                       const transportTotal = transportPerPerson * pricingCalc.pax;
-                      const entranceTotal = entrancePerPerson * pricingCalc.pax;
-                      const lunchTotal = lunchPerPerson * pricingCalc.pax;
+                      const entranceTotal = entrancePerPerson * pricingCalc.entrancePax;
+                      const lunchTotal = lunchPerPerson * pricingCalc.lunchPax;
                       const grandTotal = transportTotal + entranceTotal + lunchTotal;
                       
                       return (
@@ -11531,13 +11574,13 @@ function GuestCard() {
                           </div>
                           {pricingCalc.includeEntrance && entrancePerPerson > 0 && (
                             <div className="flex justify-between items-center text-xs text-white/60 mt-1">
-                              <span>Vstopnina ({pricingCalc.pax} oseb × {eur(entrancePerPerson)}):</span>
+                              <span>Vstopnina ({pricingCalc.entrancePax} oseb × {eur(entrancePerPerson)}):</span>
                               <span>{eur(entranceTotal)}</span>
                             </div>
                           )}
                           {lunchPerPerson > 0 && (
                             <div className="flex justify-between items-center text-xs text-white/60 mt-1">
-                              <span>Kosilo ({pricingCalc.pax} oseb × {eur(lunchPerPerson)}):</span>
+                              <span>Kosilo ({pricingCalc.lunchPax} oseb × {eur(lunchPerPerson)}):</span>
                               <span>{eur(lunchTotal)}</span>
                             </div>
                           )}
