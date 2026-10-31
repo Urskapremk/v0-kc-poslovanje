@@ -10097,7 +10097,16 @@ function GuestCard() {
                           ) : (
                             <p className="text-[#0f2e3a]/80 text-xs truncate">{shortBungalow} - <span className="text-[#0f2e3a] font-medium">{r.guestName}</span></p>
                           )}
-                          <p className="text-[#2b2622]/50 text-[10px]">{totalPax} os{isGroup ? ' skupaj' : ''}</p>
+                          <p className="text-[#2b2622]/50 text-[10px]">
+                            {totalPax} os{isGroup ? ' skupaj' : ''}
+                            {' · '}
+                            {(() => {
+                              const excBoatName = dbBoats.find((b: { id: string; name: string }) => b.id === exc.boatId)?.name;
+                              return excBoatName
+                                ? <span className="font-semibold text-[#3f6b7d]">čoln {excBoatName}</span>
+                                : <span className="font-semibold text-[#b0203a]">čoln ni izbran</span>;
+                            })()}
+                          </p>
                           {/* Zneski za plačilo */}
                           <div className="mt-2 space-y-1 border-t border-[#0f2e3a]/12 pt-2">
                             <div className="flex items-center justify-between gap-2">
