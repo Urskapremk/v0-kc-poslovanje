@@ -8,6 +8,7 @@ import useSWR, { mutate } from "swr";
   import { bungalowCardLabel, bungalowDisplayName, reservationMatchesBungalow, stayUnits } from "@/lib/bungalow";
   import { birthdayGuestsOnCard, birthdayLabel, unitStayDates, type StaySegment } from "@/lib/birthday-stay";
 import { BungalowPeopleEditor } from "@/components/bungalow-people-editor";
+import { SplitStayPanel } from "@/components/split-stay-panel";
 import { ReservedExcursionPrices } from "@/components/reserved-excursion-prices";
 import type { BungalowPeopleMap, BungalowPerson } from "@/lib/bungalow-people";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
@@ -2717,10 +2718,14 @@ async function handleCreateReservation() {
   <section className="space-y-3">
         {BUNGALOWS.map(bungalow => {
           let now = getBungalowGuest(bungalow, "now");
+          // A booking over several units bills on its first unit. The other units
+          // only show where these guests sleep, so nobody bills or charges there.
+          let hostedBy: Reservation | undefined;
           if (now) {
-            if (claimedNow.has(now)) now = undefined;
+            if (claimedNow.has(now)) { hostedBy = now; now = undefined; }
             else claimedNow.add(now);
           }
+          const hostUnitLabel = hostedBy ? (stayUnits(hostedBy.bungalow)[0]?.label || hostedBy.bungalow) : "";
           const next = getBungalowGuest(bungalow, "next");
           // Second upcoming guest — the user wants to see two guests ahead per bungalow.
           const next2 = getBungalowGuest(bungalow, "next2");
@@ -2730,7 +2735,7 @@ async function handleCreateReservation() {
           // (available bungalow) so the expanded list can skip it and still show three.
           const next4 = getBungalowGuest(bungalow, "next4");
           const isExpanded = expandedBungalow === bungalow;
-          const status = now ? now.status.replace(/_/g, " ") : "AVAILABLE";
+          const status = now ? now.status.replace(/_/g, " ") : hostedBy ? "SPALNICA" : "AVAILABLE";
           
           // One accent colour per status — drives the vertical rail and the status label,
           // so the card needs no tinted background or coloured dot.
@@ -2739,6 +2744,7 @@ async function handleCreateReservation() {
             "RESERVED": "#8f6d3a",
             "IN HOUSE": "#4f7a54",
             "DEPARTING TODAY": "#a15a3f",
+            "SPALNICA": "#3f6b7d",
             "AVAILABLE": "#b4a795",
           };
           const accent = statusAccent[status] || statusAccent["AVAILABLE"];
@@ -3349,8 +3355,25 @@ async function handleCreateReservation() {
                           {stayRange(next.arrival, next.departure)}
                         </p>
                       </>
-                    ) : (
+                    ) : hostedBy ? null : (
                       <p className="mt-1 text-[13px] font-light italic text-[#2b2622]/45">Prosto</p>
+                    )}
+                    {hostedBy && (
+                      <div className="mt-1.5 border-l border-[#3f6b7d]/50 pl-2.5">
+                        <span
+                          role="link"
+                          tabIndex={0}
+                          className="cursor-pointer text-[13px] font-light text-[#0f2e3a] underline decoration-[#3f6b7d]/30 underline-offset-2 hover:text-[#3f6b7d]"
+                          aria-label={`Odpri rezervacijo ${hostedBy.guestName}`}
+                          onClick={(e) => { e.stopPropagation(); setSelectedReservationId(hostedBy!.id); setTab("guest"); }}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); setSelectedReservationId(hostedBy!.id); setTab("guest"); } }}
+                        >
+                          Spijo gostje {hostedBy.guestName}
+                        </span>
+                        <p className="mt-0.5 text-[11px] tracking-[0.04em] text-[#2b2622]/55">
+                          Račun, dobavnica in bar na {hostUnitLabel}
+                        </p>
+                      </div>
                     )}
                     {/* Booking source + meal plan (B / HB / FB) so staff see both at a glance */}
                     {(() => {
@@ -3692,6 +3715,10 @@ function GuestCard() {
   )}
   </div>
   </div>
+
+          {multiStay && (
+            <SplitStayPanel reservationId={reservation.id} guestName={reservation.guestName} units={stayUnitList} />
+          )}
 
           {/* Check-in / Check-out Section */}
   <div className="mt-4 flex flex-col sm:flex-row gap-2 sm:gap-3">

@@ -369,6 +369,33 @@ function BungalowSelect({
               const slotGuests = bungalows.filter(b => !claimed.has(b) && reservationMatchesBungalow(b.bungalow, bungalowName))
               slotGuests.forEach(g => claimed.add(g))
 
+              // A second unit of a multi-unit booking: those guests bill on the first
+              // unit, so tapping here opens that same delivery note.
+              const host = slotGuests.length === 0
+                ? bungalows.find(b => claimed.has(b) && reservationMatchesBungalow(b.bungalow, bungalowName))
+                : undefined
+              if (host) {
+                return [(
+                  <button
+                    key={`${bungalowName}-host`}
+                    onClick={() => onSelect(host)}
+                    className="w-full p-4 rounded-2xl border text-left transition-all border-white/10 active:scale-[0.98]"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.03)' }}
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold shrink-0 bg-white/5 border-2 border-white/10 text-white/50">
+                        {config.code}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[#c59b5b] text-lg font-bold">{bungalowDisplayName(bungalowName)}</p>
+                        <p className="text-white/70 text-sm mt-1 truncate">{host.guestName}</p>
+                        <p className="text-[#7fa8b8] text-xs mt-1">Bill to {bungalowDisplayName(BUNGALOWS.find(n => reservationMatchesBungalow(host.bungalow, n)) || bungalowName)}</p>
+                      </div>
+                    </div>
+                  </button>
+                )]
+              }
+
               // Vacant slot — keep the disabled placeholder card.
               if (slotGuests.length === 0) {
                 return [(
