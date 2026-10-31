@@ -138,6 +138,8 @@ export default function ReceptionPage() {
   // kosilo, vstopnine in ceno čolna na osebo.
   const [groupMode, setGroupMode] = useState(false);
   const [groupParts, setGroupParts] = useState<Record<string, GroupPart>>({});
+  // Naroči izlet uses the same counts, boat rate, and editable price lines as one bungalow.
+  const [solo, setSolo] = useState<GroupPart>(() => ({ ...emptyGroupPart(), pax: 2, lunchPax: 2, entrancePax: 2 }));
   
   const [serviceForm, setServiceForm] = useState({
     productId: "",
@@ -203,22 +205,6 @@ export default function ReceptionPage() {
     setTimeout(() => setSuccessMsg(""), 3000);
   }
 
-  // Get TOTAL transport selling price (Ar) for excursion based on boat and pax.
-  // IMPORTANT: pricePaxN is the price PER PERSON for a group of N people
-  // (same as the main calculator on the overview page: 40 EUR/os × 4 = 160 EUR),
-  // so we multiply by pax to get the total.
-  function getExcursionSellingPrice(excursionId: string, boatId: string, pax: number): number {
-    const pricing = excursionPricing.find(ep => ep.excursionId === excursionId && ep.boatId === boatId);
-    if (!pricing) return 0;
-
-    const safePax = Math.min(Math.max(pax, 1), 6);
-    const paxKey = `pricePax${safePax}` as keyof ExcursionPricing;
-    const pricePerPersonEur = pricing[paxKey] as number || 0;
-
-    // Total in EUR = per-person price × pax, then convert to Ariary
-    return Math.round(pricePerPersonEur * pax * exchangeRate);
-  }
-
   // Add excursion to guest's delivery note
   async function handleAddExcursion() {
     if (!selectedGuest || !excursionForm.excursionId) return;
@@ -231,42 +217,33 @@ export default function ReceptionPage() {
       const exc = excursions.find(e => e.id === excursionForm.excursionId);
       if (!exc) return;
       
-      // Get SELLING price (Ar) based on excursion + boat + pax, converted back to EUR
-      // so addExcursionBooking can store it as guestPrice (consistent with the main page editor).
-      const totalPriceAr = getExcursionSellingPrice(excursionForm.excursionId, excursionForm.boatId, excursionForm.pax);
-      const guestPriceEur = exchangeRate > 0 ? totalPriceAr / exchangeRate : 0;
-
-      // Vstopnina (na osebo × osebe), če je kljukica vključena
-      const entranceFeeEur = excursionForm.includeEntrance && exchangeRate > 0
-        ? ((exc.entranceFeeAr || 0) * excursionForm.pax) / exchangeRate
-        : 0;
-      // Kosilo: cena izbranega ponudnika na osebo × osebe
       const lunchProvider = lunchProviders.find(l => l.id === excursionForm.lunchProviderId);
-      const lunchPriceEur = lunchProvider && exchangeRate > 0
-        ? ((lunchProvider.pricePerPersonAr || 0) * excursionForm.pax) / exchangeRate
-        : 0;
+      const lines = partLines(solo);
 
       // Add to excursion_bookings. Because the guest is already checked in, this call
       // ALSO inserts the matching order_item on the delivery note (priced + dated),
       // so we must NOT call addOrderItem separately (that caused a duplicate line).
+      // The three EUR amounts are the selling-price lines she sees.
       await addExcursionBooking(selectedGuest.id, {
         excursionId: excursionForm.excursionId,
         date: excursionForm.date,
-        pax: excursionForm.pax,
+        pax: solo.pax,
         boatId: excursionForm.boatId || undefined,
-        guestPrice: guestPriceEur,
-        entranceFee: entranceFeeEur,
-        lunchPrice: lunchPriceEur,
-        lunchPax: excursionForm.lunchProviderId ? excursionForm.pax : 0,
+        guestPrice: lines.transport,
+        entranceFee: lines.entrance,
+        lunchPrice: lines.lunch,
+        lunchPax: lunchProvider ? solo.lunchPax : 0,
         lunchProviderId: excursionForm.lunchProviderId || undefined,
         paymentStatus: excursionForm.paymentStatus
       });
       
       // Reset form
+      const pax = selectedGuest.pax;
+      setSolo(freshSolo(pax, "", ""));
       setExcursionForm({
         excursionId: "",
         date: today(),
-        pax: selectedGuest.pax,
+        pax,
         boatId: "",
         lunchProviderId: "",
         includeEntrance: true,
@@ -284,6 +261,24 @@ export default function ReceptionPage() {
   const groupTotalPax = Object.values(groupParts).reduce((sum, part) => sum + (part.pax || 0), 0);
   // Pax, ki določa cenovno stopnjo cenika (skupinski: skupni pax, sicer pax obrazca)
   const effectivePax = groupMode ? Math.max(groupTotalPax, 1) : excursionForm.pax;
+
+  function applySoloBoat(part: GroupPart, excursionId: string, boatId: string): GroupPart {
+    if (part.boatTouched || part.pax <= 0) return part;
+    return { ...part, boatEur: catalogBoatEur(excursionId, boatId, part.pax) };
+  }
+
+  function freshSolo(pax: number, excursionId: string, boatId: string): GroupPart {
+    return applySoloBoat({
+      ...emptyGroupPart(),
+      pax,
+      lunchPax: pax,
+      entrancePax: pax,
+    }, excursionId, boatId);
+  }
+
+  function patchSolo(patch: (part: GroupPart) => GroupPart) {
+    setSolo(prev => applySoloBoat(patch(prev), excursionForm.excursionId, excursionForm.boatId));
+  }
 
   function catalogBoatEur(excursionId: string, boatId: string, pax: number): number {
     const pricing = excursionPricing.find(ep => ep.excursionId === excursionId && ep.boatId === boatId);
@@ -571,6 +566,7 @@ export default function ReceptionPage() {
                     onClick={() => {
                       setSelectedGuest(guest);
                       setExcursionForm(prev => ({ ...prev, pax: guest.pax }));
+                      setSolo(freshSolo(guest.pax, excursionForm.excursionId, excursionForm.boatId));
                     }}
                     className="p-5 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] hover:border-[#c59b5b]/30 transition-all text-left group"
                   >
@@ -682,6 +678,11 @@ export default function ReceptionPage() {
                           withCatalogBoat(prev, excursionId, excursionForm.boatId),
                           { transportEur: null, entranceEur: null },
                         ));
+                        setSolo(prev => applySoloBoat(
+                          { ...prev, transportEur: null, entranceEur: null },
+                          excursionId,
+                          excursionForm.boatId,
+                        ));
                       }}
                       className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
                     >
@@ -710,10 +711,80 @@ export default function ReceptionPage() {
                       min="1"
                       inputMode="numeric"
                       value={excursionForm.pax === 0 ? "" : excursionForm.pax}
-                      onChange={e => setExcursionForm(prev => ({ ...prev, pax: e.target.value === "" ? 0 : Number(e.target.value) }))}
-                      onBlur={e => { if (e.target.value === "" || Number(e.target.value) < 1) setExcursionForm(prev => ({ ...prev, pax: 1 })); }}
+                      onChange={e => {
+                        const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                        setExcursionForm(prev => ({ ...prev, pax: n }));
+                        patchSolo(cur => ({
+                          ...cur,
+                          pax: n,
+                          lunchPax: cur.lunchTouched ? cur.lunchPax : n,
+                          entrancePax: cur.entranceTouched ? cur.entrancePax : n,
+                        }));
+                      }}
+                      onBlur={e => {
+                        if (e.target.value === "" || Number(e.target.value) < 1) {
+                          setExcursionForm(prev => ({ ...prev, pax: 1 }));
+                          patchSolo(cur => ({
+                            ...cur,
+                            pax: 1,
+                            lunchPax: cur.lunchTouched ? cur.lunchPax : 1,
+                            entrancePax: cur.entranceTouched ? cur.entrancePax : 1,
+                          }));
+                        }
+                      }}
                       className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
                     />
+                    <div className="grid grid-cols-3 gap-1.5 mt-2">
+                      <label className="min-w-0">
+                        <span className="block text-[9px] uppercase tracking-wider text-white/40 mb-1">Kosila</span>
+                        <input
+                          type="number"
+                          min="0"
+                          inputMode="numeric"
+                          aria-label="Kosila"
+                          value={solo.lunchPax === 0 ? "" : solo.lunchPax}
+                          placeholder="0"
+                          onChange={e => {
+                            const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                            patchSolo(cur => ({ ...cur, lunchPax: n, lunchTouched: true, lunchEur: null }));
+                          }}
+                          className="w-full px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white text-sm text-center focus:outline-none focus:border-[#7fa8b8]/40"
+                        />
+                      </label>
+                      <label className="min-w-0">
+                        <span className="block text-[9px] uppercase tracking-wider text-white/40 mb-1">Vstopnine</span>
+                        <input
+                          type="number"
+                          min="0"
+                          inputMode="numeric"
+                          aria-label="Vstopnine"
+                          value={solo.entrancePax === 0 ? "" : solo.entrancePax}
+                          placeholder="0"
+                          onChange={e => {
+                            const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                            patchSolo(cur => ({ ...cur, entrancePax: n, entranceTouched: true, entranceEur: null }));
+                          }}
+                          className="w-full px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white text-sm text-center focus:outline-none focus:border-[#7fa8b8]/40"
+                        />
+                      </label>
+                      <label className="min-w-0">
+                        <span className="block text-[9px] uppercase tracking-wider text-white/40 mb-1">Coln EUR/os</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          aria-label="Coln EUR/os"
+                          value={solo.boatEur === 0 ? "" : solo.boatEur}
+                          placeholder="0"
+                          onChange={e => {
+                            const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                            patchSolo(cur => ({ ...cur, boatEur: n, boatTouched: true, transportEur: null }));
+                          }}
+                          className="w-full px-2 py-1.5 rounded-lg bg-white/[0.04] border border-white/[0.08] text-white text-sm text-center focus:outline-none focus:border-[#7fa8b8]/40"
+                        />
+                      </label>
+                    </div>
                   </div>
                   )}
                   {groupMode && (
@@ -826,6 +897,11 @@ export default function ReceptionPage() {
       withCatalogBoat(prev, excursionForm.excursionId, boatId),
       { transportEur: null },
     ));
+    setSolo(prev => applySoloBoat(
+      { ...prev, transportEur: null },
+      excursionForm.excursionId,
+      boatId,
+    ));
   }}
   className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
   >
@@ -850,8 +926,6 @@ export default function ReceptionPage() {
   
   {/* Price display */}
   {excursionForm.excursionId && excursionForm.boatId && (() => {
-    const exc = excursions.find(e => e.id === excursionForm.excursionId);
-    const lunchProvider = lunchProviders.find(l => l.id === excursionForm.lunchProviderId);
     const toAr = (eurAmount: number) => Math.round(eurAmount * exchangeRate);
     let transportEur = 0;
     let entranceEur = 0;
@@ -872,11 +946,13 @@ export default function ReceptionPage() {
         lunchEur += lines.lunch;
       }
     } else {
-      transportEur = exchangeRate > 0 ? getExcursionSellingPrice(excursionForm.excursionId, excursionForm.boatId, effectivePax) / exchangeRate : 0;
-      entranceEur = excursionForm.includeEntrance && exchangeRate > 0 ? ((exc?.entranceFeeAr || 0) * effectivePax) / exchangeRate : 0;
-      lunchEur = lunchProvider && exchangeRate > 0 ? ((lunchProvider.pricePerPersonAr || 0) * effectivePax) / exchangeRate : 0;
-      entranceCount = effectivePax;
-      lunchCount = effectivePax;
+      const lines = partLines(solo);
+      transportPax = solo.pax || 0;
+      transportEur = lines.transport;
+      entranceEur = lines.entrance;
+      lunchEur = lines.lunch;
+      entranceCount = lines.entranceCount;
+      lunchCount = lines.lunchCount;
     }
     const transportAr = toAr(transportEur);
     const entranceAr = toAr(entranceEur);
@@ -889,10 +965,42 @@ export default function ReceptionPage() {
     <p className="text-white/50 text-xs uppercase tracking-wider mb-1">Prodajna cena {groupMode ? `(skupaj ${transportPax} oseb)` : ""}</p>
     <p className="text-2xl font-light text-[#c59b5b]">{totalEur.toFixed(2)} EUR</p>
     <p className="text-white/40 text-xs">{ar(totalAr)}</p>
-    <div className="mt-2 space-y-0.5 text-white/40 text-xs">
-      <div className="flex justify-between gap-2"><span>Prevoz ({transportPax} os)</span><span>{toEur(transportAr)} EUR · {ar(transportAr)}</span></div>
-      {entranceAr > 0 && <div className="flex justify-between gap-2"><span>Vstopnina ({entranceCount})</span><span>{toEur(entranceAr)} EUR · {ar(entranceAr)}</span></div>}
-      {lunchAr > 0 && <div className="flex justify-between gap-2"><span>Kosilo ({lunchCount})</span><span>{toEur(lunchAr)} EUR · {ar(lunchAr)}</span></div>}
+    <div className="mt-2 space-y-1 text-white/40 text-xs">
+      {groupMode ? (
+        <>
+          <div className="flex justify-between gap-2"><span>Prevoz ({transportPax} os)</span><span>{toEur(transportAr)} EUR · {ar(transportAr)}</span></div>
+          {entranceAr > 0 && <div className="flex justify-between gap-2"><span>Vstopnina ({entranceCount})</span><span>{toEur(entranceAr)} EUR · {ar(entranceAr)}</span></div>}
+          {lunchAr > 0 && <div className="flex justify-between gap-2"><span>Kosilo ({lunchCount})</span><span>{toEur(lunchAr)} EUR · {ar(lunchAr)}</span></div>}
+        </>
+      ) : (
+        <>
+          {([
+            ["Prevoz", `Prevoz (${transportPax} os)`, transportEur, "transportEur"],
+            ["Vstopnina", `Vstopnina (${entranceCount})`, entranceEur, "entranceEur"],
+            ["Kosilo", `Kosilo (${lunchCount})`, lunchEur, "lunchEur"],
+          ] as const).map(([key, label, amount, field]) => (
+            <div key={key} className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="min-w-0">{label}</span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  aria-label={label}
+                  value={amount}
+                  onChange={e => {
+                    const n = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0);
+                    patchSolo(cur => ({ ...cur, [field]: Math.round(n * 100) / 100 }));
+                  }}
+                  className="w-[4.75rem] px-1.5 py-0.5 rounded-md bg-black/20 border border-white/10 text-white text-xs text-right tabular-nums focus:outline-none focus:border-[#c59b5b]/50"
+                />
+                <span className="whitespace-nowrap">EUR · {ar(Math.round(amount * exchangeRate))}</span>
+              </span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   </div>
     );
@@ -905,6 +1013,7 @@ export default function ReceptionPage() {
                       onChange={e => {
                         setExcursionForm(prev => ({ ...prev, lunchProviderId: e.target.value }));
                         setGroupParts(prev => mapGroupParts(prev, { lunchEur: null }));
+                        setSolo(prev => ({ ...prev, lunchEur: null }));
                       }}
                       className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
                     >
@@ -927,6 +1036,7 @@ export default function ReceptionPage() {
                           onClick={() => {
                             setExcursionForm(prev => ({ ...prev, includeEntrance: !prev.includeEntrance }));
                             setGroupParts(prev => mapGroupParts(prev, { entranceEur: null }));
+                            setSolo(prev => ({ ...prev, entranceEur: null }));
                           }}
                           className={`w-full px-4 py-3 rounded-xl border text-sm flex items-center justify-between gap-2 transition-colors ${
                             excursionForm.includeEntrance
