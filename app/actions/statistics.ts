@@ -27,6 +27,7 @@ import { parseCategories } from '@/lib/stroski-categories'
 import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { ensureSupplierPaymentCostColumns } from './supplier-payment'
 import { transportCostTitle } from '@/lib/dilip-boat-cost'
+import { ensureExcursionPriceColumns } from '@/lib/excursion-price-columns'
 import { parseSalaryChanges, salaryForMonth } from '@/lib/employment'
 import { normalizeAssetCost } from '@/lib/asset-cost'
 
@@ -1027,6 +1028,7 @@ export async function deleteStaffSalary(id: string) {
 
 // Get statistics for a month
 export async function getMonthlyStatistics(year: number, month: number) {
+  await ensureExcursionPriceColumns()
   await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
   await ensureKompenzacijaColumns()
   const startDate = new Date(year, month - 1, 1)
@@ -2459,6 +2461,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
 // Get carrier (boat operator) statistics for a month - how much business we gave
 // each transporter, number of trips, and how much we paid them.
 export async function getCarrierStatistics(year: number, month: number) {
+  await ensureExcursionPriceColumns()
   await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
   const startDate = new Date(year, month - 1, 1)
   const endDate = new Date(year, month, 0)
