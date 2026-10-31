@@ -794,9 +794,19 @@ export default function StaffPage() {
 
   // Load bungalows when logged in
   useEffect(() => {
-    if (user) {
-      loadBungalows()
-      loadProducts()
+    if (!user) return
+    loadBungalows()
+    loadProducts()
+    // The bar tablet stays open all day: re-read guests (names, child ages) so
+    // edits on the guest card reach the bar without logging out.
+    const refresh = () => { if (document.visibilityState === 'visible') loadBungalows() }
+    const timer = setInterval(refresh, 60_000)
+    document.addEventListener('visibilitychange', refresh)
+    window.addEventListener('focus', refresh)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', refresh)
+      window.removeEventListener('focus', refresh)
     }
   }, [user])
 
