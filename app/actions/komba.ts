@@ -2236,6 +2236,7 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   paymentStatus: string
   notes: string
   dilipOrderedAt: string
+  extraGuides: number
 }>) {
   await ensureExcursionPriceColumns()
   const touchesInvoice = data.excursionId !== undefined
@@ -2276,6 +2277,7 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   if (data.paymentStatus !== undefined) updateData.paymentStatus = data.paymentStatus
   if (data.notes !== undefined) updateData.notes = data.notes || null
   if (data.dilipOrderedAt !== undefined) updateData.dilipOrderedAt = new Date(data.dilipOrderedAt)
+  if (data.extraGuides !== undefined) updateData.extraGuides = Math.max(0, Math.round(data.extraGuides))
   
   await db.update(excursionBookings).set(updateData).where(eq(excursionBookings.id, id))
   if (previous) await syncExcursionInvoiceLine(id, previous)
@@ -2835,15 +2837,18 @@ export async function getArchivedExcursions() {
     const dilipOverride = members.find(m => m.dilipOverrideAr != null)?.dilipOverrideAr
     // Ista izjema kot na seznamu "Izleti za naročiti": polna cena čolna, brez provizije.
     const dilipPaysFullBoat = dilipOverride == null && dilipOwesFullBoatPrice(excursionName, first.boatId)
-    const dilipPayment = dilipOverride != null
-      ? Number(dilipOverride)
-      : dilipPaysFullBoat
+    const extraGuides = Math.max(0, ...members.map(m => Number(m.extraGuides) || 0))
+    const extraGuideAr = guidePrice * extraGuides
+    const baseDilipPayment = dilipPaysFullBoat
       ? dilipFullBoatAr(boatCompletePrice)
       : isFixedDilip
       ? 80000 + guidePrice
       : isDirectBoat
         ? boatCompletePrice + guidePrice
         : (boatNet > 0 ? Math.round(boatNet * 0.9) + guidePrice : 0)
+    const dilipPayment = dilipOverride != null
+      ? Number(dilipOverride)
+      : baseDilipPayment > 0 ? baseDilipPayment + extraGuideAr : 0
     const entranceTotalAr = Math.round((excType?.entranceFeeAr || 0) * totalPax)
     // Kosilo NEPOSREDNO v Ar iz cenika ponudnika (pricePerPersonAr × pax), da se izognemo
     // round-trip zaokroževanju Ar→EUR→Ar (70.000 → 69.984). Rezerva: stara EUR cena × tečaj.

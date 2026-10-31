@@ -476,6 +476,7 @@ export const excursionBookings = pgTable('excursion_bookings', {
   fanjaLedgerId: text('fanjaLedgerId'),
   fanjaPaidAmountAr: integer('fanjaPaidAmountAr'),
   dilipOverrideAr: integer('dilipOverrideAr'),
+  extraGuides: integer('extraGuides').notNull().default(0),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   })
   

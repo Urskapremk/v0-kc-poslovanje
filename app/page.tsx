@@ -10017,15 +10017,24 @@ function GuestCard() {
                   const dilipOverride = members.map(m => (m.excursion as { dilipOverrideAr?: number | null }).dilipOverrideAr).find(v => v != null);
                   // Nosy Tanikely and trip around Nosy Komba + Dilip: polna cena čolna, brez vodiča in brez 10 %.
                   const dilipPaysFullBoat = dilipOverride == null && dilipOwesFullBoatPrice(item.excursionName, exc.boatId);
-                  const dilipPayment = dilipOverride != null
-                    ? Number(dilipOverride)
-                    : dilipPaysFullBoat
+                  const extraGuides = Math.max(0, ...members.map(m => Number((m.excursion as { extraGuides?: number }).extraGuides) || 0));
+                  const extraGuideAr = guidePrice * extraGuides;
+                  const baseDilipPayment = dilipPaysFullBoat
                     ? dilipFullBoatAr(boatCompletePrice)
                     : isFixedDilipExcursion
                     ? 80000 + guidePrice
                     : isDirectBoatExcursion
                       ? boatCompletePrice + guidePrice
                       : (boatNet > 0 ? Math.round(boatNet * 0.9) + guidePrice : 0);
+                  const dilipPayment = dilipOverride != null
+                    ? Number(dilipOverride)
+                    : baseDilipPayment > 0 ? baseDilipPayment + extraGuideAr : 0;
+                  const setExtraGuides = async (n: number) => {
+                    await Promise.all(members.map((m, mi) =>
+                      updateExcursionBooking(m.excursion.id, { extraGuides: mi === 0 ? n : 0 })
+                    ));
+                    refresh();
+                  };
                   const dilipPayLabel = dilipPaysFullBoat ? 'Dilipu (čoln)' : 'Dilipu (čoln + vodič)';
                   // Vstopnina (skiper jo plača na licu mesta) = vstopnina/os × SKUPNO število oseb
                   const entranceTotalAr = Math.round((excType?.entranceFeeAr || 0) * totalPax);
@@ -10099,6 +10108,34 @@ function GuestCard() {
                                   : (dilipPayment > 0 ? ar(dilipPayment) : '—')}
                               </span>
                             </div>
+                            {!isFanjaExcursion && guidePrice > 0 && (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-[#2b2622]/55">
+                                  {extraGuides > 0
+                                    ? `od tega dodaten vodič${extraGuides > 1 ? ` ×${extraGuides}` : ''} (${ar(guidePrice)}/vodič)`
+                                    : `Vodič ${ar(guidePrice)} — dodaten vodič?`}
+                                </span>
+                                <span className="flex items-center gap-1.5">
+                                  {extraGuides > 0 && (
+                                    <span className="text-[11px] font-semibold text-[#3f6b7d] whitespace-nowrap">+{ar(extraGuideAr)}</span>
+                                  )}
+                                  {extraGuides > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setExtraGuides(extraGuides - 1)}
+                                      aria-label="Odstrani dodatnega vodiča"
+                                      className="flex h-5 w-5 items-center justify-center rounded-full border border-[#3f6b7d]/30 text-[11px] text-[#3f6b7d] hover:bg-[#3f6b7d]/10"
+                                    >−</button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setExtraGuides(extraGuides + 1)}
+                                    aria-label="Dodaj dodatnega vodiča"
+                                    className="flex h-5 items-center justify-center rounded-full border border-[#3f6b7d]/30 px-1.5 text-[10px] font-semibold text-[#3f6b7d] hover:bg-[#3f6b7d]/10"
+                                  >{extraGuides > 0 ? '+' : '+ vodič'}</button>
+                                </span>
+                              </div>
+                            )}
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-[10px] text-[#2b2622]/55">Vodiču za kosilo</span>
                               <span className="text-[11px] font-semibold text-[#8f6d3a] whitespace-nowrap">
