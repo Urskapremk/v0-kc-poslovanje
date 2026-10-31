@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { stayUnits } from "./bungalow"
-import { mergeGuestFieldsIntoPeople, multiStayUnitForSlot, policePerson, replaceBungalowPeople } from "./bungalow-people"
+import { findPersonByCheckinToken, mergeGuestFieldsIntoPeople, multiStayUnitForSlot, policePerson, replaceBungalowPeople, stayPeopleForCheckin, writePersonFields } from "./bungalow-people"
 
 const VITOGAZ = "Garden Bungalov III / Garden Bungalov III (2+1); Ocean Bungalow IV - Beach Villa / Ocean Bungalow IV ; Jungle Glamp Village / Jungle Glamp Village 1 (2+0); Jungle Glamp Village / Jungle Glamp Village 2 (2+0)"
 
@@ -55,6 +55,60 @@ describe("bungalow people", () => {
     assert.equal(next.jungle[0].name, "Ana")
     assert.equal(next.jungle[0].passport, "X1")
     assert.equal(next["jungle-ii"][0].name, "Boris")
+  })
+
+  it("lists every named guest on bungalow I, not only the first person of each unit", () => {
+    const bungalow = "Ocean Bungalov I – for 4 / Ocean Family Bungalov I (4+0); Ocean Bungalow II / Ocean Bungalow II (2+0)"
+    const people = {
+      "ocean-i": [
+        { name: "Kristofer Thorslund" },
+        { name: "Mrs. Thorslund" },
+        { name: "Child 11 year" },
+        { name: "Child 9 year" },
+        { name: "" },
+      ],
+      "ocean-ii": [{ name: "Mrs." }, { name: "Child 13 years" }],
+    }
+    const listed = stayPeopleForCheckin(bungalow, people)
+    assert.deepEqual(listed.map(person => person.name), [
+      "Kristofer Thorslund",
+      "Mrs. Thorslund",
+      "Child 11 year",
+      "Child 9 year",
+      "Mrs.",
+      "Child 13 years",
+    ])
+    assert.deepEqual(listed.filter(person => person.legacySlot).map(person => person.name), [
+      "Kristofer Thorslund",
+      "Mrs.",
+    ])
+    assert.equal(listed.find(person => person.name === "Mrs. Thorslund")?.unitKey, "ocean-i")
+    assert.equal(listed.find(person => person.name === "Child 13 years")?.legacySlot, null)
+  })
+
+  it("lists every person on Jungle Glamp Village I", () => {
+    const bungalow = "Jungle Glamp Village / Jungle Glamp Village 1 (2+0); Jungle Glamp Village / Jungle Glamp Village 2 (2+0)"
+    const listed = stayPeopleForCheckin(bungalow, {
+      jungle: [{ name: "Ana" }, { name: "Cene" }],
+      "jungle-ii": [{ name: "Boris" }],
+    })
+    assert.deepEqual(listed.map(person => `${person.unitLabel}: ${person.name}`), [
+      "Jungle Glamp Village I: Ana",
+      "Jungle Glamp Village I: Cene",
+      "Jungle Glamp Village II: Boris",
+    ])
+  })
+
+  it("writes a later person without replacing the first person on that bungalow", () => {
+    const next = writePersonFields(
+      { "ocean-i": [{ name: "Kristofer Thorslund" }, { name: "Mrs. Thorslund" }] },
+      "ocean-i",
+      1,
+      { guestName: "Mrs. Thorslund", passport: "P2" },
+    )
+    assert.equal(next["ocean-i"][0].name, "Kristofer Thorslund")
+    assert.equal(next["ocean-i"][1].passport, "P2")
+    assert.equal(findPersonByCheckinToken({ "ocean-i": [{ name: "A", checkinToken: "abc" }, { name: "B", checkinToken: "def" }] }, "def")?.index, 1)
   })
 
   it("takes the police person from that bungalow, not the company holder", () => {

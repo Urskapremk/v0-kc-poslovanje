@@ -34,24 +34,38 @@ export function multiStayUnitForSlot(
   return units[GUEST_SLOTS.indexOf(slot)]?.key || null
 }
 
+// Writes police-form fields onto one person in a bungalow. index 0 is the
+// first person; later people on the same bungalow keep their own row.
+export function writePersonFields(
+  current: BungalowPeopleMap | null | undefined,
+  key: string,
+  index: number,
+  fields: Partial<Record<string, string>>,
+): BungalowPeopleMap {
+  const list = [...(current?.[key] || [])].map(person => ({ ...person }))
+  while (list.length <= index) list.push({ name: '' })
+  const person: BungalowPerson = { ...(list[index] || { name: '' }) }
+  if (fields.guestName !== undefined) person.name = fields.guestName
+  for (const field of PERSON_FIELDS) {
+    if (fields[field] !== undefined) person[field] = fields[field]
+  }
+  list[index] = person
+  return replaceBungalowPeople(current, key, list)
+}
+
 export function mergeGuestFieldsIntoPeople(
   current: BungalowPeopleMap | null | undefined,
   key: string,
   fields: Partial<Record<string, string>>,
 ): BungalowPeopleMap {
-  const list = [...(current?.[key] || [])]
-  const person: BungalowPerson = { ...(list[0] || { name: '' }) }
-  if (fields.guestName !== undefined) person.name = fields.guestName
-  for (const field of PERSON_FIELDS) {
-    if (fields[field] !== undefined) person[field] = fields[field]
-  }
-  if (list.length === 0) list.push(person)
-  else list[0] = person
-  return replaceBungalowPeople(current, key, list)
+  return writePersonFields(current, key, 0, fields)
 }
 
 export type BungalowPerson = {
   name: string
+  // Private link for a person who is not the first in their bungalow.
+  // The first person of each of the first four units keeps the legacy slot token.
+  checkinToken?: string
   nationality?: string
   passport?: string
   dateOfBirth?: string
@@ -83,6 +97,58 @@ export function replaceBungalowPeople(
   }
   base[key] = people.map(person => ({ ...person, name: person.name ?? '' }))
   return base
+}
+
+export type StayCheckinPerson = {
+  unitKey: string
+  unitLabel: string
+  index: number
+  name: string
+  // Set only for the first person of a unit that still has a legacy slot token.
+  legacySlot: GuestSlotName | null
+}
+
+// Every named person on a multi-unit stay, bungalow by bungalow. Blank rows
+// are not guests. A single-unit booking returns [] and keeps the shared columns.
+export function stayPeopleForCheckin(
+  bungalow: string | null | undefined,
+  people: BungalowPeopleMap | null | undefined,
+): StayCheckinPerson[] {
+  const units = stayUnits(bungalow)
+  if (units.length < 2) return []
+  const listed: StayCheckinPerson[] = []
+  units.forEach((unit, unitIndex) => {
+    const list = people?.[unit.key]
+    if (!Array.isArray(list)) return
+    list.forEach((person, index) => {
+      const name = (person?.name || '').trim()
+      if (!name) return
+      listed.push({
+        unitKey: unit.key,
+        unitLabel: unit.label,
+        index,
+        name,
+        legacySlot: index === 0 && unitIndex < GUEST_SLOTS.length ? GUEST_SLOTS[unitIndex] : null,
+      })
+    })
+  })
+  return listed
+}
+
+export function findPersonByCheckinToken(
+  people: BungalowPeopleMap | null | undefined,
+  token: string,
+): { unitKey: string; index: number; person: BungalowPerson } | null {
+  if (!people || !token) return null
+  for (const [unitKey, list] of Object.entries(people)) {
+    if (!Array.isArray(list)) continue
+    const index = list.findIndex(person => person?.checkinToken === token)
+    if (index >= 0) {
+      const person = list[index]
+      return { unitKey, index, person: { ...person, name: person.name || '' } }
+    }
+  }
+  return null
 }
 
 // Police form for one bungalow reads that bungalow's person. It does not fall

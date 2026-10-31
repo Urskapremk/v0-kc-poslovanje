@@ -10,7 +10,7 @@ import useSWR, { mutate } from "swr";
 import { BungalowPeopleEditor } from "@/components/bungalow-people-editor";
 import { SplitStayPanel } from "@/components/split-stay-panel";
 import { ReservedExcursionPrices } from "@/components/reserved-excursion-prices";
-import type { BungalowPeopleMap, BungalowPerson } from "@/lib/bungalow-people";
+import { stayPeopleForCheckin, type BungalowPeopleMap, type BungalowPerson } from "@/lib/bungalow-people";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
@@ -2016,7 +2016,7 @@ export default function KombaCabanaApp() {
   const [loadingInvoicePreview, setLoadingInvoicePreview] = React.useState(false);
   const [invoicePreview, setInvoicePreview] = React.useState<{ html: string; to: string; excludeAccommodation: boolean; onlyStayMeals: boolean; hidePayments?: boolean } | null>(null);
   const [loadingCheckinPreview, setLoadingCheckinPreview] = React.useState(false);
-  const [checkinPreview, setCheckinPreview] = React.useState<{ html: string; to: string; guests: { slot: 'first' | 'second' | 'third' | 'fourth'; label: string; expanded: boolean; data: Record<CheckinGuestField, string> }[] } | null>(null);
+  const [checkinPreview, setCheckinPreview] = React.useState<{ html: string; to: string; guests: { slot: 'first' | 'second' | 'third' | 'fourth'; unitKey?: string; personIndex?: number; label: string; expanded: boolean; data: Record<CheckinGuestField, string> }[] } | null>(null);
   const [savingCheckinNames, setSavingCheckinNames] = React.useState(false);
   const [loadingFeedbackPreview, setLoadingFeedbackPreview] = React.useState(false);
   const [emailingFeedback, setEmailingFeedback] = React.useState(false);
@@ -3966,35 +3966,49 @@ function GuestCard() {
           // guest already entered) before sending. Show a row per guest up to
           // the party size.
           const namedCount = [reservation.secondGuestName, reservation.thirdGuestName, reservation.fourthGuestName].filter((n) => (n || "").trim()).length + 1;
-          const slotsToShow = multiStay ? Math.min(4, stayUnitList.length) : Math.min(4, Math.max(reservation.pax || 1, namedCount));
+          const slotsToShow = Math.min(4, Math.max(reservation.pax || 1, namedCount));
           const r = reservation as unknown as Record<string, unknown>;
           // Column name for a slot + base field ("first" = raw column, others prefixed).
           const colOf = (slot: 'first' | 'second' | 'third' | 'fourth', base: CheckinGuestField) =>
             slot === 'first' ? base : `${slot}${base.charAt(0).toUpperCase()}${base.slice(1)}`;
           const fieldKeys: CheckinGuestField[] = ['guestName', 'dateOfBirth', ...CHECKIN_EXTRA_FIELDS.map((f) => f.key)];
-          const buildData = (slot: 'first' | 'second' | 'third' | 'fourth', unitKey?: string) => {
+          const dataFromPerson = (person?: BungalowPerson) => {
             const d = {} as Record<CheckinGuestField, string>;
-            if (unitKey) {
-              const person = (reservation.bungalowPeople?.[unitKey] || [])[0];
-              fieldKeys.forEach((k) => {
-                const value = k === 'guestName' ? person?.name : person?.[k as keyof BungalowPerson];
-                d[k] = (value || "").toString().trim();
-              });
-              return d;
-            }
+            fieldKeys.forEach((k) => {
+              const value = k === 'guestName' ? person?.name : person?.[k as keyof BungalowPerson];
+              d[k] = (value || "").toString().trim();
+            });
+            return d;
+          };
+          const buildData = (slot: 'first' | 'second' | 'third' | 'fourth') => {
+            const d = {} as Record<CheckinGuestField, string>;
             fieldKeys.forEach((k) => { d[k] = ((r[colOf(slot, k)] as string) || "").toString().trim(); });
             return d;
           };
           const slotNames = ['first', 'second', 'third', 'fourth'] as const;
+          const namedStayPeople = multiStay ? stayPeopleForCheckin(reservation.bungalow, reservation.bungalowPeople) : [];
           const allSlots = multiStay
-            ? stayUnitList.slice(0, 4).map((unit, i) => ({ slot: slotNames[i], label: unit.label, expanded: false, data: buildData(slotNames[i], unit.key) }))
+            ? (namedStayPeople.length > 0 ? namedStayPeople : stayUnitList.map((unit, i) => ({
+                unitKey: unit.key,
+                unitLabel: unit.label,
+                index: 0,
+                name: '',
+                legacySlot: slotNames[i] || 'first' as const,
+              }))).map((person) => ({
+                slot: person.legacySlot || 'first',
+                unitKey: person.unitKey,
+                personIndex: person.index,
+                label: person.name ? `${person.unitLabel} · ${person.name}` : person.unitLabel,
+                expanded: false,
+                data: dataFromPerson((reservation.bungalowPeople?.[person.unitKey] || [])[person.index]),
+              }))
             : ([
             { slot: 'first', label: 'Guest 1' },
             { slot: 'second', label: 'Guest 2' },
             { slot: 'third', label: 'Guest 3' },
             { slot: 'fourth', label: 'Guest 4' },
           ] as const).map((s) => ({ slot: s.slot, label: s.label, expanded: false, data: buildData(s.slot) }));
-          setCheckinPreview({ html: result.html, to: result.to || "", guests: allSlots.slice(0, slotsToShow) });
+          setCheckinPreview({ html: result.html, to: result.to || "", guests: multiStay ? allSlots : allSlots.slice(0, slotsToShow) });
         } else {
           showMsg(result.error || "Predogleda ni bilo mogoce pripraviti.");
         }
@@ -6996,10 +7010,18 @@ function GuestCard() {
                     onClick={async () => {
                       setSavingCheckinNames(true);
                       try {
+                        const stayEdits = checkinPreview.guests
+                          .filter((g) => g.unitKey)
+                          .map((g) => ({ unitKey: g.unitKey as string, index: g.personIndex ?? 0, fields: { ...g.data } }));
                         const guestData: Record<string, Record<string, string>> = {};
-                        checkinPreview.guests.forEach((g) => { guestData[g.slot] = { ...g.data }; });
+                        if (stayEdits.length === 0) checkinPreview.guests.forEach((g) => { guestData[g.slot] = { ...g.data }; });
                         const { getCheckinEmailPreview } = await import("@/app/actions/checkin");
-                        const result = await getCheckinEmailPreview(reservation.id, checkinPreview.to, guestData);
+                        const result = await getCheckinEmailPreview(
+                          reservation.id,
+                          checkinPreview.to,
+                          stayEdits.length ? undefined : guestData,
+                          stayEdits.length ? stayEdits : undefined,
+                        );
                         if (result.html) {
                           setCheckinPreview((p) => (p ? { ...p, html: result.html! } : p));
                           refresh();
@@ -7047,10 +7069,18 @@ function GuestCard() {
                       }
                       setEmailingGuest(true);
                       try {
+                        const stayEdits = checkinPreview.guests
+                          .filter((g) => g.unitKey)
+                          .map((g) => ({ unitKey: g.unitKey as string, index: g.personIndex ?? 0, fields: { ...g.data } }));
                         const guestData: Record<string, Record<string, string>> = {};
-                        checkinPreview.guests.forEach((g) => { guestData[g.slot] = { ...g.data }; });
+                        if (stayEdits.length === 0) checkinPreview.guests.forEach((g) => { guestData[g.slot] = { ...g.data }; });
                         const { sendCheckinEmail } = await import("@/app/actions/checkin");
-                        const result = await sendCheckinEmail(reservation.id, to, guestData);
+                        const result = await sendCheckinEmail(
+                          reservation.id,
+                          to,
+                          stayEdits.length ? undefined : guestData,
+                          stayEdits.length ? stayEdits : undefined,
+                        );
                         if (result.success) {
                           showMsg(`Email sent to guest (${to}).`);
                           setSentEmailsRefresh((n) => n + 1);

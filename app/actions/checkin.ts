@@ -7,7 +7,7 @@ import { revalidatePath } from 'next/cache'
 import { randomBytes } from 'crypto'
 import { logSentEmail } from './sent-emails'
 import { bungalowDistinctDisplayNames } from '@/lib/bungalow'
-import { mergeGuestFieldsIntoPeople, multiStayUnitForSlot, policePerson, type BungalowPeopleMap } from '@/lib/bungalow-people'
+import { findPersonByCheckinToken, mergeGuestFieldsIntoPeople, multiStayUnitForSlot, policePerson, replaceBungalowPeople, stayPeopleForCheckin, writePersonFields, type BungalowPeopleMap, type BungalowPerson } from '@/lib/bungalow-people'
 
 let bungalowPeopleColumnReady = false
 async function ensureBungalowPeopleColumn() {
@@ -127,6 +127,63 @@ export async function getCheckinLink(
   return { token, url: base ? `${base}/checkin/${token}` : null }
 }
 
+function guestView(res: Record<string, unknown>, guest: Record<string, unknown>, slot: GuestSlot) {
+  return {
+    id: res.id as string,
+    slot,
+    guestName: guest.guestName,
+    arrival: res.arrival,
+    departure: res.departure,
+    bungalow: res.bungalow,
+    nationality: guest.nationality,
+    passport: guest.passport,
+    dateOfBirth: guest.dateOfBirth,
+    placeOfBirth: guest.placeOfBirth,
+    fatherName: guest.fatherName,
+    motherName: guest.motherName,
+    profession: guest.profession,
+    domicile: guest.domicile,
+    passportDate: guest.passportDate,
+    passportLieu: guest.passportLieu,
+    venantDe: guest.venantDe,
+    validiteVisa: guest.validiteVisa,
+    allantA: guest.allantA,
+  }
+}
+
+function fieldsFromPerson(person: BungalowPerson | null | undefined): Record<string, unknown> {
+  const guest: Record<string, unknown> = {}
+  for (const base of GUEST_FIELDS) {
+    if (base === 'guestName') guest.guestName = person?.name || ''
+    else guest[base] = person?.[base as keyof BungalowPerson] ?? null
+  }
+  return guest
+}
+
+// A person who is not the first in their bungalow keeps a token on their row.
+// The four column tokens stay the links for the first person of each unit.
+async function loadReservationByPersonToken(token: string) {
+  if (!/^[a-f0-9]{32,128}$/i.test(token)) return null
+  const result = await db.execute(sql`
+    SELECT * FROM reservations
+    WHERE "checkedOutAt" IS NULL
+      AND "bungalowPeople"::text LIKE ${'%' + token + '%'}
+    LIMIT 8
+  `)
+  for (const row of result.rows) {
+    const raw = row.bungalowPeople
+    let people: BungalowPeopleMap | null = null
+    if (typeof raw === 'string') {
+      try { people = JSON.parse(raw) as BungalowPeopleMap } catch { people = null }
+    } else if (raw && typeof raw === 'object') {
+      people = raw as BungalowPeopleMap
+    }
+    const found = findPersonByCheckinToken(people, token)
+    if (found) return { row: { ...(row as Record<string, unknown>), bungalowPeople: people }, found }
+  }
+  return null
+}
+
 // Public: fetch the reservation data needed for the guest check-in form.
 // Detects which guest slot the token belongs to and returns that guest's
 // fields under unified keys, plus the guest's name.
@@ -153,7 +210,11 @@ export async function getReservationByToken(token: string) {
     .limit(1)
 
   const res = rows[0] as Record<string, unknown> | undefined
-  if (!res) return null
+  if (!res) {
+    const hit = await loadReservationByPersonToken(token)
+    if (!hit) return null
+    return guestView(hit.row, fieldsFromPerson(hit.found.person), 'first')
+  }
 
   const slot = slotForToken(res, token)
   if (!slot) return null
@@ -175,27 +236,7 @@ export async function getReservationByToken(token: string) {
     }
   }
 
-  return {
-    id: res.id as string,
-    slot,
-    guestName: guest.guestName,
-    arrival: res.arrival,
-    departure: res.departure,
-    bungalow: res.bungalow,
-    nationality: guest.nationality,
-    passport: guest.passport,
-    dateOfBirth: guest.dateOfBirth,
-    placeOfBirth: guest.placeOfBirth,
-    fatherName: guest.fatherName,
-    motherName: guest.motherName,
-    profession: guest.profession,
-    domicile: guest.domicile,
-    passportDate: guest.passportDate,
-    passportLieu: guest.passportLieu,
-    venantDe: guest.venantDe,
-    validiteVisa: guest.validiteVisa,
-    allantA: guest.allantA,
-  }
+  return guestView(res, guest, slot)
 }
 
 // Public: save the guest-provided check-in data.
@@ -249,7 +290,25 @@ export async function submitCheckinByToken(
 
   const row = rows[0]
   if (!row) {
-    return { success: false, error: 'Link expired or invalid' }
+    const hit = await loadReservationByPersonToken(token)
+    if (!hit) return { success: false, error: 'Link expired or invalid' }
+    const fields: Record<string, string> = {}
+    for (const [key, value] of Object.entries(data)) {
+      if (value && (GUEST_FIELDS as readonly string[]).includes(key)) fields[key] = value
+    }
+    if (Object.keys(fields).length > 0) {
+      const next = writePersonFields(
+        hit.row.bungalowPeople as BungalowPeopleMap | null,
+        hit.found.unitKey,
+        hit.found.index,
+        fields,
+      )
+      await db.update(reservations)
+        .set({ bungalowPeople: next, updatedAt: new Date() })
+        .where(eq(reservations.id, hit.row.id as string))
+    }
+    revalidatePath('/')
+    return { success: true }
   }
 
   const slot = slotForToken(row, token)
@@ -314,21 +373,25 @@ function buildCheckinEmailHtml(opts: {
   bungalow: string
   arrival: string
   departure: string
-  guests: { name: string; url: string }[]
+  guests: { name: string; url: string; unitLabel?: string }[]
 }): string {
   const logo = `${getPublicBaseUrl()}/images/komba-logo-gold.png`
   const stay = [opts.arrival, opts.departure].filter(Boolean).join(' &rarr; ')
 
+  let lastUnit = ''
   const guestLinks = opts.guests
-    .map(
-      (g) => `
+    .map((g) => {
+      const showUnit = Boolean(g.unitLabel && g.unitLabel !== lastUnit)
+      if (g.unitLabel) lastUnit = g.unitLabel
+      return `
       <tr>
         <td style="padding:14px 0 0 0;">
+          ${showUnit ? `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:1px;color:#c59b5b;text-transform:uppercase;margin-bottom:6px;">${escapeHtml(g.unitLabel || '')}</div>` : ''}
           <div style="font-size:14px;color:#e9f0f2;font-weight:600;margin-bottom:8px;">${escapeHtml(g.name)}</div>
           <a href="${g.url}" style="display:inline-block;background:#c59b5b;color:#0a2029;text-decoration:none;font-weight:600;font-size:14px;padding:12px 22px;border-radius:10px;">Complete check-in</a>
         </td>
       </tr>`
-    )
+    })
     .join('')
 
   return `<!DOCTYPE html>
@@ -409,10 +472,27 @@ export type GuestFieldValues = {
 // Per-slot overrides. Operator edits in the check-in email preview modal.
 export type GuestDataOverrides = Partial<Record<GuestSlot, GuestFieldValues>>
 
+// One person on a multi-unit stay. index is their place in that bungalow's list.
+export type StayGuestEdit = {
+  unitKey: string
+  index: number
+  fields: GuestFieldValues
+}
+
+function fieldsFromEdit(gd: GuestFieldValues): Record<string, string> {
+  const fields: Record<string, string> = {}
+  for (const base of GUEST_FIELDS) {
+    const v = gd[base as keyof GuestFieldValues]
+    if (v !== undefined) fields[base] = v.trim()
+  }
+  return fields
+}
+
 async function buildCheckinEmail(
   reservationId: string,
   toEmail?: string,
-  guestData?: GuestDataOverrides
+  guestData?: GuestDataOverrides,
+  stayEdits?: StayGuestEdit[],
 ): Promise<{ html: string; to: string; guestName: string; bungalow: string } | { error: string }> {
   await ensureBungalowPeopleColumn()
   const rows = await db
@@ -440,18 +520,23 @@ async function buildCheckinEmail(
   // so unchanged fields keep their stored value.
   const staySlots = ['first', 'second', 'third', 'fourth'] as GuestSlot[]
   const multiStay = staySlots.some(slot => multiStayUnitForSlot(res.bungalow as string, slot))
-  if (guestData && multiStay) {
+  if (multiStay && stayEdits && stayEdits.length > 0) {
+    let people = res.bungalowPeople as BungalowPeopleMap | null
+    for (const edit of stayEdits) {
+      if (!edit.unitKey) continue
+      people = writePersonFields(people, edit.unitKey, edit.index, fieldsFromEdit(edit.fields))
+    }
+    await db.update(reservations)
+      .set({ bungalowPeople: people, updatedAt: new Date() })
+      .where(eq(reservations.id, reservationId))
+    res.bungalowPeople = people
+  } else if (guestData && multiStay) {
     let people = res.bungalowPeople as BungalowPeopleMap | null
     for (const slot of staySlots) {
       const unitKey = multiStayUnitForSlot(res.bungalow as string, slot)
       const gd = guestData[slot]
       if (!unitKey || !gd) continue
-      const fields: Record<string, string> = {}
-      for (const base of GUEST_FIELDS) {
-        const v = gd[base as keyof GuestFieldValues]
-        if (v !== undefined) fields[base] = v.trim()
-      }
-      people = mergeGuestFieldsIntoPeople(people, unitKey, fields)
+      people = mergeGuestFieldsIntoPeople(people, unitKey, fieldsFromEdit(gd))
     }
     await db.update(reservations)
       .set({ bungalowPeople: people, updatedAt: new Date() })
@@ -495,19 +580,45 @@ async function buildCheckinEmail(
   // Recipient is optional for building/previewing; it's only required when sending.
   const to = (toEmail || res.email || '').trim()
 
-  // Build links for every guest present on this reservation (slot included when
-  // it has a name — including names the operator just entered above).
-  const slots: { slot: GuestSlot; name: string }[] = []
-  if (!multiStay || names.first) slots.push({ slot: 'first', name: names.first })
-  if (names.second) slots.push({ slot: 'second', name: names.second })
-  if (names.third) slots.push({ slot: 'third', name: names.third })
-  if (names.fourth) slots.push({ slot: 'fourth', name: names.fourth })
-
-  const guests: { name: string; url: string }[] = []
-  for (const s of slots) {
-    const link = await getCheckinLink(reservationId, s.slot)
-    // Use the guest's full name (name + surname) so it reads more warmly.
-    if (link.url) guests.push({ name: s.name || 'Guest', url: link.url })
+  const guests: { name: string; url: string; unitLabel?: string }[] = []
+  if (multiStay) {
+    // Every named person on every bungalow. The first person of each unit keeps
+    // the legacy slot link; everyone else gets a token stored on their row.
+    let people = res.bungalowPeople as BungalowPeopleMap | null
+    let dirty = false
+    for (const person of stayPeopleForCheckin(res.bungalow as string, people)) {
+      if (person.legacySlot) {
+        const link = await getCheckinLink(reservationId, person.legacySlot)
+        if (link.url) guests.push({ name: person.name, url: link.url, unitLabel: person.unitLabel })
+        continue
+      }
+      let token = people?.[person.unitKey]?.[person.index]?.checkinToken
+      if (!token) {
+        token = randomBytes(24).toString('hex')
+        const list = [...(people?.[person.unitKey] || [])]
+        list[person.index] = { ...(list[person.index] || { name: person.name }), checkinToken: token }
+        people = replaceBungalowPeople(people, person.unitKey, list)
+        dirty = true
+      }
+      const base = getPublicBaseUrl()
+      if (base) guests.push({ name: person.name, url: `${base}/checkin/${token}`, unitLabel: person.unitLabel })
+    }
+    if (dirty) {
+      await db.update(reservations)
+        .set({ bungalowPeople: people, updatedAt: new Date() })
+        .where(eq(reservations.id, reservationId))
+    }
+  } else {
+    // Build links for every guest present on this reservation (slot included when
+    // it has a name — including names the operator just entered above).
+    const slots: { slot: GuestSlot; name: string }[] = [{ slot: 'first', name: names.first }]
+    if (names.second) slots.push({ slot: 'second', name: names.second })
+    if (names.third) slots.push({ slot: 'third', name: names.third })
+    if (names.fourth) slots.push({ slot: 'fourth', name: names.fourth })
+    for (const s of slots) {
+      const link = await getCheckinLink(reservationId, s.slot)
+      if (link.url) guests.push({ name: s.name || 'Guest', url: link.url })
+    }
   }
 
   const bungalowLine = bungalowDistinctDisplayNames((res.bungalow as string) || '')
@@ -527,9 +638,10 @@ async function buildCheckinEmail(
 export async function getCheckinEmailPreview(
   reservationId: string,
   toEmail?: string,
-  guestData?: GuestDataOverrides
+  guestData?: GuestDataOverrides,
+  stayEdits?: StayGuestEdit[],
 ): Promise<{ html?: string; to?: string; error?: string }> {
-  const built = await buildCheckinEmail(reservationId, toEmail, guestData)
+  const built = await buildCheckinEmail(reservationId, toEmail, guestData, stayEdits)
   if ('error' in built) return { error: built.error }
   return { html: built.html, to: built.to }
 }
@@ -537,14 +649,15 @@ export async function getCheckinEmailPreview(
 export async function sendCheckinEmail(
   reservationId: string,
   toEmail?: string,
-  guestData?: GuestDataOverrides
+  guestData?: GuestDataOverrides,
+  stayEdits?: StayGuestEdit[],
 ): Promise<{ success: boolean; error?: string }> {
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
     return { success: false, error: 'E-pošta še ni nastavljena (manjka RESEND_API_KEY).' }
   }
 
-  const built = await buildCheckinEmail(reservationId, toEmail, guestData)
+  const built = await buildCheckinEmail(reservationId, toEmail, guestData, stayEdits)
   if ('error' in built) return { success: false, error: built.error }
   const { html, to, guestName, bungalow } = built
   if (!to) return { success: false, error: 'Gost nima vpisanega email naslova.' }
