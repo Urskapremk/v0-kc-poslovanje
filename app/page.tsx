@@ -15,6 +15,7 @@ import type { BungalowPeopleMap, BungalowPerson } from "@/lib/bungalow-people";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
+import { guestBillLineAmount } from "@/lib/guest-bill-amount";
   import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
   import { TimelineCalendar } from "@/components/timeline-calendar";
   import { DailyReminder, type ReminderSection } from "@/components/daily-reminder";
@@ -7773,7 +7774,7 @@ function GuestCard() {
         </GlassCard>
         <GlassCard>
           <SectionHeader eyebrow={reservation.guestName} title="Postavke za placilo" />
-          <div className="mt-6 space-y-6 max-h-[500px] overflow-y-auto pr-2">
+          <div className="mt-6 space-y-6 overflow-y-auto pr-2" style={{ maxHeight: "max(1100px, calc(100vh - 8rem))" }}>
             {sortedDates.length === 0 && paidItems.length === 0 && notExecutedTransfers.length === 0 ? <p className="text-white/40">Ni postavk.</p> : null}
             
             {/* Executed Unpaid Items - grouped by date */}
@@ -7789,7 +7790,7 @@ function GuestCard() {
                    <div className="flex items-center justify-between">
                     <div>
                       <p className="text-[#0f2e3a]">{toEnglishItemName(item.name)}</p>
-                      <p className="mt-1 text-xs text-[#2b2622]/60">{item.category} | Qty {item.qty} | {ar(item.priceAr)}</p>
+                      <p className="mt-1 text-xs text-[#2b2622]/60">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
                       {!item.isTransfer && (
                         <p className="mt-0.5 text-[10px] text-[#2b2622]/45">
                           {item.isBarItem ? `Served by: ${item.staffName || 'Bar'}` : `Added by: ${item.addedBy || 'Urska'}`}
@@ -7896,7 +7897,7 @@ function GuestCard() {
                   <div key={item.id} className="flex items-center justify-between rounded-2xl border border-white/[0.05] bg-white/[0.01] p-4 opacity-50">
                     <div>
                       <p className="text-white/60 line-through">{toEnglishItemName(item.name)}</p>
-                      <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {ar(item.priceAr)}</p>
+                      <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <LuxuryBadge variant="default">Ni izveden</LuxuryBadge>
@@ -7925,7 +7926,7 @@ function GuestCard() {
                       <div key={item.id} className="flex items-center justify-between rounded-2xl border border-[#2a7897]/10 bg-[#2a7897]/5 p-4">
                         <div>
                           <p className="text-white/60">{toEnglishItemName(item.name)}</p>
-                          <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {ar(item.priceAr)}</p>
+                          <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
                           {!item.isTransfer && (
                             <p className="mt-0.5 text-[10px] text-white/30">
                               {item.isBarItem ? `Served by: ${item.staffName || 'Bar'}` : `Added by: ${item.addedBy || 'Urska'}`}
