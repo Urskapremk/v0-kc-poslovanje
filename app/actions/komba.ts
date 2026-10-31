@@ -1039,6 +1039,7 @@ excursions: resExcursions.map(e => ({
   entranceFee: e.entranceFee ? Number(e.entranceFee) : 0,
   extraEntranceAr: e.extraEntranceAr ? Number(e.extraEntranceAr) : 0,
   extraEntranceLabel: e.extraEntranceLabel || '',
+  extraGuides: Number(e.extraGuides) || 0,
   lunchPrice: e.lunchPrice ? Number(e.lunchPrice) : 0,
   lunchPax: e.lunchPax || 0,
   entrancePax: e.entrancePax == null ? null : Number(e.entrancePax),
