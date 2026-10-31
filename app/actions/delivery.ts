@@ -80,22 +80,66 @@ export async function getActiveBungalows() {
     return isInDateRange && isCheckedIn && isNotCheckedOut && !isHiddenFromBar
   })
   
-  return currentGuests.map(r => ({
-    reservationId: r.id,
-    bungalow: r.bungalow,
-    guestName: r.guestName,
-    arrival: r.arrival,
-    departure: r.departure,
-    pax: r.pax,
-    // Per-guest names + age bands (from the guest card) so the bar can pick a
-    // person instead of guessing the discount. band null/empty = adult.
-    guests: [
+  return currentGuests.map(r => {
+    const pax = Math.max(1, r.pax || 1)
+    const legacy = [
       { name: r.guestName, band: r.guestBand ?? null },
       { name: r.secondGuestName ?? null, band: r.secondGuestBand ?? null },
       { name: r.thirdGuestName ?? null, band: r.thirdGuestBand ?? null },
       { name: r.fourthGuestName ?? null, band: r.fourthGuestBand ?? null },
-    ].slice(0, Math.max(1, r.pax || 1)),
-  }))
+    ]
+    // A multi-unit booking lists everyone per bungalow (bungalowPeople); all of
+    // them bill on this one note, so the bar must see every person across units.
+    const people = Object.values((r.bungalowPeople as Record<string, { name?: string; dateOfBirth?: string }[]> | null) || {})
+      .flat()
+      .filter(p => p?.name?.trim())
+    const legacyNamed = legacy.filter(g => g.name?.trim()).length
+    const guests = people.length > legacyNamed
+      ? people.map((p, i) => ({
+          name: p.name!.trim(),
+          band: bandFromPerson(p.name!, p.dateOfBirth, r.arrival) ?? legacy[i]?.band ?? null,
+        }))
+      : legacy
+    while (guests.length < pax) guests.push({ name: null, band: null })
+    return {
+      reservationId: r.id,
+      bungalow: r.bungalow,
+      guestName: r.guestName,
+      arrival: r.arrival,
+      departure: r.departure,
+      pax: r.pax,
+      // Per-guest names + age bands (from the guest card) so the bar can pick a
+      // person instead of guessing the discount. band null/empty = adult.
+      guests: people.length > legacyNamed ? guests : guests.slice(0, pax),
+    }
+  })
+}
+
+function ageToBand(age: number): string | null {
+  if (!Number.isFinite(age) || age < 0) return null
+  if (age < 5) return '0-5'
+  if (age < 10) return '5-10'
+  if (age <= 15) return '10-15'
+  return null
+}
+
+// Child age band from the person card: date of birth if known, otherwise an age
+// written in the name ("Child 11 year", "Otrok 9 let"). null = adult.
+function bandFromPerson(name: string, dateOfBirth: string | undefined, arrival: unknown): string | null {
+  if (dateOfBirth) {
+    const m = dateOfBirth.match(/^(\d{4})-(\d{2})-(\d{2})/) || dateOfBirth.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})/)
+    if (m) {
+      const [y, mo, d] = m[1].length === 4 ? [+m[1], +m[2], +m[3]] : [+m[3], +m[2], +m[1]]
+      const ref = new Date(String(arrival || new Date().toISOString()).slice(0, 10))
+      let age = ref.getFullYear() - y
+      if (ref.getMonth() + 1 < mo || (ref.getMonth() + 1 === mo && ref.getDate() < d)) age--
+      const band = ageToBand(age)
+      if (band) return band
+    }
+  }
+  const ageInName = name.match(/(\d{1,2})\s*(?:y\b|yr|yrs|year|years|let|leta|leto|ans?\b|anni|jahre)/i)
+  if (ageInName) return ageToBand(Number(ageInName[1]))
+  return null
 }
 
 // Get or create today's delivery note for a bungalow
