@@ -8,6 +8,7 @@ import useSWR, { mutate } from "swr";
   import { bungalowCardLabel, bungalowDisplayName, reservationMatchesBungalow, stayUnits } from "@/lib/bungalow";
   import { birthdayGuestsOnCard, birthdayLabel, unitStayDates, type StaySegment } from "@/lib/birthday-stay";
 import { BungalowPeopleEditor } from "@/components/bungalow-people-editor";
+import { ReservedExcursionPrices } from "@/components/reserved-excursion-prices";
 import type { BungalowPeopleMap, BungalowPerson } from "@/lib/bungalow-people";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
@@ -212,6 +213,9 @@ interface ExcursionBooking {
   guestPrice: number;
   lunchProviderId: string;
   lunchPrice: number;
+  lunchPax?: number;
+  entrancePax?: number | null;
+  boatPriceEur?: number | null;
   entranceFee: number;
   extraEntranceAr?: number;
   extraEntranceLabel?: string;
@@ -6550,168 +6554,20 @@ function GuestCard() {
                                 </div>
                               </div>
                               
-                              <div className="grid grid-cols-2 gap-2">
-                                <div>
-                                  <label className="block text-[10px] text-white/40 mb-1">Coln</label>
-                                  <select
-                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-[#c59b5b]/50 focus:outline-none [&>option]:bg-[#0f2e3a] [&>option]:text-white"
-                                    value={exc.boatId || ''}
-                                    onChange={async e => {
-                                      const boatId = e.target.value;
-                                      const price = getExcursionGuestPrice(exc.excursionId, boatId, reservation.pax);
-                                      await updateExcursionBooking(exc.id, { boatId, guestPrice: price });
-                                      refresh();
-                                    }}
-                                  >
-                                    <option value="">-- Izberi --</option>
-                                    {dbBoats.map((b: { id: string; name: string; engine: string }) => (
-                                      <option key={b.id} value={b.id}>{b.name}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                                
-                                <div>
-                                  <label className="block text-[10px] text-white/40 mb-1">Oseb</label>
-                                  <input
-                                    type="number"
-                                    className="w-full rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white focus:border-[#7fa8b8]/50 focus:outline-none"
-                                    value={exc.pax || reservation.pax}
-                                    onChange={async e => {
-                                      const pax = Number(e.target.value);
-                                      const price = getExcursionGuestPrice(exc.excursionId, exc.boatId, pax);
-                                      await updateExcursionBooking(exc.id, { pax, guestPrice: price });
-                                      refresh();
-                                    }}
-                                  />
-                                </div>
-                              </div>
-                          
-                          {/* Entrance Fee */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div>
-                              <label className="block text-xs text-white/40 mb-1">Vstopnina (EUR)</label>
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="number"
-                                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#7fa8b8]/50 focus:outline-none"
-                                  value={exc.entranceFee || 0}
-                                  onChange={async e => {
-                                    await updateExcursionBooking(exc.id, { entranceFee: Number(e.target.value) });
-                                    refresh();
-                                  }}
-                                />
-                                <button
-                                  onClick={async () => {
-                                    const entrancePerPerson = excursionData?.entranceFeeAr ? arToEur(excursionData.entranceFeeAr, exchangeRate) : 0;
-                                    const totalEntrance = entrancePerPerson * (exc.pax || reservation.pax);
-                                    await updateExcursionBooking(exc.id, { entranceFee: Math.round(totalEntrance * 100) / 100 });
-                                    refresh();
-                                  }}
-                                  className="px-2 py-2 rounded-lg bg-white/5 text-xs text-white/60 hover:bg-white/10 whitespace-nowrap"
-                                  title="Izracunaj iz cenika"
-                                >
-                                  Auto
-                                </button>
-                              </div>
-                            </div>
-                            
-                            {/* Lunch Provider */}
-                            <div>
-                              <label className="block text-xs text-white/40 mb-1">Ponudnik kosila</label>
-                              <select
-                                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c4744a]/50 focus:outline-none [&>option]:bg-[#0f2e3a] [&>option]:text-white"
-                                value={exc.lunchProviderId || ''}
-                                onChange={async e => {
-                                  const providerId = e.target.value;
-                                  const provider = dbLunchProviders.find((lp: { id: string }) => lp.id === providerId);
-                                  const lunchPricePerPerson = provider ? arToEur(provider.pricePerPersonAr, exchangeRate) : 0;
-                                  const totalLunch = lunchPricePerPerson * (exc.pax || reservation.pax);
-                                  await updateExcursionBooking(exc.id, { 
-                                    lunchProviderId: providerId, 
-                                    lunchPrice: Math.round(totalLunch * 100) / 100 
-                                  });
-                                  refresh();
+                              <ReservedExcursionPrices
+                                exc={exc}
+                                reservationPax={reservation.pax}
+                                boats={dbBoats}
+                                lunchProviders={dbLunchProviders}
+                                entranceFeeAr={Number((excursionData as { entranceFeeAr?: number } | undefined)?.entranceFeeAr) || 0}
+                                exchangeRate={exchangeRate}
+                                boatPerFromCatalog={(boatId, pax) => {
+                                  if (!boatId || pax < 1) return 0
+                                  return getExcursionGuestPrice(exc.excursionId, boatId, pax) / pax
                                 }}
-                              >
-                                <option value="">-- Brez kosila --</option>
-                                {dbLunchProviders.map((lp: { id: string; name: string; location: string | null; pricePerPersonAr: number }) => (
-                                  <option key={lp.id} value={lp.id}>
-                                    {lp.name} {lp.location ? `(${lp.location})` : ''} - {eur(arToEur(lp.pricePerPersonAr, exchangeRate))}/os
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                          
-                          {/* Lunch Price - only if provider selected */}
-                          {exc.lunchProviderId && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <div>
-                                <label className="block text-xs text-white/40 mb-1">Cena kosila (EUR)</label>
-                                <input
-                                  type="number"
-                                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white focus:border-[#c4744a]/50 focus:outline-none"
-                                  value={exc.lunchPrice || 0}
-                                  onChange={async e => {
-                                    await updateExcursionBooking(exc.id, { lunchPrice: Number(e.target.value) });
-                                    refresh();
-                                  }}
-                                />
-                              </div>
-                              <div className="flex items-end pb-2">
-                                <p className="text-xs text-white/40">Skupaj kosilo: {eur(exc.lunchPrice || 0)}</p>
-                              </div>
-                            </div>
-                          )}
-                          
-                          {/* Transport Price and Payment */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <LuxuryInput 
-                              label="Cena transporta (EUR)" 
-                              type="number" 
-                              value={exc.guestPrice} 
-                              onChange={async v => {
-                                await updateExcursionBooking(exc.id, { guestPrice: Number(v) });
-                                refresh();
-                              }} 
-                            />
-                            <LuxurySelect
-                              label="Status placila"
-                              value={exc.paymentStatus || 'UNPAID'}
-                              onChange={async v => {
-                                await updateExcursionBooking(exc.id, { paymentStatus: v });
-                                refresh();
-                              }}
-                              options={[
-                                { value: 'PREPAID', label: 'Vkljuceno v rezervacijo' },
-                                { value: 'PAID', label: 'Placano' },
-                                { value: 'UNPAID', label: 'Se ni placano' },
-                              ]}
-                            />
-                          </div>
-                          
-                          {/* Total Summary */}
-                          <div className="p-3 rounded-lg bg-[#7fa8b8]/10 border border-[#7fa8b8]/20">
-                            <div className="flex justify-between text-xs text-white/60">
-                              <span>Transport:</span>
-                              <span>{eur(exc.guestPrice || 0)}</span>
-                            </div>
-                            <div className="flex justify-between text-xs text-white/60">
-                              <span>Vstopnina:</span>
-                              <span>{eur(exc.entranceFee || 0)}</span>
-                            </div>
-                            {exc.lunchProviderId && (
-                              <div className="flex justify-between text-xs text-white/60">
-                                <span>Kosilo:</span>
-                                <span>{eur(exc.lunchPrice || 0)}</span>
-                              </div>
-                            )}
-                            <div className="flex justify-between text-sm font-medium text-[#7fa8b8] pt-2 mt-2 border-t border-[#7fa8b8]/20">
-                              <span>SKUPAJ:</span>
-                              <span>{eur((exc.guestPrice || 0) + (exc.entranceFee || 0) + (exc.lunchPrice || 0))}</span>
-                            </div>
-                          </div>
-                          
+                                onRefresh={refresh}
+                              />
+
                           {/* Notes */}
                           <div>
                             <label className="block text-xs text-white/40 mb-1">Opombe</label>

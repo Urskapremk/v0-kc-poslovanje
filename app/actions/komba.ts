@@ -10,6 +10,7 @@ import { unpaySupplier } from './supplier-payment'
 import { unpayFanja } from './fanja-payment'
 import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
 import { cashAriaryToEurAmount } from '@/lib/cash-payment'
+import { ensureExcursionPriceColumns } from '@/lib/excursion-price-columns'
 import { replaceBungalowPeople, type BungalowPeopleMap, type BungalowPerson } from '@/lib/bungalow-people'
 
 // Generate unique ID
@@ -764,6 +765,7 @@ async function reverseAndDeleteExcursionBooking(booking: { id: string; groupId?:
 }
 
 export async function deleteOrderItem(id: string) {
+  await ensureExcursionPriceColumns()
   const [item] = await db.select().from(orderItems).where(eq(orderItems.id, id)).limit(1)
 
   // If the deleted line is an excursion, ALSO remove the linked booking from the archive
@@ -810,6 +812,7 @@ export async function updateOrderItemPaymentStatus(id: string, status: string) {
 // consistent — otherwise the wrong date would linger there. There is no FK link between
 // order_items and excursion_bookings, so we match by reservation + the SAME old date.
 export async function updateOrderItemDate(id: string, eventDate: string) {
+  await ensureExcursionPriceColumns()
   const clean = eventDate && /^\d{4}-\d{2}-\d{2}$/.test(eventDate) ? eventDate : null
 
   const [item] = await db.select().from(orderItems).where(eq(orderItems.id, id)).limit(1)
@@ -852,6 +855,7 @@ export async function setOrderItemTransferOrdered(id: string, which: 'dilip' | '
 
 export async function getDashboardData(includeReservationId?: string) {
   await ensureCashAmountColumn()
+  await ensureExcursionPriceColumns()
   await ensureSkipBoatPayColumn()
   await ensureBungalowPeopleColumn()
   const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
@@ -1037,6 +1041,8 @@ excursions: resExcursions.map(e => ({
   extraEntranceLabel: e.extraEntranceLabel || '',
   lunchPrice: e.lunchPrice ? Number(e.lunchPrice) : 0,
   lunchPax: e.lunchPax || 0,
+  entrancePax: e.entrancePax == null ? null : Number(e.entrancePax),
+  boatPriceEur: e.boatPriceEur == null || e.boatPriceEur === '' ? null : Number(e.boatPriceEur),
   paymentStatus: e.paymentStatus,
   paidMethod: e.paidMethod || '',
   paidDate: e.paidDate || '',
@@ -1986,6 +1992,7 @@ export async function deletePayment(id: string) {
 // ============ EXCURSION BOOKINGS ============
 
 export async function getExcursionBookings(reservationId: string) {
+  await ensureExcursionPriceColumns()
   return await db.select().from(excursionBookings).where(eq(excursionBookings.reservationId, reservationId))
 }
 
@@ -2006,6 +2013,7 @@ export async function addExcursionBooking(reservationId: string, data: {
   groupId?: string
   groupPax?: number
 }) {
+  await ensureExcursionPriceColumns()
   const id = uid('excbk')
   await db.insert(excursionBookings).values({
     id,
@@ -2222,11 +2230,14 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   entranceFee: number
   lunchPrice: number
   lunchPax: number
+  entrancePax: number
+  boatPriceEur: number
   lunchProviderId: string
   paymentStatus: string
   notes: string
   dilipOrderedAt: string
 }>) {
+  await ensureExcursionPriceColumns()
   const touchesInvoice = data.excursionId !== undefined
     || data.boatId !== undefined
     || data.date !== undefined
@@ -2259,6 +2270,8 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   if (data.entranceFee !== undefined) updateData.entranceFee = String(data.entranceFee)
   if (data.lunchPrice !== undefined) updateData.lunchPrice = String(data.lunchPrice)
   if (data.lunchPax !== undefined) updateData.lunchPax = data.lunchPax
+  if (data.entrancePax !== undefined) updateData.entrancePax = data.entrancePax
+  if (data.boatPriceEur !== undefined) updateData.boatPriceEur = String(data.boatPriceEur)
   if (data.lunchProviderId !== undefined) updateData.lunchProviderId = data.lunchProviderId || null
   if (data.paymentStatus !== undefined) updateData.paymentStatus = data.paymentStatus
   if (data.notes !== undefined) updateData.notes = data.notes || null
@@ -2270,6 +2283,7 @@ export async function updateExcursionBooking(id: string, data: Partial<{
 }
 
 export async function deleteExcursionBooking(id: string) {
+  await ensureExcursionPriceColumns()
   await db.delete(excursionBookings).where(eq(excursionBookings.id, id))
   revalidatePath('/')
 }
@@ -2286,6 +2300,7 @@ export async function cancelExcursionToCredit(
   creditEur: number,
   reason?: string,
 ) {
+  await ensureExcursionPriceColumns()
   const [booking] = await db
     .select()
     .from(excursionBookings)
@@ -2341,6 +2356,7 @@ export async function cancelExcursionToCredit(
 // (e.g. recovered from illness). Reactivates the booking, removes the credit that
 // was created on cancel, and rebuilds the excursion line on the invoice/order.
 export async function reactivateExcursion(bookingId: string) {
+  await ensureExcursionPriceColumns()
   const [booking] = await db
     .select()
     .from(excursionBookings)
@@ -2762,6 +2778,7 @@ export async function getArchivedTransfers() {
 export async function getArchivedExcursions() {
   const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
   await ensureSupplierPaymentCostColumns()
+  await ensureExcursionPriceColumns()
   const [allBookings, allExc, allExcPricing, allBoats, allSupplierPayments, allLunch, rate] = await Promise.all([
     db.select().from(excursionBookings),
     db.select().from(excursions),
@@ -2922,6 +2939,7 @@ export async function searchReservations(query: string) {
 // ============ VOUCHER DATA ============
 
 export async function getExcursionVoucherData(bookingId: string) {
+  await ensureExcursionPriceColumns()
   // Get the excursion booking
   const [booking] = await db.select().from(excursionBookings).where(eq(excursionBookings.id, bookingId)).limit(1)
   if (!booking) return null
@@ -3056,6 +3074,7 @@ function excursionMatchesScheduleType(excursionName: string | null | undefined, 
 
 // Get scheduled excursions with guest bookings for each date
 export async function getScheduledExcursionsWithGuests() {
+  await ensureExcursionPriceColumns()
   const scheduled = await db.select().from(scheduledExcursions).orderBy(scheduledExcursions.date)
   const bookings = await db.select().from(excursionBookings)
   const allReservations = await db.select().from(reservations).where(isNull(reservations.checkedOutAt))

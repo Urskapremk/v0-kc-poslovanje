@@ -451,6 +451,10 @@ export const excursionBookings = pgTable('excursion_bookings', {
   extraEntranceLabel: text('extraEntranceLabel'),
   lunchPrice: decimal('lunchPrice', { precision: 10, scale: 2 }).notNull().default('0'),
   lunchPax: integer('lunchPax').notNull().default(0),
+  // How many entrance tickets this booking charges. Null on older rows; the editor infers it.
+  entrancePax: integer('entrancePax'),
+  // Boat selling price per person (EUR). The transport line can differ once it is typed by hand.
+  boatPriceEur: decimal('boatPriceEur', { precision: 10, scale: 2 }),
   lunchProviderId: text('lunchProviderId'),
   paymentStatus: text('paymentStatus').default('UNPAID'),
   paidMethod: text('paidMethod'), // 'card' | 'cash' | 'transfer' — how the guest paid (for invoice)
