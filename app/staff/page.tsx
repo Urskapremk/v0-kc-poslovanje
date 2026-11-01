@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { format } from 'date-fns'
 import { 
   getActiveBungalows, 
@@ -75,6 +75,10 @@ const BUNGALOW_CONFIG: Record<string, { code: string; color: string; bgColor: st
 const getBungalowConfig = (name: string) => {
   return BUNGALOW_CONFIG[name] || { code: "?", color: "#9dafb5", bgColor: "rgba(157,175,181, 0.15)" }
 }
+
+// Room for the header, one row of the food grid, the person picker and the
+// quantity row. The bill uses whatever is left, and at least one full line.
+const BILL_MAX_HEIGHT = 'max(5.5rem, 30dvh, calc(100dvh - 27rem))'
 
 interface Product {
   id: string
@@ -513,6 +517,39 @@ function DeliveryNoteView({
     }
   }, [categories, selectedCategory])
 
+  const billRef = useRef<HTMLDivElement>(null)
+  const [billMaxHeight, setBillMaxHeight] = useState(BILL_MAX_HEIGHT)
+  // The list has a ceiling so the person picker stays on screen. Snap that
+  // ceiling to the last line that fits whole, so a chosen person and extra
+  // lines never leave a bill row cut off at the bottom.
+  const billKey = deliveryNote.items.map(item => `${item.id}:${item.quantity}:${item.totalAr}:${item.isFree ? 1 : 0}`).join('|')
+  useLayoutEffect(() => {
+    const el = billRef.current
+    if (!el) return
+    const fitWholeLines = () => {
+      el.style.maxHeight = BILL_MAX_HEIGHT
+      const rows = [...el.querySelectorAll<HTMLElement>('[data-bill-line]')]
+      if (rows.length === 0) return
+      const top = el.getBoundingClientRect().top
+      const limit = el.clientHeight
+      let fitBottom = 0
+      for (const row of rows) {
+        const bottom = row.getBoundingClientRect().bottom - top
+        if (bottom <= limit + 1) fitBottom = bottom
+        else break
+      }
+      const contentBottom = rows[rows.length - 1].getBoundingClientRect().bottom - top
+      const next = contentBottom > limit + 1 && fitBottom > 0 && fitBottom < limit - 1
+        ? `${Math.ceil(fitBottom)}px`
+        : BILL_MAX_HEIGHT
+      el.style.maxHeight = next
+      setBillMaxHeight(prev => prev === next ? prev : next)
+    }
+    fitWholeLines()
+    window.addEventListener('resize', fitWholeLines)
+    return () => window.removeEventListener('resize', fitWholeLines)
+  }, [billKey, selectedGuestIdx])
+
   const handleAddItem = async (product: Product) => {
     setAdding(true)
     try {
@@ -553,9 +590,12 @@ function DeliveryNoteView({
   }
 
   return (
-    <div className="min-h-[100dvh] bg-[#0a2029] flex flex-col safe-area-inset">
+    // The till stays one screen tall. The food list scrolls in the middle
+    // and the bill stays on screen, so choosing a person cannot push a
+    // line off the bottom.
+    <div className="flex h-[100dvh] max-h-[100dvh] flex-col overflow-hidden bg-[#0a2029] safe-area-inset">
       {/* Header - Compact */}
-      <div className="sticky top-0 z-20 bg-[#0a2029]/95 backdrop-blur-sm border-b border-white/10">
+      <div className="z-20 shrink-0 border-b border-white/10 bg-[#0a2029]/95 backdrop-blur-sm">
         <div className="px-3 py-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 min-w-0">
@@ -603,7 +643,7 @@ function DeliveryNoteView({
       </div>
 
       {/* Products Grid - Main area */}
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-3">
         <div className="grid grid-cols-3 gap-2">
           {selectedCategory && products[selectedCategory]?.map((product) => {
             const existingItem = deliveryNote.items.find(item => item.productId === product.id);
@@ -633,19 +673,26 @@ function DeliveryNoteView({
         </div>
       </div>
 
-      {/* Bottom Panel - Items + Quantity + Total */}
-      <div className="sticky bottom-0 bg-[#0b2731] border-t border-white/10">
-        {/* Items List - dobavnica style */}
+      {/* Bottom Panel - Items + Quantity + Total.
+          The bill grows with what was added and only then scrolls, inside
+          the space left after the person picker. A chosen person adds a
+          note under the chips; that must not cover or slice a line. */}
+      <div className="shrink-0 border-t border-white/10 bg-[#0b2731]">
         {deliveryNote.items.length > 0 && (
-          <div className="px-3 py-2 border-b border-white/5 max-h-[30vh] overflow-y-auto">
+          <div
+            ref={billRef}
+            className="min-h-[5.5rem] overflow-y-auto border-b border-white/5 px-3 py-2"
+            style={{ maxHeight: billMaxHeight }}
+          >
             <div className="space-y-0">
               {deliveryNote.items.map((item) => (
-                <div 
+                <div
                   key={item.id}
-                  className="flex items-center justify-between py-2 border-b border-white/5 last:border-b-0"
+                  data-bill-line
+                  className="flex items-start justify-between gap-2 border-b border-white/5 py-2 last:border-b-0"
                 >
-                  <span className="text-white/70 text-sm">{item.quantity}x {toEnglishItemName(item.productName)}</span>
-                  <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 text-sm leading-snug text-white/70">{item.quantity}x {toEnglishItemName(item.productName)}</span>
+                  <div className="flex shrink-0 items-center gap-2">
                     {item.coveredByMealPlan ? (
                       <span className="text-[#8fae92] text-xs font-medium">Included (board)</span>
                     ) : item.isFree ? (
@@ -679,8 +726,10 @@ function DeliveryNoteView({
         )}
         
         {/* Pot A: pick the guest the meal is FOR. The child discount is read
-            straight from the guest card, so the bar never guesses a % . */}
-        <div className="px-3 pt-2">
+            straight from the guest card, so the bar never guesses a % .
+            Chips scroll on their own when a bungalow has many guests, so
+            they cannot shove the bill off the screen. */}
+        <div className="max-h-40 shrink-0 overflow-y-auto px-3 pt-2">
           <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1">Who is this meal for?</p>
           <div className="flex flex-wrap gap-1.5">
             <button
