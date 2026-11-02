@@ -502,7 +502,13 @@ async function syncTransferItem(reservationId: string, type: 'arrival' | 'depart
 
   const routeRow = tr.route ? (await db.select().from(routes).where(eq(routes.id, tr.route)).limit(1))[0] : null
   const boatRow = tr.boatId ? (await db.select().from(boats).where(eq(boats.id, tr.boatId)).limit(1))[0] : null
-  const routeName = routeRow?.name || tr.route
+  const taxiRouteRow = tr.hermanRouteId
+    ? (await db.select().from(routes).where(eq(routes.id, tr.hermanRouteId)).limit(1))[0]
+    : null
+  const goesToAirport = /airport|a[ée]roport|fascene/i.test(taxiRouteRow?.name || '')
+  const routeName = goesToAirport
+    ? (type === 'departure' ? 'Komba Cabana - Airport Fascene' : 'Airport Fascene - Komba Cabana')
+    : (routeRow?.name || tr.route)
   const boatName = boatRow?.name || ''
 
   const dateSrc = type === 'arrival' ? res.arrival : res.departure

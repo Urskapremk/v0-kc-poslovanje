@@ -2254,7 +2254,8 @@ export default function KombaCabanaApp() {
       const isPaid = arrivalTransfer.paymentStatus === 'PAID';
       const totalPriceEur = arrivalTransfer.guestPrice || getTransferGuestPrice(routeId, boatId, pax);
       const totalPriceAr = Math.round(totalPriceEur * exchangeRate); // Convert EUR to Ariary
-      const routeName = routeNameById(routeId) || routeId;
+      const arrivalViaAirport = /airport|a[ée]roport|fascene/i.test(arrivalTransfer.hermanRouteId ? (routeNameById(arrivalTransfer.hermanRouteId) || '') : '');
+      const routeName = arrivalViaAirport ? 'Airport Fascene - Komba Cabana' : (routeNameById(routeId) || routeId);
       const boatName = dbBoats.find((b: { id: string; name: string }) => b.id === boatId)?.name || '';
       // Get arrival date as string for eventDate (YYYY-MM-DD format)
       const arrivalDateStr = formatDateStr(res.arrival);
@@ -2281,7 +2282,8 @@ export default function KombaCabanaApp() {
       const isPaid = departureTransfer.paymentStatus === 'PAID';
       const totalPriceEur = departureTransfer.guestPrice || getTransferGuestPrice(routeId, boatId, pax);
       const totalPriceAr = Math.round(totalPriceEur * exchangeRate); // Convert EUR to Ariary
-      const routeName = routeNameById(routeId) || routeId;
+      const departureViaAirport = /airport|a[ée]roport|fascene/i.test(departureTransfer.hermanRouteId ? (routeNameById(departureTransfer.hermanRouteId) || '') : '');
+      const routeName = departureViaAirport ? 'Komba Cabana - Airport Fascene' : (routeNameById(routeId) || routeId);
       const boatName = dbBoats.find((b: { id: string; name: string }) => b.id === boatId)?.name || '';
       // Get departure date as string for eventDate (YYYY-MM-DD format)
       const departureDateStr = formatDateStr(res.departure);
