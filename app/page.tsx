@@ -16,6 +16,7 @@ import { stayPeopleForCheckin, type BungalowPeopleMap, type BungalowPerson } fro
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
 import { guestBillLineAmount } from "@/lib/guest-bill-amount";
+import { capturePaymentListPlace, restorePaymentListPlace, type PaymentListPlace } from "@/lib/payment-list-place";
   import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
   import { TimelineCalendar } from "@/components/timeline-calendar";
   import { DailyReminder, type ReminderSection } from "@/components/daily-reminder";
@@ -1852,6 +1853,16 @@ function PlaceClock({ timeZone, title, active }: { timeZone: string; title: stri
   );
 }
 
+// Orders is declared inside the dashboard, so a fresh function exists on every
+// render. <Orders /> would remount the delivery note whenever Odstrani sets
+// state, and the payment list would jump back to the top. This shell keeps one
+// component identity; the latest render is stored in the ref during render.
+const ordersPanelRef: { current: (() => React.ReactNode) | null } = { current: null }
+function OrdersPanel() {
+  const renderOrders = ordersPanelRef.current
+  return renderOrders ? renderOrders() : null
+}
+
 // ============ MAIN APP ============
 export default function KombaCabanaApp() {
   // ALL HOOKS MUST BE AT THE TOP - before any conditional returns
@@ -2043,6 +2054,8 @@ export default function KombaCabanaApp() {
   // Which bar (delivery-note) item's quantity is being corrected, and the typed value.
   const [qtyEditItem, setQtyEditItem] = React.useState<string | null>(null);
   const [qtyEditVal, setQtyEditVal] = React.useState("");
+  // Scroll and focus captured just before Odstrani removes a payment line.
+  const paymentListPlace = React.useRef<PaymentListPlace | null>(null);
   
   // PIN Protection State
   const [isAuthenticated, setIsAuthenticated] = React.useState(false);
@@ -2070,6 +2083,15 @@ export default function KombaCabanaApp() {
       setTab('guest');
     }
   }, []);
+
+  // Put the payment list back where it was after Odstrani. The browser (and a
+  // route refresh from the server action) can scroll to the top once the
+  // focused button is gone; this runs before paint on every commit while a
+  // place is held.
+  React.useLayoutEffect(() => {
+    const place = paymentListPlace.current
+    if (place) restorePaymentListPlace(place)
+  });
   
   const handlePinKey = (key: string) => {
     if (key === 'C') {
@@ -2526,8 +2548,35 @@ async function handleCreateReservation() {
     setSaving(false);
   }
 
+  function settlePaymentListPlace() {
+    const place = paymentListPlace.current;
+    if (!place) return;
+    const restore = () => {
+      if (paymentListPlace.current !== place) return;
+      restorePaymentListPlace(place);
+    };
+    restore();
+    requestAnimationFrame(restore);
+    window.setTimeout(restore, 0);
+    window.setTimeout(restore, 60);
+    window.setTimeout(() => {
+      if (paymentListPlace.current === place) paymentListPlace.current = null;
+    }, 120);
+  }
+
+  function removePaymentLine(
+    event: React.MouseEvent<HTMLButtonElement>,
+    item: { id: string; isBarItem?: boolean; deliveryNoteId?: string },
+  ) {
+    event.preventDefault();
+    // Focus a line that stays on screen before this button unmounts.
+    paymentListPlace.current = capturePaymentListPlace(event.currentTarget, item.id);
+    void handleDeleteOrder(item);
+  }
+
   async function handleDeleteOrder(item: { id: string; isBarItem?: boolean; deliveryNoteId?: string }) {
     setSaving(true);
+    let removed = false;
     try {
       if (item.isBarItem) {
         // Bar items live in delivery_note_items, not order_items — delete from the delivery note.
@@ -2540,11 +2589,15 @@ async function handleCreateReservation() {
         await deleteOrderItem(item.id);
         await mutate((key) => key === "nabava-trips" || (Array.isArray(key) && key[0] === "nabava-purchases"));
       }
-      refresh();
+      await refresh();
+      removed = true;
     } catch {
+      paymentListPlace.current = null;
       showMsg("Brisanje postavke ni uspelo. Poskusite znova.");
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
+    if (removed) settlePaymentListPlace();
   }
 
   async function handleToggleFree(item: { id: string; deliveryNoteId?: string; isBarItem?: boolean }, free: boolean) {
@@ -7328,6 +7381,24 @@ function GuestCard() {
       setDiscounts(data as typeof discounts);
     }
     React.useEffect(() => { loadDiscounts(); }, [reservationId]);
+    // The panel no longer remounts on every save, so a guest switch has to
+    // clear the drafts that used to disappear with the old component.
+    const seenReservationId = React.useRef(reservationId);
+    React.useEffect(() => {
+      if (seenReservationId.current === reservationId) return;
+      seenReservationId.current = reservationId;
+      setShowDiscounts(false);
+      setDiscountKind('stay');
+      setDiscountLabel('');
+      setDiscountAmount('');
+      setAddingDiscount(false);
+      setShowCustomExcursion(false);
+      setCustomExcursionDraft({ name: "", priceEur: 0, date: today(), paymentStatus: "UNPAID", paidMethod: "cash", paidDate: today() });
+      setMealBand('');
+      setSelProductIsFood(false);
+      setSelProductBaseAr(0);
+      setBalanceDueEur(null);
+    }, [reservationId]);
 
     async function handleAddDiscount() {
       const eur = parseFloat(discountAmount);
@@ -7804,7 +7875,12 @@ function GuestCard() {
         </GlassCard>
         <GlassCard>
           <SectionHeader eyebrow={reservation.guestName} title="Postavke za placilo" />
-          <div className="mt-6 space-y-6 overflow-y-auto pr-2" style={{ maxHeight: "max(1100px, calc(100vh - 8rem))" }}>
+          <div
+            data-payment-lines=""
+            tabIndex={-1}
+            className="mt-6 space-y-6 overflow-y-auto pr-2 outline-none"
+            style={{ maxHeight: "max(1100px, calc(100vh - 8rem))", overflowAnchor: "none" }}
+          >
             {sortedDates.length === 0 && paidItems.length === 0 && notExecutedTransfers.length === 0 ? <p className="text-white/40">Ni postavk.</p> : null}
             
             {/* Executed Unpaid Items - grouped by date */}
@@ -7816,7 +7892,7 @@ function GuestCard() {
                   <div className="h-px flex-1 bg-gradient-to-l from-[#c59b5b]/30 to-transparent" />
                 </div>
                 {groupedByDate[date].map(item => (
-                  <div key={item.id} className="rounded-2xl border border-[#0f2e3a]/12 bg-[#efe8da] p-4">
+                  <div key={item.id} data-payment-line={item.id} tabIndex={-1} className="rounded-2xl border border-[#0f2e3a]/12 bg-[#efe8da] p-4 outline-none">
                    <div className="flex items-center justify-between">
                     <div>
                       <p className="text-[#0f2e3a]">{toEnglishItemName(item.name)}</p>
@@ -7857,7 +7933,7 @@ function GuestCard() {
                       {!item.isTransfer && (
                         <button className="inline-flex min-w-[96px] cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full border border-[#4f7a54]/30 bg-[#4f7a54]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#4f7a54] transition-colors hover:bg-[#4f7a54]/20" onClick={() => handleToggleFree(item, true)}><Home className="h-2.5 w-2.5" />On House</button>
                       )}
-                      <button className="inline-flex min-w-[96px] cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full border border-[#b0203a]/30 bg-[#b0203a]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#b0203a] transition-colors hover:bg-[#b0203a]/20" onClick={() => handleDeleteOrder(item)}><Trash2 className="h-2.5 w-2.5" />Odstrani</button>
+                      <button type="button" className="inline-flex min-w-[96px] cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full border border-[#b0203a]/30 bg-[#b0203a]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#b0203a] transition-colors hover:bg-[#b0203a]/20" onMouseDown={(e) => e.preventDefault()} onClick={(e) => removePaymentLine(e, item)}><Trash2 className="h-2.5 w-2.5" />Odstrani</button>
                     </div>
                    </div>
                    {dateEditItem === item.id && (
@@ -7953,7 +8029,7 @@ function GuestCard() {
                       <div className="h-px flex-1 bg-gradient-to-l from-[#2a7897]/20 to-transparent" />
                     </div>
                     {groupedPaidByDate[date].map(item => (
-                      <div key={item.id} className="flex items-center justify-between rounded-2xl border border-[#2a7897]/10 bg-[#2a7897]/5 p-4">
+                      <div key={item.id} data-payment-line={item.id} tabIndex={-1} className="flex items-center justify-between rounded-2xl border border-[#2a7897]/10 bg-[#2a7897]/5 p-4 outline-none">
                         <div>
                           <p className="text-white/60">{toEnglishItemName(item.name)}</p>
                           <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
@@ -7984,7 +8060,7 @@ function GuestCard() {
                           {item.isFree && (
                             <button className="cursor-pointer text-white/50 transition-colors hover:text-white/80" onClick={() => handleToggleFree(item, false)}>Placljivo</button>
                           )}
-                          <button className="inline-flex cursor-pointer items-center gap-1 text-[#bc7d67] transition-colors hover:text-[#bc7d67]/70" onClick={() => handleDeleteOrder(item)}><Trash2 className="h-4 w-4" />Odstrani</button>
+                          <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-[#bc7d67] transition-colors hover:text-[#bc7d67]/70" onMouseDown={(e) => e.preventDefault()} onClick={(e) => removePaymentLine(e, item)}><Trash2 className="h-4 w-4" />Odstrani</button>
                         </div>
                       </div>
                     ))}
@@ -7997,6 +8073,8 @@ function GuestCard() {
       </section>
     );
   }
+
+  ordersPanelRef.current = Orders
 
   
   // ============ EXCURSIONS MANAGER ============
@@ -10947,7 +11025,7 @@ function GuestCard() {
     </section>
   )}
                 {tab === "guest" && GuestCard()}
-                {tab === "orders" && <Orders />}
+                {tab === "orders" && <OrdersPanel />}
                 {tab === "excursions" && <ExcursionsManager />}
               </div>
 
