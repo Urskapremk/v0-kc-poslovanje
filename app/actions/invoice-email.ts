@@ -913,8 +913,8 @@ async function buildInvoiceData(
                   .join(' · ')
               : ''
           return {
-            name: i.name as string,
-            eur: Number(i.priceAr || 0) / exchangeRate,
+  name: Number(i.qty) > 1 ? `${i.qty}x ${i.name as string}` : (i.name as string),
+  eur: Number(i.priceAr || 0) / exchangeRate,
             paid,
             free: !!i.isFree,
             included: isMealItem(i),
@@ -971,8 +971,8 @@ async function buildInvoiceData(
     extensionNote: reservation.extensionNote,
     invoiceNote: (reservation as { invoiceNote?: string | null }).invoiceNote ?? null,
     services: invoiceOrderItems.filter(isChargeableOrShown).map((i) => ({
-      name: i.name,
-      eur: Number(i.priceAr || 0) / exchangeRate,
+  name: Number((i as AnyRec).qty) > 1 ? `${(i as AnyRec).qty}x ${i.name}` : i.name,
+  eur: Number(i.priceAr || 0) / exchangeRate,
       paid: i.paymentStatus === 'PAID',
       free: !!(i as AnyRec).isFree,
       included: isMealItem(i),
