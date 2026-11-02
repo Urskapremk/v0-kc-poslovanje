@@ -32,6 +32,7 @@ interface OrderItem {
   id: string
   name: string
   category: string
+  qty?: number | null
   priceAr: number
   refPriceAr?: number | null
   paymentStatus: string
@@ -1135,6 +1136,7 @@ export default function RacunPage() {
                               <div key={item.id} className="inv-bar-item inv-rowline border-b py-2 last:border-b-0 text-sm">
                                 <div className="flex items-center justify-between">
                                   <span className={notCharged && !separatelyPaid ? 'inv-muted' : ''}>
+                                    {Number(item.qty) > 1 && <span className="inv-muted">{item.qty}x </span>}
                                     {translateItemName(item.name, invoiceLang)}
                                     {notCharged && !separatelyPaid && (
                                       <span className="inv-green ml-2 text-xs">({notChargedLabel})</span>
