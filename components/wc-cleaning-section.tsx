@@ -2,7 +2,7 @@
 
 import React, { useMemo } from 'react'
 import useSWR from 'swr'
-import { Droplets, Printer } from 'lucide-react'
+import { ChevronDown, Droplets, Printer } from 'lucide-react'
 import {
   WC_CLEANING_FROM,
   WC_MORNING_TIME,
@@ -115,45 +115,48 @@ export function WcCleaningSection({ year, month }: Props) {
 
   return (
     <>
-      <div className="no-print space-y-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-bold text-[#7fa8b8] flex items-center gap-2">
-              <Droplets className="h-5 w-5" />
-              Čiščenje WC in tuši — vsi zaposleni
-            </h3>
-            <p className="text-xs text-white/45 mt-1 max-w-3xl">
+      <details className="group no-print rounded-2xl border border-white/10 bg-white/[0.03] transition-colors open:bg-white/[0.05]">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-3 sm:p-4 [&::-webkit-details-marker]:hidden">
+          <h3 className="text-base font-bold text-[#7fa8b8] flex items-center gap-2">
+            <Droplets className="h-5 w-5" />
+            Čiščenje WC in tuši — vsi zaposleni
+          </h3>
+          <ChevronDown className="h-4 w-4 flex-shrink-0 text-[#7fa8b8]/70 transition-transform group-open:rotate-180" />
+        </summary>
+
+        <div className="space-y-3 border-t border-white/[0.08] px-3 pb-3 pt-3 sm:px-4 sm:pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="text-xs text-white/45 max-w-3xl">
               Od {WC_CLEANING_FROM.slice(8, 10)}.{WC_CLEANING_FROM.slice(5, 7)}.{WC_CLEANING_FROM.slice(0, 4)}:
               ob {WC_MORNING_TIME} (dopoldanska izmena) in ob {WC_AFTERNOON_TIME} (popoldanska/večernja izmena).
               Rotacija med vsemi, ki delajo; upoštevani dopusti in bolniške. {roster.length} zaposlenih v rotaciji.
             </p>
+            <div className="flex flex-wrap gap-2 max-w-2xl">
+              {roster.map((name) => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => printCombined(name)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#7fa8b8]/15 text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/25"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Skupni razpored — {name}
+                </button>
+              ))}
+              {roster.length > 1 && (
+                <button
+                  type="button"
+                  onClick={printAllCombined}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#c59b5b]/15 text-[#c59b5b] border border-[#c59b5b]/30 hover:bg-[#c59b5b]/25"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Natisni vse (po osebah)
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 max-w-2xl">
-            {roster.map((name) => (
-              <button
-                key={name}
-                type="button"
-                onClick={() => printCombined(name)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#7fa8b8]/15 text-[#7fa8b8] border border-[#7fa8b8]/30 hover:bg-[#7fa8b8]/25"
-              >
-                <Printer className="h-3.5 w-3.5" />
-                Skupni razpored — {name}
-              </button>
-            ))}
-            {roster.length > 1 && (
-              <button
-                type="button"
-                onClick={printAllCombined}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[#c59b5b]/15 text-[#c59b5b] border border-[#c59b5b]/30 hover:bg-[#c59b5b]/25"
-              >
-                <Printer className="h-3.5 w-3.5" />
-                Natisni vse (po osebah)
-              </button>
-            )}
-          </div>
-        </div>
 
-        <div className="overflow-x-auto">
+          <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm min-w-[480px]">
             <thead>
               <tr className="text-xs uppercase tracking-wider text-white/50">
@@ -192,8 +195,9 @@ export function WcCleaningSection({ year, month }: Props) {
               )}
             </tbody>
           </table>
+          </div>
         </div>
-      </div>
+      </details>
 
       <div className="wc-combined-print" aria-hidden="true">
         {roster.map((name) => {
