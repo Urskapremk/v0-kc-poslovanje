@@ -232,7 +232,7 @@ function CompanyCard({
   const [dragOver, setDragOver] = useState(false)
   const [lightbox, setLightbox] = useState<{ src: string; kind: 'image' | 'pdf' } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [documentsOpen, setDocumentsOpen] = useState(true)
+  const [documentsOpen, setDocumentsOpen] = useState(false)
   const name = COMPANIES[company].name
 
   const uploadFiles = useCallback(async (files: File[]) => {
@@ -317,6 +317,8 @@ function CompanyCard({
           />
         </button>
       </h3>
+      {documentsOpen ? (
+        <div id={`dokumenti-${company}`}>
       <p className="mt-1 text-[11px] tracking-[0.04em] text-[#9dafb5]/75">
         Posnetki dokumentov
       </p>
@@ -406,8 +408,6 @@ function CompanyCard({
       ) : null}
       {error ? <p className="mt-3 text-[11px] text-[#c8846b]">{error}</p> : null}
 
-      {documentsOpen ? (
-        <div id={`dokumenti-${company}`}>
           {documents && documents.length === 0 && !uploading ? (
             <p className="mt-3 text-[11px] font-light italic text-white/35">
               Še ni posnetkov dokumentov.
