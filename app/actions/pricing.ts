@@ -6,9 +6,11 @@ import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { dilipOwesFullBoatPrice, standardDilipSupplierAr } from '@/lib/dilip-excursion'
+import { ensureTaxiPriceList, isTaxiRelationId } from '@/lib/taxi-price-list'
 
 // ============ BOATS ============
 export async function getBoats() {
+  await ensureTaxiPriceList()
   return await db.query.boats.findMany({
     where: eq(boats.active, true),
     orderBy: (boats, { asc }) => [asc(boats.name)]
@@ -17,6 +19,7 @@ export async function getBoats() {
 
 // ============ ROUTES ============
 export async function getRoutes() {
+  await ensureTaxiPriceList()
   return await db.query.routes.findMany({
     where: eq(routes.active, true),
     orderBy: (routes, { asc }) => [asc(routes.name)]
@@ -25,6 +28,7 @@ export async function getRoutes() {
 
 // Get only base routes for supplier pricing (no composite routes like Airport)
 export async function getBaseRoutes() {
+  await ensureTaxiPriceList()
   const allRoutes = await db.query.routes.findMany({
     where: eq(routes.active, true),
     orderBy: (routes, { asc }) => [asc(routes.name)]
@@ -35,6 +39,7 @@ export async function getBaseRoutes() {
 
 // ============ SUPPLIER PRICING (Transfers) ============
 export async function getSupplierPricing() {
+  await ensureTaxiPriceList()
   return await db.query.supplierPricing.findMany({
     where: eq(supplierPricing.active, true)
   })
@@ -219,6 +224,7 @@ export async function updateExcursionPricing(excursionId: string, boatId: string
 
 // ============ SELLING PRICING (Guest prices for transfers) ============
 export async function getSellingPricing() {
+  await ensureTaxiPriceList()
   return await db.query.sellingPricing.findMany({
     where: eq(sellingPricing.active, true)
   })
@@ -266,6 +272,7 @@ async function deactivateAirportPackageRoute() {
 
 // Get routes that have guest pricing (includes composite routes like Airport)
 export async function getGuestRoutes() {
+  await ensureTaxiPriceList()
   await deactivateAirportPackageRoute()
   return await db.query.routes.findMany({
     where: eq(routes.active, true),
@@ -339,5 +346,49 @@ export async function updateLunchProvider(id: string, data: { name?: string; loc
 export async function deleteLunchProvider(id: string) {
   await db.update(lunchProviders).set({ active: false }).where(eq(lunchProviders.id, id))
   revalidatePath('/admin')
+  return { success: true }
+}
+
+// ============ TAXI PRICE LIST ============
+
+export async function addTaxiDriver(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return { success: false }
+  await ensureTaxiPriceList()
+  await db.insert(boats).values({
+    id: `taxi-${nanoid(8)}`,
+    name: trimmed,
+    engine: 'Avto',
+    maxPax: 8,
+    active: true,
+  })
+  revalidatePath('/admin')
+  revalidatePath('/')
+  return { success: true }
+}
+
+export async function addTaxiRelation(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return { success: false }
+  await ensureTaxiPriceList()
+  await db.insert(routes).values({
+    id: `taxi-rel-${nanoid(10)}`,
+    name: trimmed,
+    type: 'taxi',
+    active: true,
+  })
+  revalidatePath('/admin')
+  revalidatePath('/')
+  return { success: true }
+}
+
+export async function renameTaxiRelation(id: string, name: string) {
+  const trimmed = name.trim()
+  if (!isTaxiRelationId(id) || !trimmed) return { success: false }
+  await db.update(routes)
+    .set({ name: trimmed })
+    .where(and(eq(routes.id, id), eq(routes.type, 'taxi')))
+  revalidatePath('/admin')
+  revalidatePath('/')
   return { success: true }
 }
