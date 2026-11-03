@@ -3,7 +3,7 @@
 import React, { useState } from "react";
 import useSWR from "swr";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Plus, Pencil, Trash2, Check, X, Ship, MapPin, Compass, Users, Printer, Copy, Sparkles } from "lucide-react";
+import { ArrowLeft, Plus, Pencil, Trash2, Check, X, Ship, MapPin, Compass, Users, Printer, Copy, Sparkles, Car } from "lucide-react";
 import { getProducts, addProduct, updateProduct, deleteProduct, getStaff, addStaff, updateStaff, deleteStaff, addRoute } from "../actions/admin";
 import { getDashboardData } from "../actions/komba";
 import { 
@@ -11,7 +11,8 @@ import {
   getExcursions, getExcursionPricing, updateExcursionPricing, updateExcursion, addExcursion, deleteExcursion, duplicateExcursion, clearExcursionDuplicateFlag,
   getSellingPricing, updateSellingPricing, getGuestRoutes,
   getExcursionSellingPricing, updateExcursionSellingPricing,
-  getLunchProviders, addLunchProvider, updateLunchProvider, deleteLunchProvider
+  getLunchProviders, addLunchProvider, updateLunchProvider, deleteLunchProvider,
+  addTaxiDriver, addTaxiRelation, renameTaxiRelation
 } from "../actions/pricing";
 import { shownDilipSupplierAr } from "@/lib/dilip-excursion";
 
@@ -78,7 +79,7 @@ const { data, error, isLoading, mutate } = useSWR("admin-pricing-data", async ()
     };
   });
 
-  const [activeTab, setActiveTab] = useState<"products" | "transfers" | "guestPricing" | "excursions" | "excursionGuestPricing" | "lunchProviders" | "staff">("products");
+  const [activeTab, setActiveTab] = useState<"products" | "transfers" | "guestPricing" | "taxis" | "excursions" | "excursionGuestPricing" | "lunchProviders" | "staff">("products");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
   const [showAddForm, setShowAddForm] = useState(false);
@@ -92,6 +93,12 @@ const [showAddExcursion, setShowAddExcursion] = useState(false);
 const [newExcursion, setNewExcursion] = useState({ name: "", description: "", guidePriceAr: 0, entranceFeeAr: 0, lunchPriceAr: 0 });
   const [editingGuestPrice, setEditingGuestPrice] = useState<string | null>(null);
   const [guestPriceForm, setGuestPriceForm] = useState<{ pricePax1: number; pricePax2: number; pricePax3: number; pricePax4: number; pricePax5: number; pricePax6: number }>({ pricePax1: 0, pricePax2: 0, pricePax3: 0, pricePax4: 0, pricePax5: 0, pricePax6: 0 });
+  const [editingRelationId, setEditingRelationId] = useState<string | null>(null);
+  const [relationName, setRelationName] = useState("");
+  const [newTaxiName, setNewTaxiName] = useState("");
+  const [newRelationName, setNewRelationName] = useState("");
+  const [showAddTaxi, setShowAddTaxi] = useState(false);
+  const [showAddRelation, setShowAddRelation] = useState(false);
   const [editingExcGuestPrice, setEditingExcGuestPrice] = useState<string | null>(null);
   const [excGuestPriceForm, setExcGuestPriceForm] = useState<{ pricePax1: number; pricePax2: number; pricePax3: number; pricePax4: number; pricePax5: number; pricePax6: number }>({ pricePax1: 0, pricePax2: 0, pricePax3: 0, pricePax4: 0, pricePax5: 0, pricePax6: 0 });
 
@@ -210,9 +217,14 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
   // Taxi drivers (Herman, Amad, …) are car providers, not guest crossing boats — exclude all taxis from guest crossing-boat selling pricing.
   const guestBoats = boats.filter((b: Boat) => !b.id.startsWith('taxi-'));
   // Filter routes for guest pricing (exclude taxi route)
-  const guestRoutesFiltered = guestRoutes.filter((r: Route) => r.id !== 'route-airport-port');
+  const isTaxiRelation = (r: { id: string; type?: string }) => r.type === 'taxi' || r.id.startsWith('taxi-rel-');
+  const boatSuppliers = boats.filter((b: Boat) => !b.id.startsWith('taxi-'));
+  const boatRoutes = routes.filter((r: Route) => !isTaxiRelation(r));
+  const taxiDrivers = boats.filter((b: Boat) => b.id.startsWith('taxi-'));
+  const taxiRelations = routes.filter((r: Route) => isTaxiRelation(r));
+  const guestRoutesFiltered = guestRoutes.filter((r: Route) => r.id !== 'route-airport-port' && !isTaxiRelation(r));
   // Herman (car to/from Port) routes = routes that have a Taxi Herman supplier price.
-  const hermanRoutesForPricing = routes.filter((r: Route) =>
+  const hermanRoutesForPricing = taxiRelations.filter((r: Route) =>
     supplierPricing.some((sp: SupplierPrice) => sp.boatId === 'taxi-herman' && sp.routeId === r.id)
   );
 
@@ -282,6 +294,17 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
           >
             <Ship className="h-4 w-4" />
             Transferji - Dobavitelji
+          </button>
+          <button
+            onClick={() => { setActiveTab("taxis"); setShowAddForm(false); setEditingId(null); }}
+            className={`px-6 py-3 rounded-2xl text-sm font-medium transition-all flex items-center gap-2 ${
+              activeTab === "taxis"
+                ? "bg-gradient-to-r from-[#d4a017] to-[#c59b5b] text-[#0a2029] shadow-[0_4px_20px_rgba(197,155,91,0.25)]"
+                : "bg-white/[0.03] border border-white/[0.06] text-white/50 hover:bg-white/[0.06] hover:text-white/80"
+            }`}
+          >
+            <Car className="h-4 w-4" />
+            Taksisti
           </button>
           <button
             onClick={() => { setActiveTab("guestPricing"); setShowAddForm(false); setEditingId(null); }}
@@ -610,7 +633,7 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
                         Coln / Ruta
                       </div>
                     </th>
-                    {routes.map((route: Route) => (
+                    {boatRoutes.map((route: Route) => (
                       <th key={route.id} className="px-5 py-4 text-center min-w-[160px]">
                         <div className="flex flex-col items-center gap-1">
                           <MapPin className="h-3.5 w-3.5 text-[#8fae92]/60" />
@@ -621,13 +644,13 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
                   </tr>
                 </thead>
                 <tbody className="text-white divide-y divide-white/10">
-                  {boats.map((boat: Boat) => (
+                  {boatSuppliers.map((boat: Boat) => (
                     <tr key={boat.id} className="hover:bg-white/[0.02] transition-colors">
                       <td className="px-5 py-4 sticky left-0 bg-[#162227] border-r border-white/[0.06]">
                         <div className="font-medium text-white">{boat.name}</div>
                         <div className="text-[11px] text-white/30 mt-0.5">{boat.engine} | max {boat.maxPax} pax</div>
                       </td>
-                      {routes.map((route: Route) => {
+                      {boatRoutes.map((route: Route) => {
                         const priceKey = `${boat.id}-${route.id}`;
                         const price = getSupplierPrice(boat.id, route.id);
                         const isEditing = editingPrice === priceKey;
@@ -893,6 +916,191 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {activeTab === "taxis" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-white/40 max-w-2xl">
+                Cenik samo za taksiste. Transferji in izleti, ki rabijo taksi, vzamejo ceno od tu. Ime relacije lahko spremeniš.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setShowAddTaxi(v => !v); setShowAddRelation(false); }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/[0.05] border border-white/[0.1] text-white/80 text-sm font-medium hover:bg-white/[0.08]"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nov taksist
+                </button>
+                <button
+                  onClick={() => { setShowAddRelation(v => !v); setShowAddTaxi(false); }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#d4a017] to-[#c59b5b] text-[#0a2029] text-sm font-semibold"
+                >
+                  <Plus className="h-4 w-4" />
+                  Nova relacija
+                </button>
+              </div>
+            </div>
+
+            {showAddTaxi && (
+              <div className="rounded-2xl border border-[#c59b5b]/20 bg-[#c59b5b]/5 p-5 flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-[220px]">
+                  <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-2">Ime taksista</label>
+                  <input
+                    value={newTaxiName}
+                    onChange={e => setNewTaxiName(e.target.value)}
+                    placeholder="npr. Taxi Amad"
+                    className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white placeholder-white/30 focus:border-[#c59b5b]/40 focus:outline-none"
+                  />
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!newTaxiName.trim()) return;
+                    await addTaxiDriver(newTaxiName);
+                    setNewTaxiName("");
+                    setShowAddTaxi(false);
+                    refresh();
+                  }}
+                  className="px-5 py-3 rounded-xl bg-[#c59b5b] text-[#0a2029] text-sm font-semibold"
+                >
+                  Shrani
+                </button>
+              </div>
+            )}
+
+            {showAddRelation && (
+              <div className="rounded-2xl border border-[#c59b5b]/20 bg-[#c59b5b]/5 p-5 flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-[220px]">
+                  <label className="block text-[10px] uppercase tracking-wider text-white/40 mb-2">Ime relacije</label>
+                  <input
+                    value={newRelationName}
+                    onChange={e => setNewRelationName(e.target.value)}
+                    placeholder="npr. Airport Fascene - Port Nosy Be"
+                    className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white placeholder-white/30 focus:border-[#c59b5b]/40 focus:outline-none"
+                  />
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!newRelationName.trim()) return;
+                    await addTaxiRelation(newRelationName);
+                    setNewRelationName("");
+                    setShowAddRelation(false);
+                    refresh();
+                  }}
+                  className="px-5 py-3 rounded-xl bg-[#c59b5b] text-[#0a2029] text-sm font-semibold"
+                >
+                  Shrani
+                </button>
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-white/[0.06] overflow-x-auto bg-white/[0.01]">
+              <table className="w-full text-sm">
+                <thead className="bg-white/[0.03] text-white/40">
+                  <tr>
+                    <th className="px-5 py-4 sticky left-0 bg-[#162227] border-r border-white/[0.06]">
+                      <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.15em] font-medium">
+                        <Car className="h-4 w-4 text-[#c59b5b]" />
+                        Taksist / Relacija
+                      </div>
+                    </th>
+                    {taxiRelations.map((route: Route) => (
+                      <th key={route.id} className="px-4 py-4 text-center min-w-[180px]">
+                        {editingRelationId === route.id ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              value={relationName}
+                              onChange={e => setRelationName(e.target.value)}
+                              className="w-full px-2 py-1.5 rounded-lg bg-white/[0.05] border border-[#c59b5b]/30 text-white text-xs focus:outline-none"
+                              autoFocus
+                            />
+                            <button
+                              onClick={async () => {
+                                if (!relationName.trim()) return;
+                                await renameTaxiRelation(route.id, relationName);
+                                setEditingRelationId(null);
+                                refresh();
+                              }}
+                              className="p-1.5 rounded-lg text-[#c59b5b]"
+                            >
+                              <Check className="h-4 w-4" />
+                            </button>
+                            <button onClick={() => setEditingRelationId(null)} className="p-1.5 rounded-lg text-white/30">
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setEditingRelationId(route.id); setRelationName(route.name); }}
+                            className="group inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.1em] font-medium leading-tight hover:text-white"
+                            title="Uredi ime relacije"
+                          >
+                            {route.name}
+                            <Pencil className="h-3 w-3 opacity-40 group-hover:opacity-100" />
+                          </button>
+                        )}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="text-white divide-y divide-white/10">
+                  {taxiDrivers.map((boat: Boat) => (
+                    <tr key={boat.id} className="hover:bg-white/[0.02]">
+                      <td className="px-5 py-4 sticky left-0 bg-[#162227] border-r border-white/[0.06]">
+                        <div className="font-medium">{boat.name}</div>
+                        <div className="text-[11px] text-white/30 mt-0.5">{boat.engine}</div>
+                      </td>
+                      {taxiRelations.map((route: Route) => {
+                        const priceKey = `${boat.id}-${route.id}`;
+                        const price = getSupplierPrice(boat.id, route.id);
+                        const isEditing = editingPrice === priceKey;
+                        return (
+                          <td key={route.id} className="px-4 py-4 text-center">
+                            {isEditing ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  type="number"
+                                  value={editPriceValue}
+                                  onChange={e => setEditPriceValue(Number(e.target.value))}
+                                  className="w-28 px-3 py-1.5 rounded-lg bg-white/[0.05] border border-[#c59b5b]/30 text-white text-right text-sm font-mono focus:outline-none"
+                                  autoFocus
+                                />
+                                <button onClick={() => handleSaveSupplierPrice(boat.id, route.id)} className="p-1.5 rounded-lg text-[#c59b5b]">
+                                  <Check className="h-4 w-4" />
+                                </button>
+                                <button onClick={() => setEditingPrice(null)} className="p-1.5 rounded-lg text-white/30">
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => { setEditingPrice(priceKey); setEditPriceValue(price); }}
+                                className="px-3 py-2 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] font-mono text-sm min-w-[100px]"
+                              >
+                                {price > 0 ? (
+                                  <div>
+                                    <span>{ar(price)}</span>
+                                    <p className="text-[10px] text-[#c59b5b]/60 mt-0.5">= {eur(arToEur(price, exchangeRate))}</p>
+                                  </div>
+                                ) : <span className="text-white/20">-</span>}
+                              </button>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                  {taxiDrivers.length === 0 && (
+                    <tr>
+                      <td className="px-5 py-6 text-white/40" colSpan={Math.max(taxiRelations.length + 1, 1)}>
+                        Ni taksistov. Dodaj prvega zgoraj.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -1201,7 +1409,7 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
                           Izlet / Coln
                         </div>
                       </th>
-                      {boats.map((boat: Boat) => (
+                      {guestBoats.map((boat: Boat) => (
                         <th key={boat.id} className="px-5 py-4 text-center min-w-[130px]">
                           <div className="flex flex-col items-center gap-1">
                             <Ship className="h-3.5 w-3.5 text-[#7fa8b8]/60" />
@@ -1217,7 +1425,7 @@ const [newExcursion, setNewExcursion] = useState({ name: "", description: "", gu
                         <td className="px-5 py-4 sticky left-0 bg-[#162227] border-r border-white/[0.06]">
                           <div className="font-medium text-white">{excursion.name}</div>
                         </td>
-                        {boats.map((boat: Boat) => {
+                        {guestBoats.map((boat: Boat) => {
                           const priceKey = `${excursion.id}-${boat.id}`;
                           const price = getExcursionPrice(excursion.id, boat.id);
                           const supplierPrice = shownDilipSupplierAr({

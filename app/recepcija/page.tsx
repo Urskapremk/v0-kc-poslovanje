@@ -58,6 +58,13 @@ type ExcursionPricing = {
 type Route = {
   id: string;
   name: string;
+  type?: string;
+};
+
+type SupplierPrice = {
+  boatId: string;
+  routeId: string;
+  priceAr: number;
 };
 
 type TransferPricing = {
@@ -113,6 +120,7 @@ export default function ReceptionPage() {
   const [lunchProviders, setLunchProviders] = useState<LunchProvider[]>([]);
   const [excursionPricing, setExcursionPricing] = useState<ExcursionPricing[]>([]);
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [supplierPricing, setSupplierPricing] = useState<SupplierPrice[]>([]);
   const [transferPricing, setTransferPricing] = useState<TransferPricing[]>([]);
   const [exchangeRate, setExchangeRate] = useState(4800);
   const [loading, setLoading] = useState(true);
@@ -129,6 +137,8 @@ export default function ReceptionPage() {
     date: today(),
     pax: 2,
     boatId: "",
+    taxiBoatId: "",
+    taxiRouteId: "",
     lunchProviderId: "",
     includeEntrance: true,
     paymentStatus: "UNPAID"
@@ -193,6 +203,7 @@ export default function ReceptionPage() {
   setExcursionPricing(sellingPricing || []);
   setTransferPricing((transferSelling as TransferPricing[]) || []);
   setRoutes((routesData as Route[]) || []);
+  setSupplierPricing((data.supplierPricing as SupplierPrice[]) || []);
   setExchangeRate(data.exchangeRate || 4800);
   } catch (e) {
   console.error("Error loading data:", e);
@@ -229,6 +240,8 @@ export default function ReceptionPage() {
         date: excursionForm.date,
         pax: solo.pax,
         boatId: excursionForm.boatId || undefined,
+        taxiBoatId: excursionForm.taxiBoatId || undefined,
+        taxiRouteId: excursionForm.taxiBoatId ? (excursionForm.taxiRouteId || undefined) : undefined,
         guestPrice: lines.transport,
         entranceFee: lines.entrance,
         lunchPrice: lines.lunch,
@@ -245,6 +258,8 @@ export default function ReceptionPage() {
         date: today(),
         pax,
         boatId: "",
+        taxiBoatId: "",
+        taxiRouteId: "",
         lunchProviderId: "",
         includeEntrance: true,
         paymentStatus: "UNPAID"
@@ -318,6 +333,22 @@ export default function ReceptionPage() {
 
   // Selling-price lines for one bungalow. A stored amount wins; otherwise the
   // line still follows the count and the rate.
+  function taxiPriceAr(taxiId: string, routeId: string): number {
+    const row = supplierPricing.find(sp => sp.boatId === taxiId && sp.routeId === routeId);
+    return row ? Number(row.priceAr) || 0 : 0;
+  }
+
+  function taxiRelationsFor(taxiId: string): Route[] {
+    const relations = routes.filter(r => r.type === "taxi" || r.id.startsWith("taxi-rel-"));
+    const priced = relations.filter(r => supplierPricing.some(sp => sp.boatId === taxiId && sp.routeId === r.id));
+    const fresh = relations.filter(r => !supplierPricing.some(sp => sp.boatId.startsWith("taxi-") && sp.routeId === r.id));
+    const listed = [...priced];
+    for (const route of fresh) {
+      if (!listed.some(r => r.id === route.id)) listed.push(route);
+    }
+    return listed;
+  }
+
   function partLines(part: GroupPart) {
     const exc = excursions.find(e => e.id === excursionForm.excursionId);
     const lunchProvider = lunchProviders.find(l => l.id === excursionForm.lunchProviderId);
@@ -354,6 +385,8 @@ export default function ReceptionPage() {
       await addGroupExcursionBooking({
         excursionId: excursionForm.excursionId,
         boatId: excursionForm.boatId,
+        taxiBoatId: excursionForm.taxiBoatId || undefined,
+        taxiRouteId: excursionForm.taxiBoatId ? (excursionForm.taxiRouteId || undefined) : undefined,
         date: excursionForm.date,
         entranceFee: entranceFeeEur,
         lunchPrice: hasLunch ? lunchPriceEur : 0,
@@ -374,7 +407,7 @@ export default function ReceptionPage() {
       });
 
       setGroupParts({});
-      setExcursionForm({ excursionId: "", date: today(), pax: 2, boatId: "", lunchProviderId: "", includeEntrance: true, paymentStatus: "UNPAID" });
+      setExcursionForm({ excursionId: "", date: today(), pax: 2, boatId: "", taxiBoatId: "", taxiRouteId: "", lunchProviderId: "", includeEntrance: true, paymentStatus: "UNPAID" });
       showSuccess(`Skupinski izlet ${exc.name} dodan (${groupTotalPax} oseb, ${parts.length} bungalovov)`);
     } catch (e) {
       console.error("Error adding group excursion:", e);
@@ -907,7 +940,7 @@ export default function ReceptionPage() {
   >
   <option value="">Izberi coln</option>
   {boats
-    .filter(b => excursionPricing.some(ep => 
+    .filter(b => !b.id.startsWith("taxi-") && excursionPricing.some(ep => 
       ep.excursionId === excursionForm.excursionId && 
       ep.boatId === b.id && 
       (ep.pricePax1 || ep.pricePax2 || ep.pricePax3 || ep.pricePax4 || ep.pricePax5 || ep.pricePax6)
@@ -923,6 +956,35 @@ export default function ReceptionPage() {
     })}
   </select>
   </div>
+
+  <div>
+    <label className="block text-white/40 text-[10px] uppercase tracking-wider mb-2">Taksi, če ga izlet rabi</label>
+    <select
+      value={excursionForm.taxiBoatId}
+      onChange={e => setExcursionForm(prev => ({ ...prev, taxiBoatId: e.target.value, taxiRouteId: e.target.value ? prev.taxiRouteId : "" }))}
+      className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
+    >
+      <option value="">Brez taksija</option>
+      {boats.filter(b => b.id.startsWith("taxi-")).map(b => (
+        <option key={b.id} value={b.id}>{b.name}</option>
+      ))}
+    </select>
+  </div>
+  {excursionForm.taxiBoatId && (
+    <div>
+      <label className="block text-white/40 text-[10px] uppercase tracking-wider mb-2">Relacija taksija</label>
+      <select
+        value={excursionForm.taxiRouteId}
+        onChange={e => setExcursionForm(prev => ({ ...prev, taxiRouteId: e.target.value }))}
+        className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
+      >
+        <option value="">Izberi relacijo</option>
+        {taxiRelationsFor(excursionForm.taxiBoatId).map(r => (
+          <option key={r.id} value={r.id}>{r.name} ({ar(taxiPriceAr(excursionForm.taxiBoatId, r.id))})</option>
+        ))}
+      </select>
+    </div>
+  )}
   
   {/* Price display */}
   {excursionForm.excursionId && excursionForm.boatId && (() => {
@@ -1178,7 +1240,7 @@ export default function ReceptionPage() {
                       className="w-full px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.08] text-white text-sm focus:outline-none focus:border-[#7fa8b8]/40"
                     >
                       <option value="">Izberi pot</option>
-                      {routes.map(r => (
+                      {routes.filter(r => r.type !== "taxi" && !r.id.startsWith("taxi-rel-")).map(r => (
                         <option key={r.id} value={r.id}>{r.name}</option>
                       ))}
                     </select>
@@ -1214,7 +1276,7 @@ export default function ReceptionPage() {
                     >
                       <option value="">Izberi coln</option>
                       {boats
-                        .filter(b => transferPricing.some(tp =>
+                        .filter(b => !b.id.startsWith("taxi-") && transferPricing.some(tp =>
                           tp.routeId === transferForm.routeId &&
                           tp.boatId === b.id &&
                           (tp.pricePax1 || tp.pricePax2 || tp.pricePax3 || tp.pricePax4 || tp.pricePax5 || tp.pricePax6)

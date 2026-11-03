@@ -442,6 +442,9 @@ export const excursionBookings = pgTable('excursion_bookings', {
   reservationId: text('reservationId').notNull(),
   excursionId: text('excursionId').notNull(),
   boatId: text('boatId'),
+  // Optional taxi leg. Driver is boats.id (taxi-*), relation is a taxi price-list route.
+  taxiBoatId: text('taxiBoatId'),
+  taxiRouteId: text('taxiRouteId'),
   date: date('date'),
   pax: integer('pax').notNull().default(1),
   guestPrice: decimal('guestPrice', { precision: 10, scale: 2 }).notNull().default('0'),

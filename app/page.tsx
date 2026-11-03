@@ -209,6 +209,8 @@ interface ExcursionBooking {
   id: string;
   excursionId: string;
   boatId: string;
+  taxiBoatId?: string | null;
+  taxiRouteId?: string | null;
   date: string;
   pax: number;
   notes: string;
@@ -224,6 +226,7 @@ interface ExcursionBooking {
   extraEntranceLabel?: string;
   paymentStatus: string;
   dilipOrderedAt: string | null;
+  groupId?: string | null;
   executed: boolean;
   status?: string; // 'ACTIVE' | 'CANCELLED' (cancelled → converted to credit)
   cancelledAt?: string | null;
@@ -2129,15 +2132,17 @@ export default function KombaCabanaApp() {
   // pending cards and supplier costs still resolve the name from here.
   // Dropdowns for a new choice keep using dbRoutes (active only).
   const dbRoutesAll = data?.routesAll || dbRoutes;
+  const isTaxiRelation = (r?: { id?: string; type?: string } | null) =>
+    !!r && (r.type === "taxi" || String(r.id || "").startsWith("taxi-rel-"));
+  const boatRoutes = dbRoutes.filter((r: { id: string; type?: string }) => !isTaxiRelation(r));
   const routeNameById = (id?: string | null): string =>
     dbRoutesAll.find((r: { id: string; name?: string }) => r.id === id)?.name || "";
-  // Active routes, plus the route already stored on this transfer when that
-  // route is no longer active — so the old choice stays visible and is not cleared.
+  // Boat routes only. A stored boat route that is no longer active stays visible.
   const routesKeepingCurrent = (currentId?: string | null) => {
     const current = (currentId || "").trim();
-    if (!current || dbRoutes.some((r: { id: string }) => r.id === current)) return dbRoutes;
-    const stored = dbRoutesAll.find((r: { id: string; name?: string }) => r.id === current);
-    return stored ? [...dbRoutes, stored] : dbRoutes;
+    if (!current || boatRoutes.some((r: { id: string }) => r.id === current)) return boatRoutes;
+    const stored = dbRoutesAll.find((r: { id: string; name?: string; type?: string }) => r.id === current);
+    return stored && !isTaxiRelation(stored) ? [...boatRoutes, stored] : boatRoutes;
   };
   const dbSellingPricing = data?.sellingPricing || [];
   const dbSupplierPricing = data?.supplierPricing || [];
@@ -2376,7 +2381,7 @@ export default function KombaCabanaApp() {
   }
 
   // Build TRANSFER_ROUTES from database
-  const TRANSFER_ROUTES = ["", ...dbRoutes.filter((r: { id: string }) => r.id !== 'route-airport-port').map((r: { name: string }) => r.name)];
+  const TRANSFER_ROUTES = ["", ...boatRoutes.filter((r: { id: string }) => r.id !== 'route-airport-port').map((r: { name: string }) => r.name)];
   
   // Build EXCURSION options from database
   const EXCURSION_OPTIONS = ["", ...dbExcursions.map((e: { name: string }) => e.name)];
@@ -2428,17 +2433,32 @@ export default function KombaCabanaApp() {
     }
     return 0;
   };
-  // Taxi routes for a given driver = routes that have a supplier price for that taxi.
-  // The "Relacija avta (taksi)" dropdown must follow the SELECTED taxi, otherwise
-  // Amad-only routes (e.g. "Exora Beach to Big Port Nosy Be") never show up.
+  // Taxi relations from the taxi price list. A driver sees the relations priced
+  // for them, plus a relation nobody has priced yet (just added). The stored
+  // choice stays visible even if that relation is no longer on the list.
   const taxiRoutesFor = (taxiId: string, currentId?: string | null) => {
-    const listed = dbRoutes.filter((r: { id: string }) =>
+    const relations = dbRoutes.filter((r: { id: string; type?: string }) => isTaxiRelation(r));
+    const priced = relations.filter((r: { id: string }) =>
       dbSupplierPricing.some((sp: { boatId: string; routeId: string }) => sp.boatId === taxiId && sp.routeId === r.id)
     );
+    const fresh = relations.filter((r: { id: string }) =>
+      !dbSupplierPricing.some((sp: { boatId: string; routeId: string }) => String(sp.boatId).startsWith("taxi-") && sp.routeId === r.id)
+    );
+    const listed = [...priced];
+    for (const route of fresh) {
+      if (!listed.some((r: { id: string }) => r.id === route.id)) listed.push(route);
+    }
     const current = (currentId || "").trim();
     if (!current || listed.some((r: { id: string }) => r.id === current)) return listed;
     const stored = dbRoutesAll.find((r: { id: string; name?: string }) => r.id === current);
     return stored ? [...listed, stored] : listed;
+  };
+  const crossingBoats = dbBoats.filter((b: { id: string }) => !String(b.id).startsWith("taxi-"));
+  const boatsKeepingCurrent = (currentId?: string | null) => {
+    const current = (currentId || "").trim();
+    if (!current || crossingBoats.some((b: { id: string }) => b.id === current)) return crossingBoats;
+    const stored = dbBoats.find((b: { id: string }) => b.id === current);
+    return stored ? [...crossingBoats, stored] : crossingBoats;
   };
   // Taxi SELLING price (for the guest) in EUR, from the selling price list, for the
   // selected driver (defaults to Herman for legacy legs with no taxi set).
@@ -5388,7 +5408,7 @@ function GuestCard() {
                               }}
                             >
                               <option value="">-- Izberi coln --</option>
-                              {dbBoats.map((b: { id: string; name: string; engine: string; maxPax: number }) => <option key={b.id} value={b.id}>{b.name} ({b.engine})</option>)}
+                              {boatsKeepingCurrent(reservation.transfers?.arrival?.boatId).map((b: { id: string; name: string; engine: string; maxPax: number }) => <option key={b.id} value={b.id}>{b.name} ({b.engine})</option>)}
                             </select>
                           </div>
 
@@ -5831,7 +5851,7 @@ function GuestCard() {
                               }}
                             >
                               <option value="">-- Izberi coln --</option>
-                              {dbBoats.map((b: { id: string; name: string; engine: string; maxPax: number }) => <option key={b.id} value={b.id}>{b.name} ({b.engine})</option>)}
+                              {boatsKeepingCurrent(reservation.transfers?.departure?.boatId).map((b: { id: string; name: string; engine: string; maxPax: number }) => <option key={b.id} value={b.id}>{b.name} ({b.engine})</option>)}
                             </select>
                           </div>
 
@@ -8082,7 +8102,7 @@ function GuestCard() {
   // ============ EXCURSIONS MANAGER ============
   function ExcursionsManager() {
     const [selectedReservationId, setSelectedReservationId] = React.useState<string>("");
-    const [newBooking, setNewBooking] = React.useState({ excursionId: "", date: today(), pax: 2, boatId: "", lunchProviderId: "", paymentStatus: "UNPAID", paidMethod: "cash", paidDate: today() });
+    const [newBooking, setNewBooking] = React.useState({ excursionId: "", date: today(), pax: 2, boatId: "", taxiBoatId: "", taxiRouteId: "", lunchProviderId: "", paymentStatus: "UNPAID", paidMethod: "cash", paidDate: today() });
     const [saving, setSaving] = React.useState(false);
     const [showAddExcursionType, setShowAddExcursionType] = React.useState(false);
     const [newExcursionType, setNewExcursionType] = React.useState({ name: "", guidePriceAr: 0, entranceFeeAr: 0, lunchPriceAr: 0 });
@@ -8115,12 +8135,14 @@ function GuestCard() {
         date: newBooking.date,
         pax: newBooking.pax,
         boatId: newBooking.boatId || undefined,
+        taxiBoatId: newBooking.taxiBoatId || undefined,
+        taxiRouteId: newBooking.taxiBoatId ? (newBooking.taxiRouteId || undefined) : undefined,
         lunchProviderId: newBooking.lunchProviderId || undefined,
         paymentStatus: newBooking.paymentStatus,
         paidMethod: isPaid ? newBooking.paidMethod : undefined,
         paidDate: isPaid ? newBooking.paidDate : undefined
       });
-      setNewBooking({ excursionId: "", date: today(), pax: 2, boatId: "", lunchProviderId: "", paymentStatus: "UNPAID", paidMethod: "cash", paidDate: today() });
+      setNewBooking({ excursionId: "", date: today(), pax: 2, boatId: "", taxiBoatId: "", taxiRouteId: "", lunchProviderId: "", paymentStatus: "UNPAID", paidMethod: "cash", paidDate: today() });
       refresh();
       setSaving(false);
       showMsg("Izlet dodan!");
@@ -8200,9 +8222,33 @@ function GuestCard() {
                 onChange={v => setNewBooking(p => ({ ...p, boatId: v }))} 
                 options={[
                   { value: "", label: "Ni izbrano" },
-                  ...dbBoats.map((b: { id: string; name: string }) => ({ value: b.id, label: b.name }))
+                  ...crossingBoats.map((b: { id: string; name: string }) => ({ value: b.id, label: b.name }))
                 ]} 
               />
+
+              <LuxurySelect
+                label="Taksi (če ga izlet rabi)"
+                value={newBooking.taxiBoatId}
+                onChange={v => setNewBooking(p => ({ ...p, taxiBoatId: v, taxiRouteId: v ? p.taxiRouteId : "" }))}
+                options={[
+                  { value: "", label: "Brez taksija" },
+                  ...taxiBoats.map((b: { id: string; name: string }) => ({ value: b.id, label: b.name })),
+                ]}
+              />
+              {newBooking.taxiBoatId && (
+                <LuxurySelect
+                  label="Relacija taksija"
+                  value={newBooking.taxiRouteId}
+                  onChange={v => setNewBooking(p => ({ ...p, taxiRouteId: v }))}
+                  options={[
+                    { value: "", label: "Izberi relacijo" },
+                    ...taxiRoutesFor(newBooking.taxiBoatId, newBooking.taxiRouteId).map((r: { id: string; name: string }) => ({
+                      value: r.id,
+                      label: `${r.name} (${ar(getSupplierCostAr(newBooking.taxiBoatId, r.id))})`,
+                    })),
+                  ]}
+                />
+              )}
               
               <LuxurySelect 
                 label="Kosilo" 
@@ -10175,6 +10221,11 @@ function GuestCard() {
                   const fanjaPaidAmountAr = (members[0]?.excursion as { fanjaPaidAmountAr?: number })?.fanjaPaidAmountAr || 0;
                   const fanjaPanelKey = fanjaMemberIds.join('|');
                   const fanjaLabel = `Izlet ${item.excursionName || ''} — ${members.map(m => `${bungalowDisplayName(m.reservation.bungalow)} / ${m.reservation.guestName}`).join(', ')}`.slice(0, 200);
+                  const excursionTaxiId = exc.taxiBoatId || "";
+                  const excursionTaxiCostAr = excursionTaxiId ? getSupplierCostAr(excursionTaxiId, exc.taxiRouteId || "") : 0;
+                  const excursionTaxiName = excursionTaxiId ? taxiNameOf(excursionTaxiId) : "";
+                  const excursionTaxiRouteName = routeNameById(exc.taxiRouteId) || "avto";
+                  const excursionTaxiRef = `excursion:${exc.groupId || exc.id}:${excursionTaxiId ? taxiKey(excursionTaxiId) : "taxi"}`;
 
                   return (
                     <div key={`exc-${idx}`} className="relative overflow-hidden p-3 pl-4 rounded-xl border border-[#0f2e3a]/12 bg-[#efe8da]">
@@ -10218,6 +10269,44 @@ function GuestCard() {
                                 : <span className="font-semibold text-[#b0203a]">čoln ni izbran</span>;
                             })()}
                           </p>
+                          <div className="mt-2 space-y-1">
+                            <label className="block text-[10px] text-[#2b2622]/55">Taksi, če ga izlet rabi</label>
+                            <select
+                              value={exc.taxiBoatId || ""}
+                              onChange={async (e) => {
+                                const taxiBoatId = e.target.value;
+                                await Promise.all(members.map(m => updateExcursionBooking(m.excursion.id, {
+                                  taxiBoatId,
+                                  taxiRouteId: taxiBoatId ? (m.excursion.taxiRouteId || "") : "",
+                                })));
+                                refresh();
+                              }}
+                              className="w-full rounded-lg border border-[#0f2e3a]/15 bg-white/70 px-2 py-1.5 text-[11px] text-[#0f2e3a]"
+                            >
+                              <option value="">Brez taksija</option>
+                              {taxiBoats.map((b: { id: string; name: string }) => (
+                                <option key={b.id} value={b.id}>{b.name}</option>
+                              ))}
+                            </select>
+                            {!!exc.taxiBoatId && (
+                              <select
+                                value={exc.taxiRouteId || ""}
+                                onChange={async (e) => {
+                                  const taxiRouteId = e.target.value;
+                                  await Promise.all(members.map(m => updateExcursionBooking(m.excursion.id, { taxiRouteId })));
+                                  refresh();
+                                }}
+                                className="w-full rounded-lg border border-[#0f2e3a]/15 bg-white/70 px-2 py-1.5 text-[11px] text-[#0f2e3a]"
+                              >
+                                <option value="">Relacija</option>
+                                {taxiRoutesFor(exc.taxiBoatId || "", exc.taxiRouteId).map((route: { id: string; name: string }) => (
+                                  <option key={route.id} value={route.id}>
+                                    {route.name} ({ar(getSupplierCostAr(exc.taxiBoatId || "", route.id))})
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </div>
                           {/* Zneski za plačilo */}
                           <div className="mt-2 space-y-1 border-t border-[#0f2e3a]/12 pt-2">
                             <div className="flex items-center justify-between gap-2">
@@ -10268,6 +10357,22 @@ function GuestCard() {
                                 {isFanjaExcursion ? '—' : (entranceTotalAr > 0 ? ar(entranceTotalAr) : '—')}
                               </span>
                             </div>
+                            {excursionTaxiCostAr > 0 && (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[10px] text-[#2b2622]/55">{excursionTaxiName} ({excursionTaxiRouteName})</span>
+                                  <span className="text-[11px] font-semibold text-[#4f7a54] whitespace-nowrap">{ar(excursionTaxiCostAr)}</span>
+                                </div>
+                                {renderSupplierPay(
+                                  excursionTaxiRef,
+                                  taxiKey(excursionTaxiId),
+                                  excursionTaxiCostAr,
+                                  `${excursionTaxiName} (avto)`,
+                                  `Taksi ${excursionTaxiName} — ${item.excursionName || "izlet"} · ${excursionTaxiRouteName}`.slice(0, 200),
+                                  "#4f7a54",
+                                )}
+                              </div>
+                            )}
                             {extraEntranceAr > 0 && (
                               <div className="flex items-center justify-between gap-2">
                                 <span className="text-[10px] text-[#2b2622]/55">{extraEntranceLabel} ({totalPax} os)</span>
@@ -11486,7 +11591,7 @@ function GuestCard() {
                       onChange={e => setPricingCalc(p => ({ ...p, boatId: e.target.value }))}
                     >
                       <option value="">-- Izberi coln --</option>
-                      {dbBoats.map((b: { id: string; name: string; engine: string }) => (
+                      {crossingBoats.map((b: { id: string; name: string; engine: string }) => (
                         <option key={b.id} value={b.id}>{b.name} ({b.engine})</option>
                       ))}
                     </select>
@@ -11665,7 +11770,7 @@ function GuestCard() {
                       onChange={e => setPricingCalc(p => ({ ...p, routeId: e.target.value }))}
                     >
                       <option value="">-- Izberi ruto --</option>
-                      {dbRoutes
+                      {boatRoutes
                         .filter((r: { id: string }) => r.id !== 'route-airport-port')
                         .map((r: { id: string; name: string }) => (
                         <option key={r.id} value={r.id}>{r.name}</option>
@@ -11681,7 +11786,7 @@ function GuestCard() {
                       onChange={e => setPricingCalc(p => ({ ...p, transferBoatId: e.target.value }))}
                     >
                       <option value="">-- Izberi coln --</option>
-                      {dbBoats.map((b: { id: string; name: string; engine: string }) => (
+                      {crossingBoats.map((b: { id: string; name: string; engine: string }) => (
                         <option key={b.id} value={b.id}>{b.name} ({b.engine})</option>
                       ))}
                     </select>
@@ -11754,7 +11859,7 @@ function GuestCard() {
                   Colni
                 </h4>
                 <div className="flex flex-wrap gap-2">
-                  {dbBoats.map((boat: { id: string; name: string; engine: string; capacity: number }) => (
+                  {crossingBoats.map((boat: { id: string; name: string; engine: string; capacity: number }) => (
                     <div key={boat.id} className="px-3 py-2 rounded-lg border border-white/[0.08] bg-white/[0.02]">
                       <p className="text-sm font-medium text-white">{boat.name}</p>
                       <p className="text-[10px] text-white/40">{boat.engine} · {boat.capacity} oseb</p>
@@ -11796,7 +11901,7 @@ function GuestCard() {
                       onChange={e => setGroupCalc(p => ({ ...p, boatId: e.target.value }))}
                     >
                       <option value="">-- Izberi coln --</option>
-                      {dbBoats.map((b: { id: string; name: string; engine: string }) => (
+                      {crossingBoats.map((b: { id: string; name: string; engine: string }) => (
                         <option key={b.id} value={b.id}>{b.name} ({b.engine})</option>
                       ))}
                     </select>

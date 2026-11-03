@@ -1039,6 +1039,8 @@ excursions: resExcursions.map(e => ({
   id: e.id,
   excursionId: e.excursionId,
   boatId: e.boatId,
+  taxiBoatId: e.taxiBoatId || '',
+  taxiRouteId: e.taxiRouteId || '',
   date: e.date,
   pax: e.pax,
   guestPrice: e.guestPrice ? Number(e.guestPrice) : 0,
@@ -1082,7 +1084,7 @@ excursions: resExcursions.map(e => ({
     })),
     boats: allBoats,
     routes: allRoutes,
-    routesAll: allRoutesRaw.map((r) => ({ id: r.id, name: r.name })),
+    routesAll: allRoutesRaw.map((r) => ({ id: r.id, name: r.name, type: r.type })),
     sellingPricing: allSellingPricing,
     supplierPricing: allSupplierPricing,
     excursions: allExcursions,
@@ -2006,6 +2008,8 @@ export async function getExcursionBookings(reservationId: string) {
 export async function addExcursionBooking(reservationId: string, data: {
   excursionId: string
   boatId?: string
+  taxiBoatId?: string
+  taxiRouteId?: string
   date?: string
   pax?: number
   guestPrice?: number
@@ -2027,6 +2031,8 @@ export async function addExcursionBooking(reservationId: string, data: {
     reservationId,
     excursionId: data.excursionId,
     boatId: data.boatId || null,
+    taxiBoatId: data.taxiBoatId || null,
+    taxiRouteId: data.taxiRouteId || null,
     date: data.date || null,
     pax: data.pax || 1,
     guestPrice: String(data.guestPrice || 0),
@@ -2100,6 +2106,8 @@ export async function addExcursionBooking(reservationId: string, data: {
 export async function addGroupExcursionBooking(data: {
   excursionId: string
   boatId?: string
+  taxiBoatId?: string
+  taxiRouteId?: string
   date?: string
   entranceFee?: number       // EUR na vstopnino
   lunchPrice?: number        // EUR na kosilo
@@ -2120,6 +2128,8 @@ export async function addGroupExcursionBooking(data: {
     await addExcursionBooking(part.reservationId, {
       excursionId: data.excursionId,
       boatId: data.boatId,
+      taxiBoatId: data.taxiBoatId,
+      taxiRouteId: data.taxiRouteId,
       date: data.date,
       pax: part.pax,
       guestPrice,
@@ -2231,6 +2241,8 @@ async function syncExcursionInvoiceLine(
 export async function updateExcursionBooking(id: string, data: Partial<{
   excursionId: string
   boatId: string
+  taxiBoatId: string
+  taxiRouteId: string
   date: string
   pax: number
   guestPrice: number
@@ -2272,6 +2284,8 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   const updateData: Record<string, unknown> = {}
   if (data.excursionId !== undefined) updateData.excursionId = data.excursionId
   if (data.boatId !== undefined) updateData.boatId = data.boatId || null
+  if (data.taxiBoatId !== undefined) updateData.taxiBoatId = data.taxiBoatId || null
+  if (data.taxiRouteId !== undefined) updateData.taxiRouteId = data.taxiRouteId || null
   if (data.date !== undefined) updateData.date = data.date || null
   if (data.pax !== undefined) updateData.pax = data.pax
   if (data.guestPrice !== undefined) updateData.guestPrice = String(data.guestPrice)
@@ -2611,6 +2625,8 @@ export async function getArchivedReservations(page: number = 1, limit: number = 
 // exactly like the pending list. We keep everything with an effective date up to today
 // (lodge-local, UTC+3), newest first.
 export async function getArchivedTransfers() {
+  const { ensureTaxiPriceList } = await import('@/lib/taxi-price-list')
+  await ensureTaxiPriceList()
   const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
   await ensureSupplierPaymentCostColumns()
   const [allTransfers, allRoutes, allBoats, allSupplierPricing, allSupplierPayments, allOrderTransfers] = await Promise.all([
