@@ -15,6 +15,7 @@ import { stayPeopleForCheckin, type BungalowPeopleMap, type BungalowPerson } fro
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
+import { combinedRouteLabel, transferLineName } from "@/lib/combined-route";
 import { guestBillLineAmount } from "@/lib/guest-bill-amount";
 import { capturePaymentListPlace, restorePaymentListPlace, type PaymentListPlace } from "@/lib/payment-list-place";
   import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
@@ -2259,14 +2260,14 @@ export default function KombaCabanaApp() {
       const isPaid = arrivalTransfer.paymentStatus === 'PAID';
       const totalPriceEur = arrivalTransfer.guestPrice || getTransferGuestPrice(routeId, boatId, pax);
       const totalPriceAr = Math.round(totalPriceEur * exchangeRate); // Convert EUR to Ariary
-      const arrivalViaAirport = /airport|a[ée]roport|fascene/i.test(arrivalTransfer.hermanRouteId ? (routeNameById(arrivalTransfer.hermanRouteId) || '') : '');
-      const routeName = arrivalViaAirport ? 'Airport Fascene - Komba Cabana' : (routeNameById(routeId) || routeId);
+      const routeName = routeNameById(routeId) || routeId;
+      const carRouteName = routeNameById(arrivalTransfer.hermanRouteId);
       const boatName = dbBoats.find((b: { id: string; name: string }) => b.id === boatId)?.name || '';
       // Get arrival date as string for eventDate (YYYY-MM-DD format)
       const arrivalDateStr = formatDateStr(res.arrival);
       
       await addOrderItem(res.id, {
-        name: `Transfer ARRIVAL: ${routeName}${boatName ? ` (${boatName})` : ''} - ${pax} pax`,
+        name: transferLineName('arrival', routeName, carRouteName, boatName, pax),
         category: 'Transfer',
         qty: 1,
         priceAr: isPaid ? 0 : totalPriceAr, // If paid, add with 0 price (evidence only)
@@ -2287,14 +2288,14 @@ export default function KombaCabanaApp() {
       const isPaid = departureTransfer.paymentStatus === 'PAID';
       const totalPriceEur = departureTransfer.guestPrice || getTransferGuestPrice(routeId, boatId, pax);
       const totalPriceAr = Math.round(totalPriceEur * exchangeRate); // Convert EUR to Ariary
-      const departureViaAirport = /airport|a[ée]roport|fascene/i.test(departureTransfer.hermanRouteId ? (routeNameById(departureTransfer.hermanRouteId) || '') : '');
-      const routeName = departureViaAirport ? 'Komba Cabana - Airport Fascene' : (routeNameById(routeId) || routeId);
+      const routeName = routeNameById(routeId) || routeId;
+      const carRouteName = routeNameById(departureTransfer.hermanRouteId);
       const boatName = dbBoats.find((b: { id: string; name: string }) => b.id === boatId)?.name || '';
       // Get departure date as string for eventDate (YYYY-MM-DD format)
       const departureDateStr = formatDateStr(res.departure);
       
       await addOrderItem(res.id, {
-        name: `Transfer DEPARTURE: ${routeName}${boatName ? ` (${boatName})` : ''} - ${pax} pax`,
+        name: transferLineName('departure', routeName, carRouteName, boatName, pax),
         category: 'Transfer',
         qty: 1,
         priceAr: isPaid ? 0 : totalPriceAr, // If paid, add with 0 price (evidence only)
@@ -8813,7 +8814,9 @@ function GuestCard() {
       const t = item.transfer;
       const r = item.reservation;
       const dir = item.type === "arrival" ? "Prihod" : "Odhod";
-      const parts = [`${dir}: ${bungalowDisplayName(r.bungalow)} - ${r.guestName}`, routeName(t.route)];
+      const boatRoute = routeName(t.route);
+      const fullRoute = combinedRouteLabel(boatRoute, routeName(t.hermanRouteId), item.type === "arrival" ? "arrival" : "departure") || boatRoute;
+      const parts = [`${dir}: ${bungalowDisplayName(r.bungalow)} - ${r.guestName}`, fullRoute];
       if (boatName(t.boatId)) parts.push(`čoln ${boatName(t.boatId)}`);
       if (t.time) parts.push(`ob ${t.time}`);
       if (t.hermanRouteId) parts.push(`Herman: ${routeName(t.hermanRouteId)}`);
@@ -9478,6 +9481,7 @@ function GuestCard() {
     const taxiName = taxiNameOf(taxiId);
     const hermanCostAr = getSupplierCostAr(taxiId, t.hermanRouteId);
     const routeName = routeNameById(t.route) || t.route;
+    const shownRoute = combinedRouteLabel(routeName, routeNameById(t.hermanRouteId), isArrival ? 'arrival' : 'departure') || routeName;
     const TypeIcon = isArrival ? LogIn : LogOut;
     const typeColor = isArrival ? '#6f9a72' : '#c4744a';
     const cardCountdown = countdownLabel(t.pickupDate || (isArrival ? r.arrival : r.departure));
@@ -9490,7 +9494,7 @@ function GuestCard() {
           <div className="min-w-0 flex-1">
             <p className="truncate text-[13px] font-medium text-[#0f2e3a]">{shortBungalow} · {r.guestName}</p>
             <p className="truncate text-[11px] font-normal" style={{ color: '#3f6b7d' }}>
-              <span className="font-medium" style={{ color: typeColor }}>{isArrival ? 'Prihod' : 'Odhod'}</span> · {routeName}
+              <span className="font-medium" style={{ color: typeColor }}>{isArrival ? 'Prihod' : 'Odhod'}</span> · {shownRoute}
               {t.time ? <span className="font-normal text-[#2b2622]/55"> · {t.time}</span> : null}
             </p>
           </div>
