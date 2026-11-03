@@ -1,6 +1,7 @@
 'use server'
 
-import { getReservationById, getOrderItems, getInvoiceDiscounts, getDashboardData } from '@/app/actions/komba'
+import { getReservationById, getOrderItems, getInvoiceDiscounts, getDashboardData, combinedTransferLabels } from '@/app/actions/komba'
+import { applyCombinedRouteLabels } from '@/lib/combined-route'
 import { getDeliveryNotesForReservation } from '@/app/actions/delivery'
 import { readFile } from 'fs/promises'
 import path from 'path'
@@ -645,11 +646,12 @@ async function buildInvoiceData(
   onlyStayMeals = false,
   hidePayments = false
 ): Promise<{ data: InvoiceData; reservation: AnyRec } | { error: string }> {
-  const [reservation, orderItems0, notes0, discounts0] = await Promise.all([
+  const [reservation, orderItems0, notes0, discounts0, routeLabels] = await Promise.all([
     getReservationById(reservationId) as Promise<AnyRec | null>,
     getOrderItems(reservationId) as Promise<AnyRec[]>,
     getDeliveryNotesForReservation(reservationId) as Promise<AnyRec[]>,
     getInvoiceDiscounts(reservationId) as Promise<AnyRec[]>,
+    combinedTransferLabels(reservationId),
   ])
 
   if (!reservation) return { error: 'Rezervacija ni najdena.' }
@@ -673,10 +675,13 @@ async function buildInvoiceData(
     if (paidMealPlan === 'B' || paidMealPlan === 'BB') return breakfast
     return false
   }
-  let orderItems = orderItems0.map((item) =>
-    (item.category === 'Prehrana' || item.category === 'Food') && item.paymentStatus === 'UNPAID' && !item.isFree && isPaidPlanMeal(item.name)
-      ? { ...item, paymentStatus: 'PAID' }
-      : item,
+  let orderItems = applyCombinedRouteLabels(
+    orderItems0.map((item) =>
+      (item.category === 'Prehrana' || item.category === 'Food') && item.paymentStatus === 'UNPAID' && !item.isFree && isPaidPlanMeal(item.name)
+        ? { ...item, paymentStatus: 'PAID' }
+        : item,
+    ),
+    routeLabels,
   )
   let notes: AnyRec[] = notes0.map((note): AnyRec => {
     const items = ((note.items || []) as AnyRec[]).map((it) =>
@@ -698,15 +703,16 @@ async function buildInvoiceData(
         const group = all.filter((r) => r.groupId === reservation.groupId && r.id !== reservationId)
         const groupData = await Promise.all(
           group.map(async (r) => {
-            const [gn, go] = await Promise.all([
+            const [gn, go, labels] = await Promise.all([
               getDeliveryNotesForReservation(r.id) as Promise<AnyRec[]>,
               getOrderItems(r.id) as Promise<AnyRec[]>,
+              combinedTransferLabels(r.id as string),
             ])
-            return { notes: gn, orderItems: go }
+            return { notes: gn, orderItems: applyCombinedRouteLabels(go, labels) }
           })
         )
         notes = [...notes0, ...groupData.flatMap((d) => d.notes)]
-        orderItems = [...orderItems0, ...groupData.flatMap((d) => d.orderItems)]
+        orderItems = [...applyCombinedRouteLabels(orderItems0, routeLabels), ...groupData.flatMap((d) => d.orderItems)]
       }
     } catch {
       // If group lookup fails, fall back to the single reservation invoice.

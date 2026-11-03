@@ -12,6 +12,7 @@ import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
 import { cashAriaryToEurAmount } from '@/lib/cash-payment'
 import { ensureExcursionPriceColumns } from '@/lib/excursion-price-columns'
 import { replaceBungalowPeople, type BungalowPeopleMap, type BungalowPerson } from '@/lib/bungalow-people'
+import { combinedRouteLabel, transferLineName } from '@/lib/combined-route'
 
 // Generate unique ID
 function uid(prefix: string) {
@@ -501,19 +502,14 @@ async function syncTransferItem(reservationId: string, type: 'arrival' | 'depart
   const paidDate = isPaid ? (tr.paidDate ?? null) : null
 
   const routeRow = tr.route ? (await db.select().from(routes).where(eq(routes.id, tr.route)).limit(1))[0] : null
+  const carRow = tr.hermanRouteId ? (await db.select().from(routes).where(eq(routes.id, tr.hermanRouteId)).limit(1))[0] : null
   const boatRow = tr.boatId ? (await db.select().from(boats).where(eq(boats.id, tr.boatId)).limit(1))[0] : null
-  const taxiRouteRow = tr.hermanRouteId
-    ? (await db.select().from(routes).where(eq(routes.id, tr.hermanRouteId)).limit(1))[0]
-    : null
-  const goesToAirport = /airport|a[ée]roport|fascene/i.test(taxiRouteRow?.name || '')
-  const routeName = goesToAirport
-    ? (type === 'departure' ? 'Komba Cabana - Airport Fascene' : 'Airport Fascene - Komba Cabana')
-    : (routeRow?.name || tr.route)
+  const routeName = routeRow?.name || tr.route
   const boatName = boatRow?.name || ''
 
   const dateSrc = type === 'arrival' ? res.arrival : res.departure
   const eventDate = dateSrc ? new Date(dateSrc).toISOString().split('T')[0] : null
-  const name = `Transfer ${type.toUpperCase()}: ${routeName}${boatName ? ` (${boatName})` : ''} - ${pax} pax`
+  const name = transferLineName(type, routeName, carRow?.name, boatName, pax)
   const paymentStatus = isPaid ? 'PAID' : 'UNPAID'
 
   if (match) {
@@ -803,6 +799,23 @@ export async function deleteOrderItem(id: string) {
 
 export async function getOrderItems(reservationId: string) {
   return await db.select().from(orderItems).where(eq(orderItems.reservationId, reservationId))
+}
+
+// Full path for a car-plus-boat transfer, or null when the leg is boat-only or car-only.
+// The invoice reads a sentence stored at check-in, so the page and the invoice email
+// ask for this and rewrite that sentence when it is shown.
+export async function combinedTransferLabels(reservationId: string): Promise<{ arrival: string | null; departure: string | null }> {
+  const [trs, allRoutes] = await Promise.all([
+    db.select().from(transfers).where(eq(transfers.reservationId, reservationId)),
+    db.select({ id: routes.id, name: routes.name }).from(routes),
+  ])
+  const nameOf = (id?: string | null) => allRoutes.find((r) => r.id === id)?.name || ''
+  const label = (type: 'arrival' | 'departure') => {
+    const row = trs.find((t) => t.type === type)
+    if (!row) return null
+    return combinedRouteLabel(nameOf(row.route), nameOf(row.hermanRouteId), type)
+  }
+  return { arrival: label('arrival'), departure: label('departure') }
 }
 
 export async function updateOrderItemPaymentStatus(id: string, status: string) {
@@ -2685,7 +2698,9 @@ export async function getArchivedTransfers() {
     const date = toDateStr(t.pickupDate) || baseDate
     if (!date || date > todayStr) return []
 
-    const routeName = routeMap.get(t.route || '') || t.route || ''
+    const boatRouteName = routeMap.get(t.route || '') || t.route || ''
+    const carRouteName = t.hermanRouteId ? (routeMap.get(t.hermanRouteId) || '') : ''
+    const routeName = combinedRouteLabel(boatRouteName, carRouteName, isArrival ? 'arrival' : 'departure') || boatRouteName
     const taxiId = t.taxiBoatId && t.taxiBoatId.length > 0 ? t.taxiBoatId : HERMAN_BOAT_ID
     const taxiName = boatMap.get(taxiId) || 'Taksi'
     const taxiSupplier = taxiId.replace(/^taxi-/, '') || 'herman'
@@ -3025,11 +3040,12 @@ export async function getTransferVoucherData(reservationId: string, type: 'arriv
     hermanRouteName = hermanRoute?.name || ''
   }
 
+  const boatRouteName = route?.name || ''
   return {
     guestName: reservation.guestName,
     secondGuestName: reservation.secondGuestName,
     bungalowName: reservation.bungalow || '',
-    routeName: route?.name || '',
+    routeName: combinedRouteLabel(boatRouteName, hermanRouteName, type) || boatRouteName,
     hermanRouteName,
     guestPrice: Number(transfer.guestPrice) || 0,
     date: type === 'arrival' 

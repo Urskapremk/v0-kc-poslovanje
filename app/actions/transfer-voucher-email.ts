@@ -4,6 +4,7 @@ import { getReservationWithDetails, getDashboardData } from '@/app/actions/komba
 import { logSentEmail } from './sent-emails'
 import { bungalowDisplayName } from '@/lib/bungalow'
 import { voucherPortPhoto } from '@/lib/voucher-port-photo'
+import { combinedRouteLabel, routeStops } from '@/lib/combined-route'
 
 // ============ TRANSFER VOUCHER EMAIL (Resend) ============
 // Sends a branded HTML transfer voucher email (Komba Cabana dark style) to the guest.
@@ -188,6 +189,7 @@ type VoucherData = {
   bungalow: string
   type: TransferType
   routeName: string
+  displayRoute: string
   hermanRouteName: string
   legs: { tag: string; val: string }[]
   date: string
@@ -221,10 +223,15 @@ async function buildVoucherData(
     ? routes.find(r => r.id === transfer.hermanRouteId)?.name || ''
     : ''
 
+  // Same stop names as the one-line path above, so "Big Port" and "Big port" are not two places.
+  const legName = (name: string) => {
+    const stops = routeStops(name)
+    return stops.length ? stops.join(' - ') : name
+  }
   const legs = hermanRouteName
     ? (type === 'arrival'
-        ? [{ tag: 'By car', val: hermanRouteName }, { tag: 'By boat', val: routeName }]
-        : [{ tag: 'By boat', val: routeName }, { tag: 'By car', val: hermanRouteName }])
+        ? [{ tag: 'By car', val: legName(hermanRouteName) }, { tag: 'By boat', val: legName(routeName) }]
+        : [{ tag: 'By boat', val: legName(routeName) }, { tag: 'By car', val: legName(hermanRouteName) }])
     : []
 
   const paymentStatus = transfer.paymentStatus || 'UNPAID'
@@ -235,6 +242,7 @@ async function buildVoucherData(
     bungalow: reservation.bungalow ? bungalowDisplayName(reservation.bungalow) : '',
     type,
     routeName,
+    displayRoute: combinedRouteLabel(routeName, hermanRouteName, type) || routeName,
     hermanRouteName,
     legs,
     date: formatEmailDate(
@@ -441,7 +449,7 @@ function buildVoucherEmailHtml(data: VoucherData): string {
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
                 <td valign="middle" style="vertical-align:middle;">
                   <div style="font-family:${FONT_BODY};font-size:10px;font-weight:400;letter-spacing:1.6px;color:${GOLD_SAND};text-transform:uppercase;">Route</div>
-                  ${data.routeName ? `<div style="font-family:${FONT_DISPLAY};font-size:16px;font-weight:600;letter-spacing:0.16px;color:${INK};margin-top:6px;">${escapeHtml(data.routeName)}</div>` : ''}
+                  ${data.displayRoute ? `<div style="font-family:${FONT_DISPLAY};font-size:16px;font-weight:600;letter-spacing:0.16px;color:${INK};margin-top:6px;">${escapeHtml(data.displayRoute)}</div>` : ''}
                   <div style="height:1px;line-height:1px;font-size:0;margin-top:10px;background-color:${GOLD_HAIRLINE};">&nbsp;</div>
                   ${legsHtml}
                 </td>

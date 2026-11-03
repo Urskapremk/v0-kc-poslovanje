@@ -6,7 +6,8 @@ import useSWR from 'swr'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ArrowLeft, CreditCard, Banknote, Smartphone, HelpCircle, Plus, X, Check, Printer, Users, FileText, FileDown, Tag, Gift } from 'lucide-react'
-import { getReservationById, getOrderItems, completeCheckout, getDashboardData, getInvoiceDiscounts, addInvoiceDiscount, deleteInvoiceDiscount, setInvoiceNote } from '@/app/actions/komba'
+import { getReservationById, getOrderItems, completeCheckout, getDashboardData, getInvoiceDiscounts, addInvoiceDiscount, deleteInvoiceDiscount, setInvoiceNote, combinedTransferLabels } from '@/app/actions/komba'
+import { applyCombinedRouteLabels } from '@/lib/combined-route'
 import { getDeliveryNotesForReservation } from '@/app/actions/delivery'
 import { bungalowDisplayName } from '@/lib/bungalow'
 
@@ -60,17 +61,19 @@ interface DeliveryNote {
 }
 
 const fetcher = async (reservationId: string) => {
-  const [notes, reservation, orderItems, dashboard, discounts] = await Promise.all([
+  const [notes, reservation, orderItems, dashboard, discounts, routeLabels] = await Promise.all([
     getDeliveryNotesForReservation(reservationId),
     getReservationById(reservationId),
     getOrderItems(reservationId),
     getDashboardData(),
     getInvoiceDiscounts(reservationId),
+    combinedTransferLabels(reservationId),
   ])
+  const namedOrderItems = applyCombinedRouteLabels(orderItems, routeLabels)
   
   // Check if this reservation is part of a group with sharedInvoice enabled
   let allNotes = notes
-  let allOrderItems = orderItems
+  let allOrderItems = namedOrderItems
   let groupReservations: typeof dashboard.reservations = []
   let isSharedInvoice = false
   
@@ -86,13 +89,14 @@ const fetcher = async (reservationId: string) => {
       // Fetch notes and orderItems for all group reservations
       const groupData = await Promise.all(
         groupReservations.map(async (r) => {
-          const [groupNotes, groupOrderItems] = await Promise.all([
+          const [groupNotes, groupOrderItems, groupLabels] = await Promise.all([
             getDeliveryNotesForReservation(r.id),
-            getOrderItems(r.id)
+            getOrderItems(r.id),
+            combinedTransferLabels(r.id),
           ])
           return { 
             notes: groupNotes, 
-            orderItems: groupOrderItems.map(item => ({ ...item, fromBungalow: r.bungalow?.split(';')[0]?.split('/')[0]?.trim() }))
+            orderItems: applyCombinedRouteLabels(groupOrderItems, groupLabels).map(item => ({ ...item, fromBungalow: r.bungalow?.split(';')[0]?.split('/')[0]?.trim() }))
           }
         })
       )
@@ -100,7 +104,7 @@ const fetcher = async (reservationId: string) => {
       // Combine all notes and orderItems
       allNotes = [...notes, ...groupData.flatMap(d => d.notes)]
       allOrderItems = [
-        ...orderItems,
+        ...namedOrderItems,
         ...groupData.flatMap(d => d.orderItems)
       ]
     }
