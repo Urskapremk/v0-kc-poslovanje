@@ -16,6 +16,7 @@ import { stayPeopleForCheckin, type BungalowPeopleMap, type BungalowPerson } fro
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
 import { combinedRouteLabel, transferLineName } from "@/lib/combined-route";
+import { hideCompletedDepartureFromList } from "@/lib/hidden-departure";
 import { guestBillLineAmount } from "@/lib/guest-bill-amount";
 import { capturePaymentListPlace, restorePaymentListPlace, type PaymentListPlace } from "@/lib/payment-list-place";
   import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
@@ -8725,7 +8726,14 @@ function GuestCard() {
     if (r.transfers.arrival.route && !r.checkedInAt && !r.checkedOutAt) transfers++;
     // Departure transfer: show ahead of time too (until guest checks out), so it can be
     // booked in advance — consistent with the arrival, regardless of check-in status.
-    if (r.transfers.departure.route && !r.checkedOutAt) transfers++;
+    // One already-completed departure (Mojca Aleš, 3 Nov) is left off this list only.
+    if (r.transfers.departure.route && !r.checkedOutAt && !hideCompletedDepartureFromList({
+      type: 'departure',
+      guestName: r.guestName,
+      bungalow: r.bungalow,
+      stayDate: r.departure,
+      pickupDate: r.transfers.departure.pickupDate,
+    })) transfers++;
     // Reception ad-hoc transfers (from the recepcija cash desk)
     if (!r.checkedOutAt) transfers += (r.orderItems || []).filter(receptionTransferActive).length;
     return count + transfers;
@@ -8742,7 +8750,13 @@ function GuestCard() {
       }
       // Departure: show ahead of time too (guest not yet checked out), consistent with
       // arrival, so the departure boat/car can be arranged before the guest arrives.
-      if (r.transfers.departure.route) {
+      if (r.transfers.departure.route && !hideCompletedDepartureFromList({
+        type: 'departure',
+        guestName: r.guestName,
+        bungalow: r.bungalow,
+        stayDate: r.departure,
+        pickupDate: r.transfers.departure.pickupDate,
+      })) {
         list.push({ type: 'departure', reservation: r, transfer: r.transfers.departure });
       }
       return list;
