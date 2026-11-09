@@ -11,6 +11,7 @@ import { BungalowPeopleEditor } from "@/components/bungalow-people-editor";
 import { SplitStayPanel } from "@/components/split-stay-panel";
 import { ReservedExcursionPrices } from "@/components/reserved-excursion-prices";
 import { stayPeopleForCheckin, type BungalowPeopleMap, type BungalowPerson } from "@/lib/bungalow-people";
+import { foreignStayCurrency, splitStayPayments } from "@/lib/foreign-stay";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
@@ -1572,8 +1573,11 @@ function computeGuestInvoiceTotalEur(
   );
 }
 
-function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, onPaymentChange, separatePaidItems = [], onRemainingChange }: { 
+  function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, onPaymentChange, separatePaidItems = [], onRemainingChange, foreignStay }: {
   reservationId: string; totalAmount: string; currency: string; exchangeRate: number; onPaymentChange?: () => void;
+  // Platform stay in a foreign currency (e.g. Airbnb USD): settled on its own, kept out of
+  // the EUR total/paid, which then cover only lodge extras.
+  foreignStay?: { currency: string; total: number; source?: string | null };
   // Reports the real remaining (TOTAL − everything paid) back to the parent so the
   // "Za placilo" summary box can show the same number.
   onRemainingChange?: (remaining: number) => void;
@@ -1585,7 +1589,7 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
   separatePaidItems?: { label: string; eur: number; method: string; date: string }[];
 }) {
   const [paymentsData, setPaymentsData] = React.useState<{
-    id: string; amount: string; method: string; paidAt: string; notes: string | null; omAmountAr?: number | null; cashAmountAr?: number | null;
+    id: string; amount: string; method: string; paidAt: string; notes: string | null; omAmountAr?: number | null; cashAmountAr?: number | null; currency?: string | null;
   }[]>([]);
   const [showAddForm, setShowAddForm] = React.useState(false);
   const [newPayment, setNewPayment] = React.useState({ amount: '', method: 'card', paidAt: new Date().toISOString().split('T')[0], notes: '', omAmountAr: '', unit: 'EUR' as 'EUR' | 'Ar' });
@@ -1603,7 +1607,9 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
   
   React.useEffect(() => { loadPayments(); }, [reservationId]);
   
-  const recordedPaid = paymentsData.reduce((sum, p) => sum + Number(p.amount), 0);
+  const staySplit = foreignStay ? splitStayPayments(paymentsData, foreignStay.currency, foreignStay.total) : null;
+  const stayPaymentIds = new Set((staySplit?.stay || []).map(p => p.id));
+  const recordedPaid = staySplit ? staySplit.eurPaid : paymentsData.reduce((sum, p) => sum + Number(p.amount), 0);
   const separatePaidEur = separatePaidItems.reduce((sum, s) => sum + (s.eur || 0), 0);
   const totalPaid = recordedPaid + separatePaidEur;
   const remaining = Number(totalAmount) - totalPaid;
@@ -1656,6 +1662,23 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
         </LuxuryButton>
       </div>
       
+      {foreignStay && staySplit && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#8fae92]/20 bg-[#8fae92]/[0.05] p-3">
+          <div className="min-w-0">
+            <p className="text-xs text-white/40">Bivanje{foreignStay.source ? ` · ${foreignStay.source}` : ''} (ločeno, v {foreignStay.currency})</p>
+            <p className="text-sm font-light tabular-nums text-white">
+              {foreignStay.total.toFixed(2)} {foreignStay.currency}
+            </p>
+          </div>
+          <p className={`text-xs font-medium ${staySplit.stayPaid >= foreignStay.total - 0.01 ? 'text-[#8fae92]' : 'text-[#d7a593]'}`}>
+            {staySplit.stayPaid >= foreignStay.total - 0.01
+              ? `Placano ${staySplit.stayPaid.toFixed(2)} ${foreignStay.currency}`
+              : `Odprto ${(foreignStay.total - staySplit.stayPaid).toFixed(2)} ${foreignStay.currency}`}
+          </p>
+          <p className="w-full text-[11px] text-white/40">Spodaj samo storitve v Lodge (bar, transferji, izleti) v EUR.</p>
+        </div>
+      )}
+
       {/* Summary */}
       <div className="grid grid-cols-3 gap-2 sm:gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/5">
         <div className="min-w-0">
@@ -1796,7 +1819,7 @@ function PaymentSection({ reservationId, totalAmount, currency, exchangeRate, on
             <div key={p.id} className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-white/[0.02] border border-white/5 group">
               <div className="flex items-center gap-4">
                 <div>
-                  <p className="text-sm font-medium text-[#8fae92]">{p.amount} {currency}</p>
+                  <p className="text-sm font-medium text-[#8fae92]">{p.amount} {stayPaymentIds.has(p.id) && foreignStay ? `${foreignStay.currency} · bivanje` : currency}</p>
                   {p.cashAmountAr ? (
                     <p className="text-xs text-[#c59b5b]">{ar(p.cashAmountAr)}</p>
                   ) : null}
@@ -6387,11 +6410,18 @@ function GuestCard() {
   <PaymentSection
     reservationId={reservation.id}
     totalAmount={
-      reservation.checkedInAt
+      foreignStayCurrency(reservation)
+        ? (computeGuestInvoiceTotalEur(reservation, exchangeRate) - Number(reservation.totalAmount || 0)).toFixed(2)
+        : reservation.checkedInAt
         ? computeGuestInvoiceTotalEur(reservation, exchangeRate).toFixed(2)
         : String(reservation.totalAmount || '0')
     }
-    currency={reservation.currency || 'EUR'}
+    currency={foreignStayCurrency(reservation) ? 'EUR' : reservation.currency || 'EUR'}
+    foreignStay={foreignStayCurrency(reservation) ? {
+      currency: foreignStayCurrency(reservation) as string,
+      total: Number(reservation.totalAmount || 0),
+      source: reservation.bookingSource,
+    } : undefined}
     exchangeRate={exchangeRate}
     onPaymentChange={refresh}
   />
@@ -8852,7 +8882,7 @@ function GuestCard() {
     // Guests departing TOMORROW — Borut must prepare the farewell gift a day ahead
     const prepareGift = reservations
       .filter((r) => r.status !== "CANCELLED" && String(r.departure).slice(0, 10) === nextDay)
-      .map((r) => ({ id: `prepareGift::${r.id}`, text: `${bungalowDisplayName(r.bungalow)} �� ${r.guestName} · ${r.pax} os  ��  pripraviti darilo danes (odhod jutri, ${nextDayLabel})` }));
+      .map((r) => ({ id: `prepareGift::${r.id}`, text: `${bungalowDisplayName(r.bungalow)} �� ${r.guestName} �� ${r.pax} os  ��  pripraviti darilo danes (odhod jutri, ${nextDayLabel})` }));
     // Guest excursions happening TOMORROW must be ordered TODAY (a day ahead) — from the guests' own bookings
     const excName = (id: string) => data?.excursions?.find((e: { id: string; name: string }) => e.id === id)?.name || "Izlet";
     const orderExcursionsAhead = reservations
