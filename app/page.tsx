@@ -7781,6 +7781,13 @@ function GuestCard() {
     <FileText className="h-4 w-4" />
     Predogled računa
   </button>
+  <button
+  onClick={() => window.open(`/racun/${reservation.id}/zahtevek`, "_blank")}
+  className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-[#c59b5b]/10 border border-[#c59b5b]/30 py-3 px-4 text-sm font-medium text-[#c59b5b] hover:bg-[#c59b5b]/20 transition-all"
+  >
+  <FileText className="h-4 w-4" />
+  Ločen račun (izbrane postavke / zahtevek)
+  </button>
   <div className="mt-3 grid grid-cols-3 gap-2">
     {([
       { key: "full", label: "Pošlji račun gostu", exc: false, stay: false },
