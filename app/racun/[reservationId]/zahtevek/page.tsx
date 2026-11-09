@@ -212,6 +212,26 @@ export default function ClaimInvoicePage() {
         <section className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-white/80">Ročno dodane postavke</h2>
+            <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() =>
+                setManual((m) => [
+                  ...m,
+                  {
+                    id: `m-${Date.now()}`,
+                    date: today,
+                    name: lang === 'fr'
+                      ? `Hébergement – 1 nuit (${bungalowDisplayName(r.bungalow)})`
+                      : `Accommodation – 1 night (${bungalowDisplayName(r.bungalow)})`,
+                    eur: '',
+                  },
+                ])
+              }
+              className="flex items-center gap-1.5 rounded-lg border border-[#c59b5b]/40 px-3 py-1.5 text-xs font-medium text-[#e0c68a] hover:bg-[#c59b5b]/10"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Dodaj nočitev
+            </button>
             <button
               onClick={() =>
                 setManual((m) => [...m, { id: `m-${Date.now()}`, date: today, name: '', eur: '' }])
@@ -221,6 +241,7 @@ export default function ClaimInvoicePage() {
               <Plus className="h-3.5 w-3.5" />
               Dodaj postavko
             </button>
+            </div>
           </div>
           {manual.map((m) => (
             <div key={m.id} className="mt-3 flex flex-wrap items-center gap-2">
