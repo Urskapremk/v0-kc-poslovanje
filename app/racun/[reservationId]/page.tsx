@@ -1374,6 +1374,14 @@ export default function RacunPage() {
             >
               {showPayments ? 'Plačila: vklop' : 'Plačila: izklop'}
             </button>
+            <Link
+              href={`/racun/${reservationId}/zahtevek`}
+              className="px-3 py-2 text-sm font-medium rounded-lg border border-white/15 bg-white/5 text-white/70 hover:text-white flex items-center gap-2"
+              title="Ločen račun samo za izbrane postavke (npr. zahtevek letalski družbi)"
+            >
+              <FileText className="h-4 w-4" />
+              Ločen račun
+            </Link>
             <button
               onClick={handleDownloadPdf}
               disabled={generatingPdf}
