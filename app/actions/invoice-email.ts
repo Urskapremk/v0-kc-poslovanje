@@ -7,6 +7,7 @@ import { readFile } from 'fs/promises'
 import path from 'path'
 import { logSentEmail } from './sent-emails'
 import { bungalowDisplayName } from '@/lib/bungalow'
+import { foreignStayCurrency, splitStayPayments } from '@/lib/foreign-stay'
 
 // ============ INVOICE EMAIL (Resend) ============
 // Sends a branded HTML invoice email (Komba Cabana check-in style) to the guest.
@@ -147,6 +148,7 @@ type InvoiceData = {
   accRemainingEur: number
   accommodationPartiallyPaid: boolean
   accPaymentNote?: string
+  foreignStay?: { currency: string; total: number; paid: number; source: string | null } | null
   paymentSpec?: { label: string; methodDate: string; eur: number; separate: boolean }[]
   hidePayments?: boolean
   extensionNote?: string | null
@@ -210,8 +212,24 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
     </tr>`
   }
 
-  const accommodationSection =
-    opts.accommodationEur > 0
+  const fs = opts.foreignStay
+  const fsPaid = !!fs && fs.paid >= fs.total - 0.01
+  const foreignStaySection = fs
+    ? sectionTitle(t.accommodation) +
+      row(
+        `${escapeHtml(opts.bungalow)}${fsPaid ? ` <span style="color:#8fae92;font-size:11px;">(${t.paid})</span>` : ''}`,
+        `${formatEur(fs.total)} ${escapeHtml(fs.currency)}`,
+        { sub: `${opts.nights} ${t.nights}` },
+      ) +
+      `<tr><td colspan="2" style="padding:0 20px 8px 20px;font-family:Arial,Helvetica,sans-serif;font-size:11px;">
+        <span style="color:${fsPaid ? '#8fae92' : '#c59b5b'};">${fsPaid
+          ? `${t.paid}: ${formatEur(fs.paid)} ${escapeHtml(fs.currency)}${fs.source ? ` · ${escapeHtml(fs.source)}` : ''}`
+          : `${t.remainingToPay}: ${formatEur(Math.max(0, fs.total - fs.paid))} ${escapeHtml(fs.currency)}`}</span>
+        <span style="color:#7f9095;"> · ${opts.lang === 'fr' ? 'non inclus dans le total en EUR' : 'not included in the EUR total'}</span>
+      </td></tr>`
+    : ''
+  const accommodationSection = foreignStaySection +
+    (opts.accommodationEur > 0
       ? sectionTitle(t.accommodation) +
         row(
           `${escapeHtml(opts.bungalow)}${opts.accommodationPaid ? ` <span style="color:#8fae92;font-size:11px;">(${t.paid})</span>` : ''}`,
@@ -232,7 +250,7 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
         (opts.extensionNote
           ? `<tr><td colspan="2" style="padding:0 20px 8px 20px;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#7f9095;font-style:italic;">${escapeHtml(opts.extensionNote)}</td></tr>`
           : '')
-      : ''
+      : '')
 
   // Services (order items) + bar grouped into daily cards — mirrors the /racun preview.
   const servicesSection =
@@ -763,7 +781,14 @@ async function buildInvoiceData(
   // "Brez bivanja" izpis: nočitev izpustimo, popuste na bivanje (kind 'stay') izločimo,
   // predplačilo pa upoštevamo le v presežku nad ceno bivanja (mirror /racun excludeAccommodation).
   const accommodationEurFull = Number(reservation.totalAmount || 0)
-  const accommodationEur = excludeAccommodation ? 0 : accommodationEurFull
+  // Platform stay in a foreign currency (e.g. Airbnb USD): shown separately, not in EUR total.
+  const stayCurrency = foreignStayCurrency(reservation as { currency?: string | null })
+  const resPayments = ((reservation as { payments?: { amount?: number; currency?: string | null; method?: string; paidAt?: string }[] }).payments || [])
+  const staySplit = stayCurrency ? splitStayPayments(resPayments, stayCurrency, accommodationEurFull) : null
+  const foreignStay = stayCurrency && !excludeAccommodation && accommodationEurFull > 0
+    ? { currency: stayCurrency, total: accommodationEurFull, paid: staySplit?.stayPaid || 0, source: (reservation as { bookingSource?: string | null }).bookingSource || null }
+    : null
+  const accommodationEur = excludeAccommodation || stayCurrency ? 0 : accommodationEurFull
   const accommodationAr = Math.round(accommodationEur * exchangeRate)
   const applicableDiscounts = discounts0
   const subtotalAr = accommodationAr + servicesTotalAr + barTotalAr
@@ -771,8 +796,8 @@ async function buildInvoiceData(
   const grandTotalAr = Math.max(0, subtotalAr - discountTotalAr)
   const grandTotalEur = grandTotalAr / exchangeRate
   const creditAr = applicableDiscounts.filter((d) => d.kind === 'credit').reduce((s, d) => s + Number(d.amountAr || 0), 0)
-  const amountPaidEur = Number(reservation.amountPaid) || 0
-  const prepaymentEur = excludeAccommodation ? Math.max(0, amountPaidEur - accommodationEurFull) : amountPaidEur
+  const amountPaidEur = staySplit ? staySplit.eurPaid : Number(reservation.amountPaid) || 0
+  const prepaymentEur = excludeAccommodation && !staySplit ? Math.max(0, amountPaidEur - accommodationEurFull) : amountPaidEur
   // Total paid = accommodation prepayment + separately-paid excursions. Paid transfers
   // are omitted from both. Both the excursions (now in subtotal) and this paid amount rise
   // together, so Balance due is unchanged.
@@ -806,7 +831,7 @@ async function buildInvoiceData(
     return e ? (lang === 'fr' ? e.fr : e.en) : m
   }
   // How/when the accommodation prepayment was made (method · date), from recorded payments.
-  const accPaymentNote = ((reservation as { payments?: { method?: string; paidAt?: string }[] }).payments || [])
+  const accPaymentNote = (staySplit ? staySplit.stay : resPayments)
     .filter((p) => p.paidAt)
     .map((p) => [methodLabel(p.method), p.paidAt ? fmtDate(p.paidAt) : ''].filter(Boolean).join(' · '))
     .join(' · ')
@@ -818,7 +843,7 @@ async function buildInvoiceData(
   // Agency bookings must NOT reveal payment details (the guest must not see how much
   // the agency paid us), so we skip the whole payment-details spec for them.
   if (!isAgencyBooking) {
-    for (const p of ((reservation as { payments?: { amount?: number; method?: string; paidAt?: string }[] }).payments || [])) {
+    for (const p of (staySplit ? staySplit.eur : resPayments)) {
       paymentSpec.push({
         label: T[lang].prepayment,
         methodDate: [methodLabel(p.method), p.paidAt ? fmtDate(p.paidAt) : ''].filter(Boolean).join(' · '),
@@ -973,6 +998,7 @@ async function buildInvoiceData(
     accRemainingEur,
     accommodationPartiallyPaid,
     accPaymentNote,
+    foreignStay,
     paymentSpec,
     extensionNote: reservation.extensionNote,
     invoiceNote: (reservation as { invoiceNote?: string | null }).invoiceNote ?? null,

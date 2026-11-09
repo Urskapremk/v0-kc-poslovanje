@@ -10,6 +10,7 @@ import { getReservationById, getOrderItems, completeCheckout, getDashboardData, 
 import { applyCombinedRouteLabels } from '@/lib/combined-route'
 import { getDeliveryNotesForReservation } from '@/app/actions/delivery'
 import { bungalowDisplayName } from '@/lib/bungalow'
+import { foreignStayCurrency, splitStayPayments } from '@/lib/foreign-stay'
 
 type PaymentMethod = 'CARD' | 'CASH' | 'ORANGE_MONEY' | 'OTHER'
 
@@ -471,7 +472,15 @@ export default function RacunPage() {
   // In "brez bivanja" (without-accommodation) mode we drop the stay entirely
   // so the guest gets a separate bill for only their services / bar / extras.
   const accommodationEurFull = Number(reservation.totalAmount || 0)
-  const accommodationEur = excludeAccommodation ? 0 : accommodationEurFull
+  // Platform stay in a foreign currency (e.g. Airbnb USD): shown separately in its own
+  // currency and kept out of the EUR total, which then covers only lodge extras.
+  const stayCurrency = foreignStayCurrency(reservation as { currency?: string | null })
+  const staySplit = stayCurrency
+    ? splitStayPayments((reservation.payments || []) as { amount: number; currency?: string | null; method?: string; paidAt?: string }[], stayCurrency, accommodationEurFull)
+    : null
+  const showForeignStay = !!stayCurrency && !excludeAccommodation && accommodationEurFull > 0
+  const foreignStayPaid = !!staySplit && staySplit.stayPaid >= accommodationEurFull - 0.01
+  const accommodationEur = excludeAccommodation || stayCurrency ? 0 : accommodationEurFull
   const accommodationAr = Math.round(accommodationEur * exchangeRate)
   const subtotalAr = accommodationAr + servicesTotal + barTotal
   const applicableDiscounts = invoiceDiscounts
@@ -485,8 +494,8 @@ export default function RacunPage() {
   // Already paid (from previous payments).
   // When excluding accommodation, any prepayment that covered the stay is not part of
   // this invoice — only the surplus beyond the accommodation price applies to the extras.
-  const alreadyPaidRaw = Number(reservation.amountPaid) || 0
-  const alreadyPaidEur = excludeAccommodation
+  const alreadyPaidRaw = staySplit ? staySplit.eurPaid : Number(reservation.amountPaid) || 0
+  const alreadyPaidEur = excludeAccommodation && !staySplit
     ? Math.max(0, alreadyPaidRaw - accommodationEurFull)
     : alreadyPaidRaw
   // Accommodation counts as paid when the prepayment covers at least the stay price
@@ -699,7 +708,7 @@ export default function RacunPage() {
   }
   // Note describing how/when the accommodation prepayment was made (method · date),
   // built from the recorded payments so it mirrors the excursion/transfer display.
-  const accPaymentNote = ((reservation.payments || []) as { method?: string; paidAt?: string }[])
+  const accPaymentNote = ((staySplit ? staySplit.stay : reservation.payments || []) as { method?: string; paidAt?: string }[])
     .filter((p) => p.paidAt)
     .map((p) => [paymentMethodLabel(p.method), p.paidAt ? fmtDate(p.paidAt) : ''].filter(Boolean).join(' · '))
     .join(' · ')
@@ -713,7 +722,7 @@ export default function RacunPage() {
   // Agency bookings must NOT reveal payment details (the guest must not see how much
   // the agency paid us), so we skip the whole payment-details spec for them.
   if (!isAgencyBooking) {
-    for (const p of (reservation.payments || []) as { amount: number; method?: string; paidAt?: string }[]) {
+    for (const p of (staySplit ? staySplit.eur : reservation.payments || []) as { amount: number; method?: string; paidAt?: string }[]) {
       paymentSpec.push({
         label: t.prepayment,
         methodDate: [paymentMethodLabel(p.method), p.paidAt ? fmtDate(p.paidAt) : ''].filter(Boolean).join(' · '),
@@ -1038,6 +1047,37 @@ export default function RacunPage() {
                 </div>
               )}
             </div>
+
+            {/* Accommodation in the platform's currency (e.g. Airbnb USD) — settled separately */}
+            {showForeignStay && (
+              <div className="inv-doc-section mb-7">
+                <h2 className="inv-section-title inv-head font-semibold mb-3 pb-2 border-b text-sm uppercase tracking-wider">{t.accommodation}</h2>
+                <table className="inv-services-table w-full text-sm">
+                  <tbody>
+                    <tr className="inv-rowline">
+                      <td className="py-2">
+                        <span>{bungalowDisplayName(reservation.bungalow)}</span>
+                        <span className="inv-muted ml-2 text-xs">{nightsCount} {t.nights}</span>
+                        {foreignStayPaid && <span className="inv-green ml-2 text-xs">({t.paid})</span>}
+                      </td>
+                      <td className="text-right py-2 tabular-nums">{formatEur(accommodationEurFull)} {stayCurrency}</td>
+                    </tr>
+                    <tr className="inv-rowline border-b">
+                      <td className="pb-2" colSpan={2}>
+                        <span className={foreignStayPaid ? 'inv-green text-xs' : 'inv-gold text-xs'}>
+                          {foreignStayPaid
+                            ? `${t.paid}: ${formatEur(staySplit?.stayPaid || 0)} ${stayCurrency}${reservation.bookingSource ? ` · ${reservation.bookingSource}` : ''}`
+                            : `${t.remainingToPay}: ${formatEur(Math.max(0, accommodationEurFull - (staySplit?.stayPaid || 0)))} ${stayCurrency}`}
+                        </span>
+                        <span className="inv-muted ml-2 text-xs">
+                          {invoiceLang === 'fr' ? '· non inclus dans le total en EUR ci-dessous' : '· not included in the EUR total below'}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {/* Accommodation */}
             {accommodationEur > 0 && (
