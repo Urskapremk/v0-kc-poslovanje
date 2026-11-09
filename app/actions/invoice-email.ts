@@ -7,6 +7,7 @@ import { readFile } from 'fs/promises'
 import path from 'path'
 import { logSentEmail } from './sent-emails'
 import { bungalowDisplayName } from '@/lib/bungalow'
+import { guestInvoiceLineNote } from '@/lib/line-note'
 import { foreignStayCurrency, splitStayPayments } from '@/lib/foreign-stay'
 
 // ============ INVOICE EMAIL (Resend) ============
@@ -153,17 +154,17 @@ type InvoiceData = {
   hidePayments?: boolean
   extensionNote?: string | null
   invoiceNote?: string | null
-  services: { name: string; eur: number; paid: boolean; free?: boolean; included?: boolean }[]
+  services: { name: string; eur: number; paid: boolean; free?: boolean; included?: boolean; showPaidEur?: number; showPaidNote?: string; guestNote?: string | null }[]
   servicesTotalEur: number
-  notes: { date: string; count: number; totalEur: number; totalAr: number; items: { qty: number; name: string; eur: number; covered?: boolean; free?: boolean }[] }[]
+  notes: { date: string; count: number; totalEur: number; totalAr: number; items: { qty: number; name: string; eur: number; covered?: boolean; free?: boolean; guestNote?: string | null }[] }[]
   // Services (order items) + bar grouped per day — mirrors the /racun preview page.
   days: {
     dateLabel: string
     count: number
     totalEur: number
     totalAr: number
-    services: { name: string; eur: number; paid: boolean; free?: boolean; included?: boolean; showPaidEur?: number; showPaidNote?: string }[]
-    bar: { qty: number; name: string; eur: number; covered?: boolean; free?: boolean }[]
+    services: { name: string; eur: number; paid: boolean; free?: boolean; included?: boolean; showPaidEur?: number; showPaidNote?: string; guestNote?: string | null }[]
+    bar: { qty: number; name: string; eur: number; covered?: boolean; free?: boolean; guestNote?: string | null }[]
   }[]
   barTotalEur: number
   onHouseTotalEur: number
@@ -269,12 +270,15 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
                 const paidSubRow = separatelyPaid
                   ? `<tr><td colspan="2" style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#8fae92;padding-top:2px;">${t.paid}${s.showPaidNote ? ` · ${escapeHtml(s.showPaidNote)}` : ''}</td></tr>`
                   : ''
+                const guestNoteRow = s.guestNote
+                  ? `<tr><td colspan="2" style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#7f9095;font-style:italic;padding-top:2px;">${escapeHtml(s.guestNote).replace(/\n/g, '<br>')}</td></tr>`
+                  : ''
                 const rightAmount = separatelyPaid ? `${formatEur(s.showPaidEur as number)} EUR` : (s.paid ? '0.00 EUR' : `${formatEur(s.eur)} EUR`)
                 return `<tr><td style="padding:6px 14px;border-bottom:1px solid #1f2f36;">
                   <table role="presentation" width="100%"><tr>
                     <td style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#c2d3da;">${escapeHtml(translateItemName(s.name, opts.lang))}${badge}</td>
                     <td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#c2d3da;white-space:nowrap;">${rightAmount}</td>
-                  </tr>${paidSubRow}</table>
+                  </tr>${paidSubRow}${guestNoteRow}</table>
                 </td></tr>`
               })
               .join('')
@@ -286,11 +290,14 @@ function buildInvoiceEmailHtml(opts: InvoiceData): string {
                   : it.free
                     ? ` <span style="color:#8fae92;font-size:11px;">(${t.complimentary})</span>`
                     : ''
+                const guestNoteRow = it.guestNote
+                  ? `<tr><td colspan="2" style="font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#7f9095;font-style:italic;padding-top:2px;">${escapeHtml(it.guestNote).replace(/\n/g, '<br>')}</td></tr>`
+                  : ''
                 return `<tr><td style="padding:6px 14px;border-bottom:1px solid #1f2f36;">
                   <table role="presentation" width="100%"><tr>
                     <td style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#c2d3da;"><span style="color:#7f9095;">${it.qty}x</span> ${escapeHtml(translateItemName(it.name, opts.lang))}${badge}</td>
                     <td align="right" style="font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#c2d3da;white-space:nowrap;">${notCharged ? '0.00 EUR' : `${formatEur(it.eur)} EUR`}</td>
-                  </tr></table>
+                  </tr>${guestNoteRow}</table>
                 </td></tr>`
               })
               .join('')
@@ -548,6 +555,7 @@ async function buildInvoicePdfBase64(d: InvoiceData): Promise<string | null> {
         if (s.showPaidEur !== undefined) {
           line(`  ${ascii(t.paid)}: ${formatEur(s.showPaidEur)} EUR${s.showPaidNote ? ` · ${ascii(s.showPaidNote)}` : ''}`, '', { muted: true })
         }
+        if (s.guestNote) line(`  ${ascii(s.guestNote)}`, '', { muted: true })
       }
       line(t.servicesTotal, `${formatEur(d.servicesTotalEur)} EUR`, { bold: true })
     }
@@ -561,6 +569,7 @@ async function buildInvoicePdfBase64(d: InvoiceData): Promise<string | null> {
           const notCharged = !!it.covered || !!it.free
           const label = it.covered ? ` (${ascii(mealIncludedLabel)})` : it.free ? ` (${ascii(t.complimentary)})` : ''
           line(`   ${it.qty}x ${ascii(translateItemName(it.name, d.lang))}${label}`, notCharged ? '0.00 EUR' : `${formatEur(it.eur)} EUR`, { muted: true })
+          if (it.guestNote) line(`  ${ascii(it.guestNote)}`, '', { muted: true })
         }
       }
       line(t.barTotal, `${formatEur(d.barTotalEur)} EUR`, { bold: true })
@@ -951,6 +960,7 @@ async function buildInvoiceData(
             included: isMealItem(i),
             showPaidEur,
             showPaidNote,
+            guestNote: guestInvoiceLineNote(i.lineNote as string | null, i.lineNoteOnInvoice as boolean | null),
           }
         }),
         bar: barItems.map((it) => ({
@@ -959,6 +969,7 @@ async function buildInvoiceData(
           eur: (Number(it.priceAr || 0) * Number(it.quantity || 0)) / exchangeRate,
           covered: !!it.coveredByMealPlan,
           free: !it.coveredByMealPlan && !!it.isFree,
+          guestNote: guestInvoiceLineNote(it.lineNote as string | null, it.lineNoteOnInvoice as boolean | null),
         })),
       }
     })
@@ -1008,6 +1019,7 @@ async function buildInvoiceData(
       paid: i.paymentStatus === 'PAID',
       free: !!(i as AnyRec).isFree,
       included: isMealItem(i),
+      guestNote: guestInvoiceLineNote((i as AnyRec).lineNote as string | null, (i as AnyRec).lineNoteOnInvoice as boolean | null),
     })),
     servicesTotalEur: servicesTotalAr / exchangeRate,
     days,
@@ -1027,6 +1039,7 @@ async function buildInvoiceData(
             eur: (Number(it.priceAr || 0) * Number(it.quantity || 0)) / exchangeRate,
             covered: !!it.coveredByMealPlan,
             free: !it.coveredByMealPlan && !!it.isFree,
+            guestNote: guestInvoiceLineNote(it.lineNote as string | null, it.lineNoteOnInvoice as boolean | null),
           })),
         }
       }),

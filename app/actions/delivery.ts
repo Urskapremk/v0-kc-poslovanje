@@ -6,6 +6,7 @@ import { eq, and, desc, asc } from 'drizzle-orm'
 import { nanoid } from 'nanoid'
 import { revalidatePath } from 'next/cache'
 import { mealPayFactor, childBand } from '@/lib/meal-plan'
+import { ensureLineNoteColumns } from '@/lib/line-note-columns'
 
 async function syncMassageCash(itemId: string) {
   try {
@@ -208,6 +209,7 @@ export async function getOrCreateDeliveryNote(reservationId: string, bungalow: s
 
 // Get delivery note with items
 export async function getDeliveryNoteWithItems(deliveryNoteId: string) {
+  await ensureLineNoteColumns()
   const note = await db.query.deliveryNotes.findFirst({
     where: eq(deliveryNotes.id, deliveryNoteId),
   })
@@ -534,6 +536,7 @@ export async function closeDeliveryNote(deliveryNoteId: string, staffId?: string
 
 // Get all delivery notes for a reservation (for invoice)
 export async function getDeliveryNotesForReservation(reservationId: string) {
+  await ensureLineNoteColumns()
   const notes = await db.query.deliveryNotes.findMany({
     where: eq(deliveryNotes.reservationId, reservationId),
     orderBy: [desc(deliveryNotes.date)],

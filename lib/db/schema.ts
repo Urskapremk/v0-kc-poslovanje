@@ -255,6 +255,9 @@ export const transfers = pgTable('transfers', {
   pickupPoint: text('pickupPoint'),
   pax: integer('pax').default(1),
   notes: text('notes'),
+  // Short staff note on this transfer line. Off the guest invoice until she says yes.
+  lineNote: text('lineNote'),
+  lineNoteOnInvoice: boolean('lineNoteOnInvoice').notNull().default(false),
   boatId: text('boatId').references(() => boats.id),
   boatPortTime: text('boatPortTime'),
   hermanAirportTime: text('hermanAirportTime'),
@@ -291,6 +294,9 @@ export const orderItems = pgTable('order_items', {
   isFree: boolean('isFree').default(false), // true when staff marked the item complimentary (On House) -> not billed
   eventDate: text('eventDate'), // Date when the item/service occurs (for excursions, transfers)
   addedBy: text('addedBy'), // who added this item at reception (e.g. 'Urska')
+  // Short staff note. Printed under the line only when lineNoteOnInvoice is true.
+  lineNote: text('lineNote'),
+  lineNoteOnInvoice: boolean('lineNoteOnInvoice').notNull().default(false),
   dilipOrderedAt: timestamp('dilipOrderedAt'), // reception ad-hoc transfer: boat ordered from Dilip
   hermanOrderedAt: timestamp('hermanOrderedAt'), // reception ad-hoc transfer: Herman taxi ordered
   createdAt: timestamp('createdAt').notNull().defaultNow(),
@@ -587,6 +593,9 @@ export const deliveryNoteItems = pgTable('delivery_note_items', {
   isFree: boolean('isFree').default(false), // true when staff marked the item complimentary (na racun hise) -> not billed
   staffId: text('staffId').references(() => staff.id, { onDelete: 'set null' }),
   staffName: text('staffName'), // Store name in case staff is deleted
+  // Short staff note. Printed under the line only when lineNoteOnInvoice is true.
+  lineNote: text('lineNote'),
+  lineNoteOnInvoice: boolean('lineNoteOnInvoice').notNull().default(false),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
 })
 

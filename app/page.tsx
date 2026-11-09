@@ -19,6 +19,7 @@ import { toEnglishItemName } from "@/lib/item-name";
 import { combinedRouteLabel, transferLineName } from "@/lib/combined-route";
 import { hideCompletedDepartureFromList } from "@/lib/hidden-departure";
 import { guestBillLineAmount } from "@/lib/guest-bill-amount";
+import { LineNoteControl } from "@/components/line-note-control";
 import { capturePaymentListPlace, restorePaymentListPlace, type PaymentListPlace } from "@/lib/payment-list-place";
   import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
   import { TimelineCalendar } from "@/components/timeline-calendar";
@@ -179,6 +180,8 @@ interface OrderItem {
   priceAr: number;
   paymentStatus?: string | null;
   isFree?: boolean;
+  lineNote?: string | null;
+  lineNoteOnInvoice?: boolean | null;
   eventDate?: string | null;
   dilipOrderedAt?: string | null;
   hermanOrderedAt?: string | null;
@@ -193,6 +196,8 @@ interface TransferData {
   pickupPoint?: string;
   pax?: number;
   notes?: string;
+  lineNote?: string | null;
+  lineNoteOnInvoice?: boolean | null;
   boatId?: string;
   boatPortTime?: string;
   hermanAirportTime?: string;
@@ -2299,7 +2304,9 @@ export default function KombaCabanaApp() {
         paymentStatus: isPaid ? 'PAID' : 'UNPAID',
         paidMethod: isPaid ? (arrivalTransfer.paidMethod || undefined) : undefined,
         paidDate: isPaid ? (arrivalTransfer.paidDate || undefined) : undefined,
-        eventDate: arrivalDateStr // Transfer happens on arrival date
+        eventDate: arrivalDateStr, // Transfer happens on arrival date
+        lineNote: arrivalTransfer.lineNote || undefined,
+        lineNoteOnInvoice: arrivalTransfer.lineNoteOnInvoice === true,
       });
     }
     
@@ -2327,7 +2334,9 @@ export default function KombaCabanaApp() {
         paymentStatus: isPaid ? 'PAID' : 'UNPAID',
         paidMethod: isPaid ? (departureTransfer.paidMethod || undefined) : undefined,
         paidDate: isPaid ? (departureTransfer.paidDate || undefined) : undefined,
-        eventDate: departureDateStr // Transfer happens on departure date
+        eventDate: departureDateStr, // Transfer happens on departure date
+        lineNote: departureTransfer.lineNote || undefined,
+        lineNoteOnInvoice: departureTransfer.lineNoteOnInvoice === true,
       });
     }
     
@@ -7515,7 +7524,9 @@ function GuestCard() {
         paymentStatus: reservation.transfers.arrival.paymentStatus,
         serviceDate: reservation.arrival,
         executed: reservation.transfers.arrival.executed,
-        isTransfer: true
+        isTransfer: true,
+        lineNote: reservation.transfers.arrival.lineNote || '',
+        lineNoteOnInvoice: reservation.transfers.arrival.lineNoteOnInvoice === true,
       });
     }
     
@@ -7530,7 +7541,9 @@ function GuestCard() {
         paymentStatus: reservation.transfers.departure.paymentStatus,
         serviceDate: reservation.departure,
         executed: reservation.transfers.departure.executed,
-        isTransfer: true
+        isTransfer: true,
+        lineNote: reservation.transfers.departure.lineNote || '',
+        lineNoteOnInvoice: reservation.transfers.departure.lineNoteOnInvoice === true,
       });
     }
     
@@ -7569,7 +7582,9 @@ function GuestCard() {
       executed: true,
       isBarItem: true,
       staffName: item.staffName,
-      createdAt: item.createdAt
+      createdAt: item.createdAt,
+      lineNote: item.lineNote || '',
+      lineNoteOnInvoice: item.lineNoteOnInvoice === true,
     });
   });
     
@@ -7636,6 +7651,37 @@ function GuestCard() {
     // the full invoice total so the box is never blank.
     const balanceEur = Math.max(0, balanceDueEur ?? invoiceTotalEur);
     const balanceAr = eurToAr(balanceEur, exchangeRate);
+
+    async function persistLineNote(item: OrderItemWithDate, note: string, onInvoice: boolean) {
+      const { setLineNote } = await import("@/app/actions/komba");
+      const result = item.id === "arrival-transfer" || item.id === "departure-transfer"
+        ? await setLineNote({
+            kind: "transfer",
+            reservationId: reservation.id,
+            transferType: item.id === "arrival-transfer" ? "arrival" : "departure",
+            note,
+            onInvoice,
+          })
+        : await setLineNote({
+            kind: item.isBarItem ? "bar" : "order",
+            id: item.id,
+            note,
+            onInvoice,
+          });
+      if (!result.ok) throw new Error(result.error);
+      refresh();
+    }
+
+    const lineNote = (item: OrderItemWithDate, tone: "light" | "dark") => (
+      <div className={tone === "light" ? "mt-3 border-t border-[#0f2e3a]/10 pt-3" : "mt-3 border-t border-white/10 pt-3"}>
+        <LineNoteControl
+          note={item.lineNote}
+          onInvoice={item.lineNoteOnInvoice}
+          tone={tone}
+          onSave={(note, onInvoice) => persistLineNote(item, note, onInvoice)}
+        />
+      </div>
+    );
 
     return (
       <section className="grid gap-8 xl:grid-cols-[440px_1fr]">
@@ -8047,6 +8093,7 @@ function GuestCard() {
                        >Preklici</button>
                      </div>
                    )}
+                   {lineNote(item, "light")}
                   </div>
                 ))}
               </div>
@@ -8061,14 +8108,17 @@ function GuestCard() {
                   <div className="h-px flex-1 bg-gradient-to-l from-white/10 to-transparent" />
                 </div>
                 {notExecutedTransfers.map(item => (
-                  <div key={item.id} className="flex items-center justify-between rounded-2xl border border-white/[0.05] bg-white/[0.01] p-4 opacity-50">
-                    <div>
-                      <p className="text-white/60 line-through">{toEnglishItemName(item.name)}</p>
-                      <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
+                  <div key={item.id} className="rounded-2xl border border-white/[0.05] bg-white/[0.01] p-4">
+                    <div className="flex items-center justify-between opacity-50">
+                      <div>
+                        <p className="text-white/60 line-through">{toEnglishItemName(item.name)}</p>
+                        <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <LuxuryBadge variant="default">Ni izveden</LuxuryBadge>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <LuxuryBadge variant="default">Ni izveden</LuxuryBadge>
-                    </div>
+                    {lineNote(item, "dark")}
                   </div>
                 ))}
               </div>
@@ -8090,7 +8140,8 @@ function GuestCard() {
                       <div className="h-px flex-1 bg-gradient-to-l from-[#2a7897]/20 to-transparent" />
                     </div>
                     {groupedPaidByDate[date].map(item => (
-                      <div key={item.id} data-payment-line={item.id} tabIndex={-1} className="flex items-center justify-between rounded-2xl border border-[#2a7897]/10 bg-[#2a7897]/5 p-4 outline-none">
+                      <div key={item.id} data-payment-line={item.id} tabIndex={-1} className="rounded-2xl border border-[#2a7897]/10 bg-[#2a7897]/5 p-4 outline-none">
+                        <div className="flex items-center justify-between">
                         <div>
                           <p className="text-white/60">{toEnglishItemName(item.name)}</p>
                           <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
@@ -8123,6 +8174,8 @@ function GuestCard() {
                           )}
                           <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-[#bc7d67] transition-colors hover:text-[#bc7d67]/70" onMouseDown={(e) => e.preventDefault()} onClick={(e) => removePaymentLine(e, item)}><Trash2 className="h-4 w-4" />Odstrani</button>
                         </div>
+                        </div>
+                        {lineNote(item, "dark")}
                       </div>
                     ))}
                   </div>

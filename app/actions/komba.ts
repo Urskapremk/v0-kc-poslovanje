@@ -13,6 +13,8 @@ import { cashAriaryToEurAmount } from '@/lib/cash-payment'
 import { ensureExcursionPriceColumns } from '@/lib/excursion-price-columns'
 import { replaceBungalowPeople, type BungalowPeopleMap, type BungalowPerson } from '@/lib/bungalow-people'
 import { combinedRouteLabel, transferLineName } from '@/lib/combined-route'
+import { ensureLineNoteColumns } from '@/lib/line-note-columns'
+import { prepareLineNote, transferMirrorDirection } from '@/lib/line-note'
 
 // Generate unique ID
 function uid(prefix: string) {
@@ -85,11 +87,90 @@ export async function setInvoiceNote(reservationId: string, note: string) {
   revalidatePath(`/racun/${reservationId}`)
 }
 
+// Short note on one line (an order item, a bar line, or an arrival/departure transfer).
+// onInvoice is false until she answers Da. A transfer note is stored on the transfer
+// and copied onto its invoice line so the guest invoice can print it under that line.
+export async function setLineNote(input: {
+  kind: 'order' | 'bar' | 'transfer'
+  id?: string
+  reservationId?: string
+  transferType?: 'arrival' | 'departure'
+  note: string
+  onInvoice: boolean
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  await ensureLineNoteColumns()
+  const prepared = prepareLineNote(input.note || '', input.onInvoice)
+  const patch = { lineNote: prepared.note, lineNoteOnInvoice: prepared.onInvoice }
+
+  if (input.kind === 'transfer') {
+    const reservationId = input.reservationId || ''
+    const transferType = input.transferType
+    if (!reservationId || (transferType !== 'arrival' && transferType !== 'departure')) {
+      return { ok: false, error: 'Transfer ni najden.' }
+    }
+    const existing = await db.select({ id: transfers.id }).from(transfers)
+      .where(and(eq(transfers.reservationId, reservationId), eq(transfers.type, transferType)))
+      .limit(1)
+    if (existing.length === 0) return { ok: false, error: 'Transfer ni najden.' }
+    await db.update(transfers).set(patch).where(eq(transfers.id, existing[0].id))
+    await copyTransferNoteOntoOrderItem(reservationId, transferType, patch)
+    revalidatePath('/')
+    revalidatePath(`/racun/${reservationId}`)
+    return { ok: true }
+  }
+
+  if (input.kind === 'bar') {
+    if (!input.id) return { ok: false, error: 'Postavka ni najdena.' }
+    const [row] = await db.select({
+      id: deliveryNoteItems.id,
+      deliveryNoteId: deliveryNoteItems.deliveryNoteId,
+    }).from(deliveryNoteItems).where(eq(deliveryNoteItems.id, input.id)).limit(1)
+    if (!row) return { ok: false, error: 'Postavka ni najdena.' }
+    await db.update(deliveryNoteItems).set(patch).where(eq(deliveryNoteItems.id, row.id))
+    const [parent] = await db.select({ reservationId: deliveryNotes.reservationId })
+      .from(deliveryNotes).where(eq(deliveryNotes.id, row.deliveryNoteId)).limit(1)
+    revalidatePath('/')
+    if (parent?.reservationId) revalidatePath(`/racun/${parent.reservationId}`)
+    return { ok: true }
+  }
+
+  if (!input.id) return { ok: false, error: 'Postavka ni najdena.' }
+  const [item] = await db.select({
+    id: orderItems.id,
+    name: orderItems.name,
+    reservationId: orderItems.reservationId,
+  }).from(orderItems).where(eq(orderItems.id, input.id)).limit(1)
+  if (!item) return { ok: false, error: 'Postavka ni najdena.' }
+  await db.update(orderItems).set(patch).where(eq(orderItems.id, item.id))
+  const direction = transferMirrorDirection(item.name)
+  if (direction) {
+    await db.update(transfers).set(patch)
+      .where(and(eq(transfers.reservationId, item.reservationId), eq(transfers.type, direction)))
+  }
+  revalidatePath('/')
+  revalidatePath(`/racun/${item.reservationId}`)
+  return { ok: true }
+}
+
+async function copyTransferNoteOntoOrderItem(
+  reservationId: string,
+  type: 'arrival' | 'departure',
+  patch: { lineNote: string | null; lineNoteOnInvoice: boolean },
+) {
+  const prefix = `TRANSFER ${type.toUpperCase()}:`
+  const rows = await db.select({ id: orderItems.id, name: orderItems.name }).from(orderItems)
+    .where(and(eq(orderItems.reservationId, reservationId), eq(orderItems.category, 'Transfer')))
+  const match = rows.find((row) => (row.name || '').toUpperCase().startsWith(prefix))
+  if (!match) return
+  await db.update(orderItems).set(patch).where(eq(orderItems.id, match.id))
+}
+
 // ============ RESERVATIONS ============
 
 // Get a single reservation by ID (including archived)
 export async function getReservationById(reservationId: string) {
   await ensureCashAmountColumn()
+  await ensureLineNoteColumns()
   const [res] = await db.select().from(reservations).where(eq(reservations.id, reservationId)).limit(1)
   if (!res) return null
   
@@ -116,6 +197,8 @@ export async function getReservationById(reservationId: string) {
       refPriceAr: o.refPriceAr ?? null,
       paymentStatus: o.paymentStatus,
       isFree: o.isFree ?? false,
+      lineNote: o.lineNote || '',
+      lineNoteOnInvoice: o.lineNoteOnInvoice === true,
       eventDate: o.eventDate,
       paidMethod: o.paidMethod ?? null,
       paidDate: o.paidDate ?? null,
@@ -182,6 +265,7 @@ export async function saveBungalowUnitPeople(
 }
 
 export async function getReservationWithDetails(id: string) {
+  await ensureLineNoteColumns()
   const [reservation] = await db.select().from(reservations).where(eq(reservations.id, id))
   if (!reservation) return null
   
@@ -202,6 +286,8 @@ export async function getReservationWithDetails(id: string) {
         pickupDate: arrivalTransfer.pickupDate || '',
         pickupPoint: arrivalTransfer.pickupPoint || '',
         notes: arrivalTransfer.notes || '',
+        lineNote: arrivalTransfer.lineNote || '',
+        lineNoteOnInvoice: arrivalTransfer.lineNoteOnInvoice === true,
         boatId: arrivalTransfer.boatId || '',
         boatPortTime: arrivalTransfer.boatPortTime || '',
         hermanAirportTime: arrivalTransfer.hermanAirportTime || '',
@@ -211,7 +297,7 @@ export async function getReservationWithDetails(id: string) {
         hermanOrderedAt: arrivalTransfer.hermanOrderedAt?.toISOString() || null,
         guestPrice: Number(arrivalTransfer.guestPrice) || 0,
         paymentStatus: arrivalTransfer.paymentStatus || 'UNPAID'
-      } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, guestPrice: 0, paymentStatus: 'UNPAID' },
+      } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', lineNote: '', lineNoteOnInvoice: false, boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, guestPrice: 0, paymentStatus: 'UNPAID' },
       departure: departureTransfer ? {
         route: departureTransfer.route || '',
         time: departureTransfer.time || '',
@@ -220,6 +306,8 @@ export async function getReservationWithDetails(id: string) {
         pickupDate: departureTransfer.pickupDate || '',
         pickupPoint: departureTransfer.pickupPoint || '',
         notes: departureTransfer.notes || '',
+        lineNote: departureTransfer.lineNote || '',
+        lineNoteOnInvoice: departureTransfer.lineNoteOnInvoice === true,
         boatId: departureTransfer.boatId || '',
         boatPortTime: departureTransfer.boatPortTime || '',
         hermanAirportTime: departureTransfer.hermanAirportTime || '',
@@ -229,7 +317,7 @@ export async function getReservationWithDetails(id: string) {
         hermanOrderedAt: departureTransfer.hermanOrderedAt?.toISOString() || null,
         guestPrice: Number(departureTransfer.guestPrice) || 0,
         paymentStatus: departureTransfer.paymentStatus || 'UNPAID'
-      } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, guestPrice: 0, paymentStatus: 'UNPAID' }
+      } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', lineNote: '', lineNoteOnInvoice: false, boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, guestPrice: 0, paymentStatus: 'UNPAID' }
     },
     orderItems: reservationOrders.map(o => ({
       id: o.id,
@@ -240,6 +328,8 @@ export async function getReservationWithDetails(id: string) {
       refPriceAr: o.refPriceAr ?? null,
       paymentStatus: o.paymentStatus,
       isFree: o.isFree ?? false,
+      lineNote: o.lineNote || '',
+      lineNoteOnInvoice: o.lineNoteOnInvoice === true,
       eventDate: o.eventDate,
       paidMethod: o.paidMethod ?? null,
       paidDate: o.paidDate ?? null,
@@ -469,6 +559,7 @@ async function syncAccommodationItem(reservationId: string) {
 // note for that day was missing the transfer. Runs only for checked-in guests to
 // avoid creating a duplicate that check-in would then add again.
 async function syncTransferItem(reservationId: string, type: 'arrival' | 'departure') {
+  await ensureLineNoteColumns()
   const resRows = await db.select().from(reservations).where(eq(reservations.id, reservationId)).limit(1)
   const res = resRows[0]
   if (!res || !res.checkedInAt) return // not checked in yet → check-in will generate it
@@ -512,9 +603,10 @@ async function syncTransferItem(reservationId: string, type: 'arrival' | 'depart
   const name = transferLineName(type, routeName, carRow?.name, boatName, pax)
   const paymentStatus = isPaid ? 'PAID' : 'UNPAID'
 
+  const line = prepareLineNote(tr.lineNote || '', tr.lineNoteOnInvoice === true)
   if (match) {
     await db.update(orderItems)
-      .set({ name, priceAr, refPriceAr, paymentStatus, paidMethod, paidDate, eventDate })
+      .set({ name, priceAr, refPriceAr, paymentStatus, paidMethod, paidDate, eventDate, lineNote: line.note, lineNoteOnInvoice: line.onInvoice })
       .where(eq(orderItems.id, match.id))
   } else {
     await db.insert(orderItems).values({
@@ -530,6 +622,8 @@ async function syncTransferItem(reservationId: string, type: 'arrival' | 'depart
       paidDate,
       eventDate,
       addedBy: 'Urska',
+      lineNote: line.note,
+      lineNoteOnInvoice: line.onInvoice,
     })
   }
 }
@@ -628,6 +722,7 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
   executedAt?: string | null
 }) {
   await ensureSkipBoatPayColumn()
+  await ensureLineNoteColumns()
   const existing = await db.select().from(transfers)
     .where(and(eq(transfers.reservationId, reservationId), eq(transfers.type, type)))
     .limit(1)
@@ -729,12 +824,16 @@ export async function addOrderItem(reservationId: string, data: {
   priceAr: number
   refPriceAr?: number // real price for display even when paid (priceAr = 0); does not affect totals
   paymentStatus?: string
-  paidMethod?: string // 'card' | 'cash' | 'transfer' ��� how the guest paid (for invoice)
+  paidMethod?: string // 'card' | 'cash' | 'transfer' — how the guest paid (for invoice)
   paidDate?: string // YYYY-MM-DD when the guest paid (for invoice)
   eventDate?: string // Date when the item/service occurs (for excursions, transfers)
   addedBy?: string // who added this item at reception (defaults to Urska)
+  lineNote?: string | null
+  lineNoteOnInvoice?: boolean
 }) {
+  await ensureLineNoteColumns()
   const id = uid('ord')
+  const line = prepareLineNote(data.lineNote || '', data.lineNoteOnInvoice === true)
   await db.insert(orderItems).values({
     id,
     reservationId,
@@ -747,7 +846,9 @@ export async function addOrderItem(reservationId: string, data: {
     paidMethod: data.paidMethod ?? null,
     paidDate: data.paidDate ?? null,
     eventDate: data.eventDate || null,
-    addedBy: data.addedBy || 'Urska'
+    addedBy: data.addedBy || 'Urska',
+    lineNote: line.note,
+    lineNoteOnInvoice: line.onInvoice,
   })
   await syncMassageCash(id)
   revalidatePath('/')
@@ -798,6 +899,7 @@ export async function deleteOrderItem(id: string) {
 }
 
 export async function getOrderItems(reservationId: string) {
+  await ensureLineNoteColumns()
   return await db.select().from(orderItems).where(eq(orderItems.reservationId, reservationId))
 }
 
@@ -874,6 +976,7 @@ export async function setOrderItemTransferOrdered(id: string, which: 'dilip' | '
 
 export async function getDashboardData(includeReservationId?: string) {
   await ensureCashAmountColumn()
+  await ensureLineNoteColumns()
   await ensureExcursionPriceColumns()
   await ensureSkipBoatPayColumn()
   await ensureBungalowPeopleColumn()
@@ -953,6 +1056,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           pickupDate: arrivalTransfer.pickupDate || '',
           pickupPoint: arrivalTransfer.pickupPoint || '',
           notes: arrivalTransfer.notes || '',
+        lineNote: arrivalTransfer.lineNote || '',
+        lineNoteOnInvoice: arrivalTransfer.lineNoteOnInvoice === true,
           boatId: arrivalTransfer.boatId || '',
           boatPortTime: arrivalTransfer.boatPortTime || '',
           hermanAirportTime: arrivalTransfer.hermanAirportTime || '',
@@ -967,7 +1072,7 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           paidDate: arrivalTransfer.paidDate || '',
           executed: arrivalTransfer.executed || false,
           executedAt: arrivalTransfer.executedAt?.toISOString() || null
-        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, skipBoatPay: false, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '', executed: false, executedAt: null },
+        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', lineNote: '', lineNoteOnInvoice: false, boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, skipBoatPay: false, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '', executed: false, executedAt: null },
         departure: departureTransfer ? {
           route: departureTransfer.route || '',
           time: departureTransfer.time || '',
@@ -976,6 +1081,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           pickupDate: departureTransfer.pickupDate || '',
           pickupPoint: departureTransfer.pickupPoint || '',
           notes: departureTransfer.notes || '',
+        lineNote: departureTransfer.lineNote || '',
+        lineNoteOnInvoice: departureTransfer.lineNoteOnInvoice === true,
           boatId: departureTransfer.boatId || '',
           boatPortTime: departureTransfer.boatPortTime || '',
           hermanAirportTime: departureTransfer.hermanAirportTime || '',
@@ -990,7 +1097,7 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           paidDate: departureTransfer.paidDate || '',
           executed: departureTransfer.executed || false,
           executedAt: departureTransfer.executedAt?.toISOString() || null
-        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, skipBoatPay: false, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '' }
+        } : { route: '', time: '', flightNumber: '', flightTime: '', pickupDate: '', pickupPoint: '', notes: '', lineNote: '', lineNoteOnInvoice: false, boatId: '', boatPortTime: '', hermanAirportTime: '', hermanRouteId: '', taxiBoatId: '', dilipOrderedAt: null, hermanOrderedAt: null, skipBoatPay: false, guestPrice: 0, paymentStatus: 'UNPAID', paidMethod: '', paidDate: '' }
       },
       orderItems: resOrders.map(o => ({
         id: o.id,
@@ -1001,6 +1108,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
         refPriceAr: o.refPriceAr ?? null,
         paymentStatus: o.paymentStatus,
         isFree: o.isFree ?? false,
+        lineNote: o.lineNote || '',
+        lineNoteOnInvoice: o.lineNoteOnInvoice === true,
         eventDate: o.eventDate,
         paidMethod: o.paidMethod ?? null,
         paidDate: o.paidDate ?? null,
@@ -1041,6 +1150,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           noteDate: note?.date ? (typeof note.date === 'string' ? note.date.split('T')[0] : note.date.toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
           noteStatus: note?.status || 'open',
           staffName: dni.staffName,
+          lineNote: dni.lineNote || '',
+          lineNoteOnInvoice: dni.lineNoteOnInvoice === true,
           // When the bar actually rang it up, so the delivery note can show the hour
           // next to who served it. Distinct from noteDate, which is only the day.
           createdAt: dni.createdAt

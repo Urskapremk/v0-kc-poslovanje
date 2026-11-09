@@ -11,6 +11,7 @@ import { applyCombinedRouteLabels } from '@/lib/combined-route'
 import { getDeliveryNotesForReservation } from '@/app/actions/delivery'
 import { bungalowDisplayName } from '@/lib/bungalow'
 import { foreignStayCurrency, splitStayPayments } from '@/lib/foreign-stay'
+import { guestInvoiceLineNote } from '@/lib/line-note'
 
 type PaymentMethod = 'CARD' | 'CASH' | 'ORANGE_MONEY' | 'OTHER'
 
@@ -43,6 +44,8 @@ interface OrderItem {
   isFree?: boolean | null
   eventDate?: string
   createdAt?: string
+  lineNote?: string | null
+  lineNoteOnInvoice?: boolean | null
 }
 
 interface DeliveryNote {
@@ -58,6 +61,8 @@ interface DeliveryNote {
     priceAr: number
     coveredByMealPlan?: boolean | null
     isFree?: boolean | null
+    lineNote?: string | null
+    lineNoteOnInvoice?: boolean | null
   }>
 }
 
@@ -1176,6 +1181,7 @@ export default function RacunPage() {
                               item.paidMethod ? (methodLabelByLang[invoiceLang][item.paidMethod as PaymentMethod] || item.paidMethod) : '',
                               item.paidDate ? fmtDate(item.paidDate) : '',
                             ].filter(Boolean).join(' · ')
+                            const printedNote = guestInvoiceLineNote(item.lineNote, item.lineNoteOnInvoice)
                             return (
                               <div key={item.id} className="inv-bar-item inv-rowline border-b py-2 last:border-b-0 text-sm">
                                 <div className="flex items-center justify-between">
@@ -1201,6 +1207,9 @@ export default function RacunPage() {
                                     </span>
                                   </div>
                                 )}
+                                {printedNote && (
+                                  <p className="inv-muted mt-1 text-xs italic whitespace-pre-line">{printedNote}</p>
+                                )}
                               </div>
                             )
                           })}
@@ -1208,18 +1217,24 @@ export default function RacunPage() {
                             const covered = !!item.coveredByMealPlan
                             const free = !item.coveredByMealPlan && !!item.isFree
                             const notCharged = covered || free
+                            const printedNote = guestInvoiceLineNote(item.lineNote, item.lineNoteOnInvoice)
                             return (
-                              <div key={item.id} className="inv-bar-item inv-rowline flex items-center justify-between border-b py-2 last:border-b-0 text-sm">
-                                <span className={notCharged ? 'inv-muted' : ''}>
-                                  <span className="inv-muted">{item.quantity}x</span> {translateItemName(item.productName, invoiceLang)}
-                                  {covered && <span className="inv-green ml-2 text-xs">({mealIncludedLabel})</span>}
-                                  {free && <span className="inv-green ml-2 text-xs">({t.complimentary})</span>}
-                                </span>
-                                <span className="tabular-nums">
-                                  {notCharged
-                                    ? '0.00 EUR'
-                                    : `${formatEur((item.priceAr * item.quantity) / exchangeRate)} EUR`}
-                                </span>
+                              <div key={item.id} className="inv-bar-item inv-rowline border-b py-2 last:border-b-0 text-sm">
+                                <div className="flex items-center justify-between">
+                                  <span className={notCharged ? 'inv-muted' : ''}>
+                                    <span className="inv-muted">{item.quantity}x</span> {translateItemName(item.productName, invoiceLang)}
+                                    {covered && <span className="inv-green ml-2 text-xs">({mealIncludedLabel})</span>}
+                                    {free && <span className="inv-green ml-2 text-xs">({t.complimentary})</span>}
+                                  </span>
+                                  <span className="tabular-nums">
+                                    {notCharged
+                                      ? '0.00 EUR'
+                                      : `${formatEur((item.priceAr * item.quantity) / exchangeRate)} EUR`}
+                                  </span>
+                                </div>
+                                {printedNote && (
+                                  <p className="inv-muted mt-1 text-xs italic whitespace-pre-line">{printedNote}</p>
+                                )}
                               </div>
                             )
                           })}

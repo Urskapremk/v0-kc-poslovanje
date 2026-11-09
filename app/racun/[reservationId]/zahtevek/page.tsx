@@ -9,6 +9,7 @@ import { ArrowLeft, Plus, Printer, Trash2 } from 'lucide-react'
 import { getReservationById, getOrderItems } from '@/app/actions/komba'
 import { getDeliveryNotesForReservation } from '@/app/actions/delivery'
 import { bungalowDisplayName } from '@/lib/bungalow'
+import { guestInvoiceLineNote } from '@/lib/line-note'
 
 type Lang = 'en' | 'fr'
 
@@ -18,6 +19,7 @@ interface Line {
   name: string
   qty: number
   eur: number
+  guestNote?: string | null
 }
 
 interface ManualLine {
@@ -93,6 +95,10 @@ export default function ClaimInvoicePage() {
       name: i.name,
       qty: Number((i as { qty?: number | null }).qty) || 1,
       eur: Number(i.priceAr) / rate,
+      guestNote: guestInvoiceLineNote(
+        (i as { lineNote?: string | null }).lineNote,
+        (i as { lineNoteOnInvoice?: boolean | null }).lineNoteOnInvoice,
+      ),
     }))
     const fromBar: Line[] = (data.notes || []).flatMap((n) =>
       (n.items || [])
@@ -103,6 +109,10 @@ export default function ClaimInvoicePage() {
           name: it.productName,
           qty: Number(it.quantity) || 1,
           eur: (Number(it.priceAr) * (Number(it.quantity) || 1)) / rate,
+          guestNote: guestInvoiceLineNote(
+            (it as { lineNote?: string | null }).lineNote,
+            (it as { lineNoteOnInvoice?: boolean | null }).lineNoteOnInvoice,
+          ),
         })),
     )
     return [...fromOrders, ...fromBar].sort((a, b) => a.date.localeCompare(b.date))
@@ -327,7 +337,10 @@ export default function ClaimInvoicePage() {
               chosen.map((l) => (
                 <tr key={l.id} className="border-b border-gray-100">
                   <td className="whitespace-nowrap py-2.5 pr-4 text-gray-500">{formatDate(l.date, lang)}</td>
-                  <td className="py-2.5 pr-4">{l.name}</td>
+                  <td className="py-2.5 pr-4">
+                    {l.name}
+                    {l.guestNote && <div className="mt-0.5 text-xs italic text-gray-500 whitespace-pre-line">{l.guestNote}</div>}
+                  </td>
                   <td className="py-2.5 pr-4 text-right tabular-nums">{l.qty}</td>
                   <td className="py-2.5 text-right tabular-nums">{formatEur(l.eur)} EUR</td>
                 </tr>
