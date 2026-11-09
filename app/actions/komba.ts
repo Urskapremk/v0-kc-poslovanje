@@ -98,58 +98,97 @@ export async function setLineNote(input: {
   note: string
   onInvoice: boolean
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  await ensureLineNoteColumns()
-  const prepared = prepareLineNote(input.note || '', input.onInvoice)
-  const patch = { lineNote: prepared.note, lineNoteOnInvoice: prepared.onInvoice }
+  const fail = 'Shranjevanje opombe ni uspelo. Poskusite znova.'
+  try {
+    await ensureLineNoteColumns()
+    const prepared = prepareLineNote(input.note || '', input.onInvoice)
+    const patch = { lineNote: prepared.note, lineNoteOnInvoice: prepared.onInvoice }
 
-  if (input.kind === 'transfer') {
-    const reservationId = input.reservationId || ''
-    const transferType = input.transferType
-    if (!reservationId || (transferType !== 'arrival' && transferType !== 'departure')) {
-      return { ok: false, error: 'Transfer ni najden.' }
+    if (input.kind === 'transfer') {
+      const reservationId = input.reservationId || ''
+      const transferType = input.transferType
+      if (!reservationId || (transferType !== 'arrival' && transferType !== 'departure')) {
+        return { ok: false, error: 'Transfer ni najden.' }
+      }
+      const existing = await db.select({ id: transfers.id }).from(transfers)
+        .where(and(eq(transfers.reservationId, reservationId), eq(transfers.type, transferType)))
+        .limit(1)
+      if (existing.length === 0) return { ok: false, error: 'Transfer ni najden.' }
+      await db.transaction(async (tx) => {
+        await tx.update(transfers).set(patch).where(eq(transfers.id, existing[0].id))
+        const [row] = await tx.select({
+          lineNote: transfers.lineNote,
+          lineNoteOnInvoice: transfers.lineNoteOnInvoice,
+        }).from(transfers).where(eq(transfers.id, existing[0].id)).limit(1)
+        if (!storedLineNoteMatches(row, prepared)) throw new Error('line note was not stored')
+      })
+      try {
+        await copyTransferNoteOntoOrderItem(reservationId, transferType, patch)
+      } catch (err) {
+        console.error('[setLineNote] transfer mirror', err)
+      }
+      revalidatePath('/')
+      revalidatePath(`/racun/${reservationId}`)
+      return { ok: true }
     }
-    const existing = await db.select({ id: transfers.id }).from(transfers)
-      .where(and(eq(transfers.reservationId, reservationId), eq(transfers.type, transferType)))
-      .limit(1)
-    if (existing.length === 0) return { ok: false, error: 'Transfer ni najden.' }
-    await db.update(transfers).set(patch).where(eq(transfers.id, existing[0].id))
-    await copyTransferNoteOntoOrderItem(reservationId, transferType, patch)
-    revalidatePath('/')
-    revalidatePath(`/racun/${reservationId}`)
-    return { ok: true }
-  }
 
-  if (input.kind === 'bar') {
+    if (input.kind === 'bar') {
+      if (!input.id) return { ok: false, error: 'Postavka ni najdena.' }
+      const [row] = await db.select({
+        id: deliveryNoteItems.id,
+        deliveryNoteId: deliveryNoteItems.deliveryNoteId,
+      }).from(deliveryNoteItems).where(eq(deliveryNoteItems.id, input.id)).limit(1)
+      if (!row) return { ok: false, error: 'Postavka ni najdena.' }
+      await db.transaction(async (tx) => {
+        await tx.update(deliveryNoteItems).set(patch).where(eq(deliveryNoteItems.id, row.id))
+        const [saved] = await tx.select({
+          lineNote: deliveryNoteItems.lineNote,
+          lineNoteOnInvoice: deliveryNoteItems.lineNoteOnInvoice,
+        }).from(deliveryNoteItems).where(eq(deliveryNoteItems.id, row.id)).limit(1)
+        if (!storedLineNoteMatches(saved, prepared)) throw new Error('line note was not stored')
+      })
+      const [parent] = await db.select({ reservationId: deliveryNotes.reservationId })
+        .from(deliveryNotes).where(eq(deliveryNotes.id, row.deliveryNoteId)).limit(1)
+      revalidatePath('/')
+      if (parent?.reservationId) revalidatePath(`/racun/${parent.reservationId}`)
+      return { ok: true }
+    }
+
     if (!input.id) return { ok: false, error: 'Postavka ni najdena.' }
-    const [row] = await db.select({
-      id: deliveryNoteItems.id,
-      deliveryNoteId: deliveryNoteItems.deliveryNoteId,
-    }).from(deliveryNoteItems).where(eq(deliveryNoteItems.id, input.id)).limit(1)
-    if (!row) return { ok: false, error: 'Postavka ni najdena.' }
-    await db.update(deliveryNoteItems).set(patch).where(eq(deliveryNoteItems.id, row.id))
-    const [parent] = await db.select({ reservationId: deliveryNotes.reservationId })
-      .from(deliveryNotes).where(eq(deliveryNotes.id, row.deliveryNoteId)).limit(1)
+    const [item] = await db.select({
+      id: orderItems.id,
+      name: orderItems.name,
+      reservationId: orderItems.reservationId,
+    }).from(orderItems).where(eq(orderItems.id, input.id)).limit(1)
+    if (!item) return { ok: false, error: 'Postavka ni najdena.' }
+    await db.transaction(async (tx) => {
+      await tx.update(orderItems).set(patch).where(eq(orderItems.id, item.id))
+      const [saved] = await tx.select({
+        lineNote: orderItems.lineNote,
+        lineNoteOnInvoice: orderItems.lineNoteOnInvoice,
+      }).from(orderItems).where(eq(orderItems.id, item.id)).limit(1)
+      if (!storedLineNoteMatches(saved, prepared)) throw new Error('line note was not stored')
+      const direction = transferMirrorDirection(item.name)
+      if (direction) {
+        await tx.update(transfers).set(patch)
+          .where(and(eq(transfers.reservationId, item.reservationId), eq(transfers.type, direction)))
+      }
+    })
     revalidatePath('/')
-    if (parent?.reservationId) revalidatePath(`/racun/${parent.reservationId}`)
+    revalidatePath(`/racun/${item.reservationId}`)
     return { ok: true }
+  } catch (err) {
+    console.error('[setLineNote]', err)
+    return { ok: false, error: fail }
   }
+}
 
-  if (!input.id) return { ok: false, error: 'Postavka ni najdena.' }
-  const [item] = await db.select({
-    id: orderItems.id,
-    name: orderItems.name,
-    reservationId: orderItems.reservationId,
-  }).from(orderItems).where(eq(orderItems.id, input.id)).limit(1)
-  if (!item) return { ok: false, error: 'Postavka ni najdena.' }
-  await db.update(orderItems).set(patch).where(eq(orderItems.id, item.id))
-  const direction = transferMirrorDirection(item.name)
-  if (direction) {
-    await db.update(transfers).set(patch)
-      .where(and(eq(transfers.reservationId, item.reservationId), eq(transfers.type, direction)))
-  }
-  revalidatePath('/')
-  revalidatePath(`/racun/${item.reservationId}`)
-  return { ok: true }
+function storedLineNoteMatches(
+  row: { lineNote: string | null; lineNoteOnInvoice: boolean | null } | undefined,
+  prepared: { note: string | null; onInvoice: boolean },
+): boolean {
+  if (!row) return false
+  return (row.lineNote || '') === (prepared.note || '') && (row.lineNoteOnInvoice === true) === prepared.onInvoice
 }
 
 async function copyTransferNoteOntoOrderItem(
@@ -157,10 +196,9 @@ async function copyTransferNoteOntoOrderItem(
   type: 'arrival' | 'departure',
   patch: { lineNote: string | null; lineNoteOnInvoice: boolean },
 ) {
-  const prefix = `TRANSFER ${type.toUpperCase()}:`
   const rows = await db.select({ id: orderItems.id, name: orderItems.name }).from(orderItems)
     .where(and(eq(orderItems.reservationId, reservationId), eq(orderItems.category, 'Transfer')))
-  const match = rows.find((row) => (row.name || '').toUpperCase().startsWith(prefix))
+  const match = rows.find((row) => transferMirrorDirection(row.name) === type)
   if (!match) return
   await db.update(orderItems).set(patch).where(eq(orderItems.id, match.id))
 }

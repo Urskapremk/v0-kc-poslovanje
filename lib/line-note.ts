@@ -27,3 +27,27 @@ export function transferMirrorDirection(name: string | null | undefined): 'arriv
   if (/^Transfer DEPARTURE:/i.test(name || '')) return 'departure'
   return null
 }
+
+export type PendingLineNote = { note: string; onInvoice: boolean }
+
+/**
+ * Text on the payment line. A note she just saved wins over a stale reload
+ * that has not caught up yet. No pending value means "use what is stored".
+ */
+export function shownLineNote(
+  storedNote: string | null | undefined,
+  storedOnInvoice: boolean | null | undefined,
+  pending?: PendingLineNote | null,
+): { note: string; onInvoice: boolean } {
+  if (pending) {
+    const note = pending.note.trim()
+    return { note, onInvoice: note.length > 0 && pending.onInvoice === true }
+  }
+  const note = (storedNote ?? '').trim()
+  return { note, onInvoice: note.length > 0 && storedOnInvoice === true }
+}
+
+/** Opomba opens an empty note. Popravi opens one that is already stored. */
+export function lineNoteButtonLabel(note: string | null | undefined): 'Opomba' | 'Popravi' {
+  return (note ?? '').trim() ? 'Popravi' : 'Opomba'
+}

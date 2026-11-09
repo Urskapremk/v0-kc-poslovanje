@@ -20,6 +20,7 @@ import { combinedRouteLabel, transferLineName } from "@/lib/combined-route";
 import { hideCompletedDepartureFromList } from "@/lib/hidden-departure";
 import { guestBillLineAmount } from "@/lib/guest-bill-amount";
 import { LineNoteControl } from "@/components/line-note-control";
+import { shownLineNote, type PendingLineNote } from "@/lib/line-note";
 import { capturePaymentListPlace, restorePaymentListPlace, type PaymentListPlace } from "@/lib/payment-list-place";
   import { CHILD_BANDS, childBand, normalizeChildrenAges, totalChildren, mealPayUnits, mealPayUnitsFromBands, countByBand, boardPax, paxLabel, buildChildAgeCardInfo, type ChildrenAges } from "@/lib/meal-plan";
   import { TimelineCalendar } from "@/components/timeline-calendar";
@@ -7436,6 +7437,12 @@ function GuestCard() {
     const [mealBand, setMealBand] = React.useState<string>('');
     const [selProductIsFood, setSelProductIsFood] = React.useState(false);
     const [selProductBaseAr, setSelProductBaseAr] = React.useState(0);
+    // Note text she just saved. Kept here so a refresh of the delivery note
+    // cannot put the empty line back before the database value arrives.
+    const [lineNotes, setLineNotes] = React.useState<Record<string, PendingLineNote & { asking: boolean }>>({});
+    const lineNoteDrafts = React.useRef<Record<string, string>>({});
+    const lineNoteEdit = React.useRef<Record<string, boolean>>({});
+    const lineNoteError = React.useRef<Record<string, string>>({});
 
     async function loadDiscounts() {
       if (!reservationId) { setDiscounts([]); return; }
@@ -7461,6 +7468,10 @@ function GuestCard() {
       setSelProductIsFood(false);
       setSelProductBaseAr(0);
       setBalanceDueEur(null);
+      setLineNotes({});
+      lineNoteDrafts.current = {};
+      lineNoteEdit.current = {};
+      lineNoteError.current = {};
     }, [reservationId]);
 
     async function handleAddDiscount() {
@@ -7652,36 +7663,85 @@ function GuestCard() {
     const balanceEur = Math.max(0, balanceDueEur ?? invoiceTotalEur);
     const balanceAr = eurToAr(balanceEur, exchangeRate);
 
-    async function persistLineNote(item: OrderItemWithDate, note: string, onInvoice: boolean) {
-      const { setLineNote } = await import("@/app/actions/komba");
-      const result = item.id === "arrival-transfer" || item.id === "departure-transfer"
-        ? await setLineNote({
-            kind: "transfer",
-            reservationId: reservation.id,
-            transferType: item.id === "arrival-transfer" ? "arrival" : "departure",
-            note,
-            onInvoice,
-          })
-        : await setLineNote({
-            kind: item.isBarItem ? "bar" : "order",
-            id: item.id,
-            note,
-            onInvoice,
-          });
-      if (!result.ok) throw new Error(result.error);
-      refresh();
+    function lineNoteKey(itemId: string) {
+      return `${reservation.id}:${itemId}`;
     }
 
-    const lineNote = (item: OrderItemWithDate, tone: "light" | "dark") => (
-      <div className={tone === "light" ? "mt-3 border-t border-[#0f2e3a]/10 pt-3" : "mt-3 border-t border-white/10 pt-3"}>
-        <LineNoteControl
-          note={item.lineNote}
-          onInvoice={item.lineNoteOnInvoice}
-          tone={tone}
-          onSave={(note, onInvoice) => persistLineNote(item, note, onInvoice)}
-        />
-      </div>
-    );
+    async function persistLineNote(item: OrderItemWithDate, note: string, onInvoice: boolean, asking = false) {
+      const key = lineNoteKey(item.id);
+      const trimmed = note.trim();
+      const next = { note: trimmed, onInvoice: trimmed ? onInvoice : false, asking: Boolean(asking) && trimmed.length > 0 };
+      let previous: (PendingLineNote & { asking: boolean }) | undefined;
+      setLineNotes((prev) => {
+        previous = prev[key];
+        return { ...prev, [key]: next };
+      });
+      lineNoteError.current[key] = "";
+      try {
+        const { setLineNote } = await import("@/app/actions/komba");
+        const result = item.id === "arrival-transfer" || item.id === "departure-transfer"
+          ? await setLineNote({
+              kind: "transfer",
+              reservationId: reservation.id,
+              transferType: item.id === "arrival-transfer" ? "arrival" : "departure",
+              note: trimmed,
+              onInvoice: next.onInvoice,
+            })
+          : await setLineNote({
+              kind: item.isBarItem ? "bar" : "order",
+              id: item.id,
+              note: trimmed,
+              onInvoice: next.onInvoice,
+            });
+        if (!result.ok) throw new Error(result.error);
+        refresh();
+      } catch (err) {
+        setLineNotes((prev) => {
+          const restored = { ...prev };
+          if (previous) restored[key] = previous;
+          else delete restored[key];
+          return restored;
+        });
+        throw err;
+      }
+    }
+
+    const lineNote = (item: OrderItemWithDate, tone: "light" | "dark") => {
+      const key = lineNoteKey(item.id);
+      const pending = lineNotes[key];
+      const shown = shownLineNote(item.lineNote, item.lineNoteOnInvoice, pending);
+      const editOnOpen = lineNoteEdit.current[key] === true;
+      return (
+        <div className={tone === "light" ? "mt-3 border-t border-[#0f2e3a]/10 pt-3" : "mt-3 border-t border-white/10 pt-3"}>
+          <LineNoteControl
+            note={shown.note}
+            onInvoice={shown.onInvoice}
+            asking={pending?.asking === true}
+            tone={tone}
+            draftSeed={lineNoteDrafts.current[key]}
+            editOnOpen={editOnOpen}
+            initialError={lineNoteError.current[key] || ""}
+            onDraft={(value) => { lineNoteDrafts.current[key] = value; }}
+            onEditStart={() => {
+              lineNoteEdit.current[key] = true;
+              lineNoteError.current[key] = "";
+              setLineNotes((prev) => {
+                const current = prev[key];
+                if (!current || current.asking === false) return prev;
+                return { ...prev, [key]: { ...current, asking: false } };
+              });
+            }}
+            onLeaveEdit={() => { lineNoteEdit.current[key] = false; }}
+            onFail={(text, message) => {
+              lineNoteDrafts.current[key] = text;
+              lineNoteEdit.current[key] = true;
+              lineNoteError.current[key] = message;
+            }}
+            onSave={(note, onInvoice, asking) => persistLineNote(item, note, onInvoice, asking)}
+          />
+        </div>
+      );
+    };
 
     return (
       <section className="grid gap-8 xl:grid-cols-[440px_1fr]">
