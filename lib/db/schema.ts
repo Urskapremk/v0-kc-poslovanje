@@ -268,6 +268,9 @@ export const transfers = pgTable('transfers', {
   // The boat is already paid on another leg (it left with departing guests and
   // comes back with arriving ones). Dilip is not paid again for this transfer.
   skipBoatPay: boolean('skipBoatPay').notNull().default(false),
+  // One-off carrier amounts for this transfer. Null keeps the shared price-list cell.
+  dilipOverrideAr: integer('dilipOverrideAr'),
+  taxiOverrideAr: integer('taxiOverrideAr'),
   guestPrice: decimal('guestPrice', { precision: 10, scale: 2 }).default('0'),
   paymentStatus: text('paymentStatus').default('UNPAID'), // 'PAID', 'UNPAID', 'PREPAID'
   paidMethod: text('paidMethod'), // 'card' | 'cash' | 'transfer' — how the guest paid (for invoice)
@@ -299,6 +302,9 @@ export const orderItems = pgTable('order_items', {
   lineNoteOnInvoice: boolean('lineNoteOnInvoice').notNull().default(false),
   dilipOrderedAt: timestamp('dilipOrderedAt'), // reception ad-hoc transfer: boat ordered from Dilip
   hermanOrderedAt: timestamp('hermanOrderedAt'), // reception ad-hoc transfer: Herman taxi ordered
+  // One-off carrier amounts for a reception transfer. Null keeps the price list.
+  dilipOverrideAr: integer('dilipOverrideAr'),
+  taxiOverrideAr: integer('taxiOverrideAr'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   })
 
@@ -485,6 +491,8 @@ export const excursionBookings = pgTable('excursion_bookings', {
   fanjaLedgerId: text('fanjaLedgerId'),
   fanjaPaidAmountAr: integer('fanjaPaidAmountAr'),
   dilipOverrideAr: integer('dilipOverrideAr'),
+  // One-off taxi amount on this excursion. Null keeps the shared taxi price cell.
+  taxiOverrideAr: integer('taxiOverrideAr'),
   extraGuides: integer('extraGuides').notNull().default(0),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   })

@@ -1030,6 +1030,8 @@ export async function deleteStaffSalary(id: string) {
 // Get statistics for a month
 export async function getMonthlyStatistics(year: number, month: number) {
   await ensureExcursionPriceColumns()
+  const { ensureSupplierOverrideColumns } = await import('@/lib/supplier-override-columns')
+  await ensureSupplierOverrideColumns()
   await ensureLineNoteColumns()
   await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
   await ensureKompenzacijaColumns()
@@ -2464,6 +2466,8 @@ export async function getMonthlyStatistics(year: number, month: number) {
 // each transporter, number of trips, and how much we paid them.
 export async function getCarrierStatistics(year: number, month: number) {
   await ensureExcursionPriceColumns()
+  const { ensureSupplierOverrideColumns } = await import('@/lib/supplier-override-columns')
+  await ensureSupplierOverrideColumns()
   await ensureLineNoteColumns()
   await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
   const startDate = new Date(year, month - 1, 1)

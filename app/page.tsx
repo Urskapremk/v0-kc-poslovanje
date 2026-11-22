@@ -13,6 +13,8 @@ import { ReservedExcursionPrices } from "@/components/reserved-excursion-prices"
 import { stayPeopleForCheckin, type BungalowPeopleMap, type BungalowPerson } from "@/lib/bungalow-people";
 import { foreignStayCurrency, splitStayPayments } from "@/lib/foreign-stay";
   import { dilipFullBoatAr, dilipOwesFullBoatPrice } from "@/lib/dilip-excursion";
+  import { readOverrideAr, supplierAmountAr } from "@/lib/supplier-override";
+  import { SupplierAmountOverride } from "@/components/supplier-amount-override";
   import { guidePhoneFromNotes, isDayBeforeOrArrival } from "@/lib/arrival-alert";
   import StroskiReceiptCaptureModal, { STROSKI_CAPTURE_OPEN_KEY } from "@/components/stroski-receipt-capture-modal";
 import { toEnglishItemName } from "@/lib/item-name";
@@ -49,6 +51,7 @@ import {
   unlinkReservationFromGroup,
   toggleOrderItemFree,
   setOrderItemTransferOrdered,
+  setOrderItemSupplierOverride,
   addScheduledExcursion,
   deleteScheduledExcursion,
   searchReservations,
@@ -186,6 +189,8 @@ interface OrderItem {
   eventDate?: string | null;
   dilipOrderedAt?: string | null;
   hermanOrderedAt?: string | null;
+  dilipOverrideAr?: number | null;
+  taxiOverrideAr?: number | null;
   }
 
 interface TransferData {
@@ -208,6 +213,8 @@ interface TransferData {
   hermanOrderedAt?: string | null;
   // Čoln je že plačan z drugim prevozom (isti čoln), zato Dilipu tega ne plačamo.
   skipBoatPay?: boolean;
+  dilipOverrideAr?: number | null;
+  taxiOverrideAr?: number | null;
   guestPrice: number;
   paymentStatus: string; // 'PREPAID', 'UNPAID', 'PAID'
   executed?: boolean; // Whether the transfer was actually executed
@@ -235,6 +242,8 @@ interface ExcursionBooking {
   extraEntranceLabel?: string;
   paymentStatus: string;
   dilipOrderedAt: string | null;
+  dilipOverrideAr?: number | null;
+  taxiOverrideAr?: number | null;
   groupId?: string | null;
   executed: boolean;
   status?: string; // 'ACTIVE' | 'CANCELLED' (cancelled → converted to credit)
@@ -9555,8 +9564,12 @@ function GuestCard() {
       const routeName = rawName.replace(/\s*\|\s*coln:.*$/i, '').replace(/\s*-\s*\d+\s*pax.*$/i, '').trim();
       const matchedBoat = dbBoats.find((b: { id: string; name: string }) => b.name.toLowerCase() === boatNameFromName.toLowerCase());
       const matchedRoute = dbRoutesAll.find((rt: { id: string; name: string }) => rt.name.toLowerCase() === routeName.toLowerCase());
-      const dilipCostAr = getSupplierCostAr(matchedBoat?.id, matchedRoute?.id);
-      const hermanCostAr = getSupplierCostAr(HERMAN_BOAT_ID, matchedRoute?.id);
+      const dilipCatalogAr = getSupplierCostAr(matchedBoat?.id, matchedRoute?.id);
+      const dilipOverride = readOverrideAr(o.dilipOverrideAr);
+      const dilipCostAr = supplierAmountAr(dilipCatalogAr, dilipOverride);
+      const hermanCatalogAr = getSupplierCostAr(HERMAN_BOAT_ID, matchedRoute?.id);
+      const taxiOverride = readOverrideAr(o.taxiOverrideAr);
+      const hermanCostAr = supplierAmountAr(hermanCatalogAr, taxiOverride);
       const isOrdered = !!o.dilipOrderedAt;
       const isHermanOrdered = !!o.hermanOrderedAt;
       // Determine direction (arrival vs departure) so the card matches the arrival/departure look.
@@ -9593,13 +9606,33 @@ function GuestCard() {
             <ChevronDown className="h-4 w-4 flex-shrink-0 text-[#0f2e3a]/40 transition-transform group-open:rotate-180" />
           </summary>
           <div className="border-t border-[#0f2e3a]/10 px-3 pb-3 pt-2">
-            {(dilipCostAr > 0 || hermanCostAr > 0) && (
+            {(dilipCatalogAr > 0 || dilipOverride != null || hermanCatalogAr > 0 || taxiOverride != null) && (
               <div className="rounded-lg border border-[#8f6d3a]/40 bg-[#8f6d3a]/10 px-2 py-1">
                 <p className="text-[10px] font-semibold text-[#8f6d3a]">Za plačilo prevoznikoma:</p>
-                <div className="flex flex-wrap gap-x-3 text-[10px] text-[#8f6d3a]/90">
-                  {dilipCostAr > 0 && <span>Dilip (čoln): {ar(dilipCostAr)}</span>}
-                  {hermanCostAr > 0 && <span>Herman: {ar(hermanCostAr)}</span>}
-                </div>
+                {(dilipCatalogAr > 0 || dilipOverride != null) && (
+                  <div className="mt-1">
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-[#8f6d3a]/90">
+                      <span>Dilip (čoln)</span>
+                      <span className="font-semibold">{dilipCostAr > 0 ? ar(dilipCostAr) : '—'}</span>
+                    </div>
+                    <SupplierAmountOverride
+                      overrideAr={dilipOverride}
+                      onSave={async (amount) => { await setOrderItemSupplierOverride(o.id, 'dilip', amount); refresh(); }}
+                    />
+                  </div>
+                )}
+                {(hermanCatalogAr > 0 || taxiOverride != null) && (
+                  <div className="mt-1">
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-[#8f6d3a]/90">
+                      <span>Herman</span>
+                      <span className="font-semibold">{hermanCostAr > 0 ? ar(hermanCostAr) : '—'}</span>
+                    </div>
+                    <SupplierAmountOverride
+                      overrideAr={taxiOverride}
+                      onSave={async (amount) => { await setOrderItemSupplierOverride(o.id, 'taxi', amount); refresh(); }}
+                    />
+                  </div>
+                )}
               </div>
             )}
             <div className="mt-2 flex flex-wrap gap-2">
@@ -9640,10 +9673,14 @@ function GuestCard() {
     const isHermanOrdered = !!t.hermanOrderedAt;
     const shortBungalow = bungalowDisplayName(r.bungalow);
     const boatName = dbBoats.find((b: { id: string }) => b.id === t.boatId)?.name;
-    const dilipCostAr = getSupplierCostAr(t.boatId, t.route);
+    const dilipCatalogAr = getSupplierCostAr(t.boatId, t.route);
+    const dilipOverride = readOverrideAr(t.dilipOverrideAr);
+    const dilipCostAr = t.skipBoatPay ? dilipCatalogAr : supplierAmountAr(dilipCatalogAr, dilipOverride);
     const taxiId = taxiIdOf(t);
     const taxiName = taxiNameOf(taxiId);
-    const hermanCostAr = getSupplierCostAr(taxiId, t.hermanRouteId);
+    const taxiCatalogAr = getSupplierCostAr(taxiId, t.hermanRouteId);
+    const taxiOverride = readOverrideAr(t.taxiOverrideAr);
+    const hermanCostAr = supplierAmountAr(taxiCatalogAr, taxiOverride);
     const routeName = routeNameById(t.route) || t.route;
     const shownRoute = combinedRouteLabel(routeName, routeNameById(t.hermanRouteId), isArrival ? 'arrival' : 'departure') || routeName;
     const TypeIcon = isArrival ? LogIn : LogOut;
@@ -9683,20 +9720,40 @@ function GuestCard() {
             {t.hermanAirportTime && (<p><span className="text-[#2b2622]/45">Herman:</span> {t.hermanAirportTime}</p>)}
             {t.notes && (<p className="text-[#8f6d3a]"><span className="text-[#2b2622]/45">Opomba:</span> {t.notes}</p>)}
           </div>
-          {(dilipCostAr > 0 || hermanCostAr > 0) && (
+          {(dilipCatalogAr > 0 || dilipOverride != null || taxiCatalogAr > 0 || taxiOverride != null) && (
             <div className="mt-1.5 rounded-lg border border-[#8f6d3a]/40 bg-[#8f6d3a]/10 px-2 py-1">
               <p className="text-[10px] font-semibold text-[#8f6d3a]">Za plačilo prevoznikoma:</p>
-              <div className="flex flex-wrap gap-x-3 text-[10px] text-[#8f6d3a]/90">
-                {dilipCostAr > 0 && (t.skipBoatPay
-                  ? <span className="font-semibold text-[#1a346e]">Dilip (čoln): ni za plačilo — isti čoln</span>
-                  : <span>Dilip (čoln): {ar(dilipCostAr)}</span>)}
-                {hermanCostAr > 0 && <span>{taxiName}: {ar(hermanCostAr)}</span>}
-              </div>
+              {(dilipCatalogAr > 0 || dilipOverride != null) && (t.skipBoatPay
+                ? <p className="mt-1 text-[10px] font-semibold text-[#1a346e]">Dilip (čoln): ni za plačilo — isti čoln</p>
+                : (
+                  <div className="mt-1">
+                    <div className="flex items-center justify-between gap-2 text-[10px] text-[#8f6d3a]/90">
+                      <span>Dilip (čoln)</span>
+                      <span className="font-semibold">{dilipCostAr > 0 ? ar(dilipCostAr) : '—'}</span>
+                    </div>
+                    <SupplierAmountOverride
+                      overrideAr={dilipOverride}
+                      onSave={async (amount) => { await updateTransfer(r.id, item.type, { dilipOverrideAr: amount }); refresh(); }}
+                    />
+                  </div>
+                ))}
+              {(taxiCatalogAr > 0 || taxiOverride != null) && (
+                <div className="mt-1">
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-[#8f6d3a]/90">
+                    <span>{taxiName}</span>
+                    <span className="font-semibold">{hermanCostAr > 0 ? ar(hermanCostAr) : '—'}</span>
+                  </div>
+                  <SupplierAmountOverride
+                    overrideAr={taxiOverride}
+                    onSave={async (amount) => { await updateTransfer(r.id, item.type, { taxiOverrideAr: amount }); refresh(); }}
+                  />
+                </div>
+              )}
               {t.skipBoatPay && <p className="mt-1 text-[10px] font-semibold text-[#1a346e]">Gostu se prevoz še vedno zaračuna.</p>}
-              {hermanCostAr > 0 && (<p className="mt-1 text-[10px] font-semibold text-[#4f7a54]">Pokliči tudi {taxiName} ({routeNameById(t.hermanRouteId) || 'avto'})</p>)}
+              {(taxiCatalogAr > 0 || hermanCostAr > 0) && (<p className="mt-1 text-[10px] font-semibold text-[#4f7a54]">Pokliči tudi {taxiName} ({routeNameById(t.hermanRouteId) || 'avto'})</p>)}
             </div>
           )}
-          {dilipCostAr > 0 && (
+          {dilipCatalogAr > 0 && (
             <button
               type="button"
               onClick={async () => { await updateTransfer(r.id, item.type, { skipBoatPay: !t.skipBoatPay }); refresh(); }}
@@ -9720,7 +9777,7 @@ function GuestCard() {
                 <Ship className="h-4 w-4" /><span className="text-[10px] font-semibold uppercase tracking-[0.15em]">Dilip naročen ✓</span>
               </button>
             )}
-            {hermanCostAr > 0 && (!isHermanOrdered ? (
+            {(taxiCatalogAr > 0 || hermanCostAr > 0) && (!isHermanOrdered ? (
               <button onClick={async () => { await updateTransfer(r.id, item.type, { hermanOrderedAt: new Date() }); refresh(); }} className="inline-flex min-w-[120px] flex-1 items-center justify-center gap-2 rounded-full border border-[#4f7a54]/30 bg-[#4f7a54]/10 px-4 py-2 text-[#4f7a54] transition-colors hover:bg-[#4f7a54]/20">
                 <Car className="h-4 w-4" /><span className="text-[10px] font-semibold uppercase tracking-[0.15em]">Pokliči {taxiName}</span>
               </button>
@@ -10339,7 +10396,7 @@ function GuestCard() {
                   // Dilip = (kompletna cena čolna − vodič) × 0,90 + vodič — ČOLN je en sam za skupino
                   const boatNet = Math.max(0, boatCompletePrice - guidePrice);
                   // Top of Nosy Komba: čoln FIKSNO 80.000 Ar + vodič (guidePriceAr, npr. 50.000)
-                  const dilipOverride = members.map(m => (m.excursion as { dilipOverrideAr?: number | null }).dilipOverrideAr).find(v => v != null);
+                  const dilipOverride = readOverrideAr(members.map(m => m.excursion.dilipOverrideAr).find(v => v != null));
                   // Nosy Tanikely and trip around Nosy Komba + Dilip: polna cena čolna, brez vodiča in brez 10 %.
                   const dilipPaysFullBoat = dilipOverride == null && dilipOwesFullBoatPrice(item.excursionName, exc.boatId);
                   const extraGuides = Math.max(0, ...members.map(m => Number((m.excursion as { extraGuides?: number }).extraGuides) || 0));
@@ -10380,7 +10437,8 @@ function GuestCard() {
                   // za gosta (ona nam pusti 10 %). Zamenja vrstico "Dilipu (čoln + vodič)".
                   const isFanjaExcursion = (item.excursionName || '').trim().toLowerCase().startsWith('fanja');
                   const fanjaGuestTotalEur = members.reduce((sum, m) => sum + (m.excursion.guestPrice || 0), 0);
-                  const fanjaPayment = Math.round(fanjaGuestTotalEur * 0.9 * excRate);
+                  const fanjaCatalogAr = Math.round(fanjaGuestTotalEur * 0.9 * excRate);
+                  const fanjaPayment = isFanjaExcursion ? supplierAmountAr(fanjaCatalogAr, dilipOverride) : fanjaCatalogAr;
                   // Plačilo Fanji: stanje beremo iz prvega člana (vknjižba je ena za celo skupino).
                   const fanjaMemberIds = members.map(m => m.excursion.id);
                   const fanjaPaidAt = (members[0]?.excursion as { fanjaPaidAt?: string | null })?.fanjaPaidAt || null;
@@ -10390,7 +10448,9 @@ function GuestCard() {
                   const fanjaPanelKey = fanjaMemberIds.join('|');
                   const fanjaLabel = `Izlet ${item.excursionName || ''} — ${members.map(m => `${bungalowDisplayName(m.reservation.bungalow)} / ${m.reservation.guestName}`).join(', ')}`.slice(0, 200);
                   const excursionTaxiId = exc.taxiBoatId || "";
-                  const excursionTaxiCostAr = excursionTaxiId ? getSupplierCostAr(excursionTaxiId, exc.taxiRouteId || "") : 0;
+                  const excursionTaxiOverride = readOverrideAr(members.map(m => m.excursion.taxiOverrideAr).find(v => v != null));
+                  const excursionTaxiCatalogAr = excursionTaxiId ? getSupplierCostAr(excursionTaxiId, exc.taxiRouteId || "") : 0;
+                  const excursionTaxiCostAr = supplierAmountAr(excursionTaxiCatalogAr, excursionTaxiOverride);
                   const excursionTaxiName = excursionTaxiId ? taxiNameOf(excursionTaxiId) : "";
                   const excursionTaxiRouteName = routeNameById(exc.taxiRouteId) || "avto";
                   const excursionTaxiRef = `excursion:${exc.groupId || exc.id}:${excursionTaxiId ? taxiKey(excursionTaxiId) : "taxi"}`;
@@ -10477,13 +10537,22 @@ function GuestCard() {
                           </div>
                           {/* Zneski za plačilo */}
                           <div className="mt-2 space-y-1 border-t border-[#0f2e3a]/12 pt-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-[#2b2622]/55">{isFanjaExcursion ? 'Plačilo Fanji' : dilipPayLabel}</span>
-                              <span className="text-[11px] font-semibold text-[#3f6b7d] whitespace-nowrap">
-                                {isFanjaExcursion
-                                  ? (fanjaPayment > 0 ? ar(fanjaPayment) : '—')
-                                  : (dilipPayment > 0 ? ar(dilipPayment) : '—')}
-                              </span>
+                            <div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-[#2b2622]/55">{isFanjaExcursion ? 'Plačilo Fanji' : dilipPayLabel}</span>
+                                <span className="text-[11px] font-semibold text-[#3f6b7d] whitespace-nowrap">
+                                  {isFanjaExcursion
+                                    ? (fanjaPayment > 0 ? ar(fanjaPayment) : '—')
+                                    : (dilipPayment > 0 ? ar(dilipPayment) : '—')}
+                                </span>
+                              </div>
+                              <SupplierAmountOverride
+                                overrideAr={dilipOverride}
+                                onSave={async (amount) => {
+                                  await Promise.all(members.map(m => updateExcursionBooking(m.excursion.id, { dilipOverrideAr: amount })));
+                                  refresh();
+                                }}
+                              />
                             </div>
                             {!isFanjaExcursion && guidePrice > 0 && (
                               <div className="flex items-center justify-between gap-2">
@@ -10525,13 +10594,20 @@ function GuestCard() {
                                 {isFanjaExcursion ? '—' : (entranceTotalAr > 0 ? ar(entranceTotalAr) : '—')}
                               </span>
                             </div>
-                            {excursionTaxiCostAr > 0 && (
+                            {(excursionTaxiId || excursionTaxiOverride != null) && (
                               <div className="space-y-1">
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="text-[10px] text-[#2b2622]/55">{excursionTaxiName} ({excursionTaxiRouteName})</span>
-                                  <span className="text-[11px] font-semibold text-[#4f7a54] whitespace-nowrap">{ar(excursionTaxiCostAr)}</span>
+                                  <span className="text-[11px] font-semibold text-[#4f7a54] whitespace-nowrap">{excursionTaxiCostAr > 0 ? ar(excursionTaxiCostAr) : '—'}</span>
                                 </div>
-                                {renderSupplierPay(
+                                <SupplierAmountOverride
+                                  overrideAr={excursionTaxiOverride}
+                                  onSave={async (amount) => {
+                                    await Promise.all(members.map(m => updateExcursionBooking(m.excursion.id, { taxiOverrideAr: amount })));
+                                    refresh();
+                                  }}
+                                />
+                                {excursionTaxiCostAr > 0 && renderSupplierPay(
                                   excursionTaxiRef,
                                   taxiKey(excursionTaxiId),
                                   excursionTaxiCostAr,

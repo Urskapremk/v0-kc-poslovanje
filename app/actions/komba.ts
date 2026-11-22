@@ -9,6 +9,8 @@ import { revalidatePath } from 'next/cache'
 import { unpaySupplier } from './supplier-payment'
 import { unpayFanja } from './fanja-payment'
 import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
+import { readOverrideAr, supplierAmountAr } from '@/lib/supplier-override'
+import { ensureSupplierOverrideColumns } from '@/lib/supplier-override-columns'
 import { cashAriaryToEurAmount } from '@/lib/cash-payment'
 import { ensureExcursionPriceColumns } from '@/lib/excursion-price-columns'
 import { replaceBungalowPeople, type BungalowPeopleMap, type BungalowPerson } from '@/lib/bungalow-people'
@@ -207,6 +209,7 @@ async function copyTransferNoteOntoOrderItem(
 
 // Get a single reservation by ID (including archived)
 export async function getReservationById(reservationId: string) {
+  await ensureSupplierOverrideColumns()
   await ensureCashAmountColumn()
   await ensureLineNoteColumns()
   const [res] = await db.select().from(reservations).where(eq(reservations.id, reservationId)).limit(1)
@@ -303,6 +306,7 @@ export async function saveBungalowUnitPeople(
 }
 
 export async function getReservationWithDetails(id: string) {
+  await ensureSupplierOverrideColumns()
   await ensureLineNoteColumns()
   const [reservation] = await db.select().from(reservations).where(eq(reservations.id, id))
   if (!reservation) return null
@@ -550,6 +554,7 @@ export async function updateReservation(id: string, data: Partial<{
 // Re-computes the existing "Bivanje" order item from the current reservation state.
 // Does nothing if the accommodation item does not exist yet (guest not checked in).
 async function syncAccommodationItem(reservationId: string) {
+  await ensureSupplierOverrideColumns()
   await ensureCashAmountColumn()
   const existing = await db
     .select()
@@ -597,6 +602,7 @@ async function syncAccommodationItem(reservationId: string) {
 // note for that day was missing the transfer. Runs only for checked-in guests to
 // avoid creating a duplicate that check-in would then add again.
 async function syncTransferItem(reservationId: string, type: 'arrival' | 'departure') {
+  await ensureSupplierOverrideColumns()
   await ensureLineNoteColumns()
   const resRows = await db.select().from(reservations).where(eq(reservations.id, reservationId)).limit(1)
   const res = resRows[0]
@@ -731,6 +737,7 @@ export async function getGroupReservations(groupId: string) {
 }
 
 async function ensureSkipBoatPayColumn() {
+  await ensureSupplierOverrideColumns()
   await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "skipBoatPay" boolean NOT NULL DEFAULT false`)
 }
 
@@ -752,6 +759,8 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
   dilipOrderedAt?: Date | null
   hermanOrderedAt?: Date | null
   skipBoatPay?: boolean
+  dilipOverrideAr?: number | null
+  taxiOverrideAr?: number | null
   guestPrice?: number
   paymentStatus?: string
   paidMethod?: string | null
@@ -783,6 +792,8 @@ export async function updateTransfer(reservationId: string, type: 'arrival' | 'd
   dilipOrderedAt: data.dilipOrderedAt !== undefined ? data.dilipOrderedAt : existing[0].dilipOrderedAt,
         hermanOrderedAt: data.hermanOrderedAt !== undefined ? data.hermanOrderedAt : existing[0].hermanOrderedAt,
         skipBoatPay: data.skipBoatPay !== undefined ? data.skipBoatPay : existing[0].skipBoatPay,
+        dilipOverrideAr: data.dilipOverrideAr !== undefined ? readOverrideAr(data.dilipOverrideAr) : existing[0].dilipOverrideAr,
+        taxiOverrideAr: data.taxiOverrideAr !== undefined ? readOverrideAr(data.taxiOverrideAr) : existing[0].taxiOverrideAr,
         guestPrice: data.guestPrice !== undefined ? String(data.guestPrice) : existing[0].guestPrice,
         paymentStatus: data.paymentStatus ?? existing[0].paymentStatus,
         paidMethod: data.paidMethod !== undefined ? data.paidMethod : existing[0].paidMethod,
@@ -1001,6 +1012,16 @@ export async function toggleOrderItemFree(id: string, free: boolean) {
   revalidatePath('/')
 }
 
+// One-off carrier amount on a reception transfer. Null returns that line to the price list.
+export async function setOrderItemSupplierOverride(id: string, which: 'dilip' | 'taxi', amountAr: number | null) {
+  await ensureSupplierOverrideColumns()
+  const value = readOverrideAr(amountAr)
+  await db.update(orderItems)
+    .set(which === 'dilip' ? { dilipOverrideAr: value } : { taxiOverrideAr: value })
+    .where(eq(orderItems.id, id))
+  revalidatePath('/')
+}
+
 // Reception ad-hoc transfer (order_items): mark the boat (Dilip) or Herman taxi as ordered/unordered.
 export async function setOrderItemTransferOrdered(id: string, which: 'dilip' | 'herman', ordered: boolean) {
   const value = ordered ? new Date() : null
@@ -1104,6 +1125,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           dilipOrderedAt: arrivalTransfer.dilipOrderedAt?.toISOString() || null,
           hermanOrderedAt: arrivalTransfer.hermanOrderedAt?.toISOString() || null,
           skipBoatPay: arrivalTransfer.skipBoatPay ?? false,
+          dilipOverrideAr: readOverrideAr(arrivalTransfer.dilipOverrideAr),
+          taxiOverrideAr: readOverrideAr(arrivalTransfer.taxiOverrideAr),
           guestPrice: Number(arrivalTransfer.guestPrice) || 0,
           paymentStatus: arrivalTransfer.paymentStatus || 'UNPAID',
           paidMethod: arrivalTransfer.paidMethod || '',
@@ -1129,6 +1152,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
           dilipOrderedAt: departureTransfer.dilipOrderedAt?.toISOString() || null,
           hermanOrderedAt: departureTransfer.hermanOrderedAt?.toISOString() || null,
           skipBoatPay: departureTransfer.skipBoatPay ?? false,
+          dilipOverrideAr: readOverrideAr(departureTransfer.dilipOverrideAr),
+          taxiOverrideAr: readOverrideAr(departureTransfer.taxiOverrideAr),
           guestPrice: Number(departureTransfer.guestPrice) || 0,
           paymentStatus: departureTransfer.paymentStatus || 'UNPAID',
           paidMethod: departureTransfer.paidMethod || '',
@@ -1153,6 +1178,8 @@ const allSupplierPayments = await db.select().from(supplierPayments)
         paidDate: o.paidDate ?? null,
         dilipOrderedAt: o.dilipOrderedAt ? o.dilipOrderedAt.toISOString() : null,
         hermanOrderedAt: o.hermanOrderedAt ? o.hermanOrderedAt.toISOString() : null,
+        dilipOverrideAr: readOverrideAr(o.dilipOverrideAr),
+        taxiOverrideAr: readOverrideAr(o.taxiOverrideAr),
         addedBy: o.addedBy ?? 'Urska',
         // Hour the reception keyed it in, shown next to "Added by" on the delivery note.
         createdAt: o.createdAt ? o.createdAt.toISOString() : undefined
@@ -1210,6 +1237,8 @@ excursions: resExcursions.map(e => ({
   extraEntranceAr: e.extraEntranceAr ? Number(e.extraEntranceAr) : 0,
   extraEntranceLabel: e.extraEntranceLabel || '',
   extraGuides: Number(e.extraGuides) || 0,
+  dilipOverrideAr: readOverrideAr(e.dilipOverrideAr),
+  taxiOverrideAr: readOverrideAr(e.taxiOverrideAr),
   lunchPrice: e.lunchPrice ? Number(e.lunchPrice) : 0,
   lunchPax: e.lunchPax || 0,
   entrancePax: e.entrancePax == null ? null : Number(e.entrancePax),
@@ -2418,6 +2447,8 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   notes: string
   dilipOrderedAt: string
   extraGuides: number
+  dilipOverrideAr: number | null
+  taxiOverrideAr: number | null
 }>) {
   await ensureExcursionPriceColumns()
   const touchesInvoice = data.excursionId !== undefined
@@ -2461,6 +2492,8 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   if (data.notes !== undefined) updateData.notes = data.notes || null
   if (data.dilipOrderedAt !== undefined) updateData.dilipOrderedAt = new Date(data.dilipOrderedAt)
   if (data.extraGuides !== undefined) updateData.extraGuides = Math.max(0, Math.round(data.extraGuides))
+  if (data.dilipOverrideAr !== undefined) updateData.dilipOverrideAr = readOverrideAr(data.dilipOverrideAr)
+  if (data.taxiOverrideAr !== undefined) updateData.taxiOverrideAr = readOverrideAr(data.taxiOverrideAr)
   
   await db.update(excursionBookings).set(updateData).where(eq(excursionBookings.id, id))
   if (previous) await syncExcursionInvoiceLine(id, previous)
@@ -2787,6 +2820,7 @@ export async function getArchivedReservations(page: number = 1, limit: number = 
 // exactly like the pending list. We keep everything with an effective date up to today
 // (lodge-local, UTC+3), newest first.
 export async function getArchivedTransfers() {
+  await ensureSupplierOverrideColumns()
   const { ensureTaxiPriceList } = await import('@/lib/taxi-price-list')
   await ensureTaxiPriceList()
   const { ensureSupplierPaymentCostColumns } = await import('./supplier-payment')
@@ -2853,8 +2887,8 @@ export async function getArchivedTransfers() {
     const taxiId = t.taxiBoatId && t.taxiBoatId.length > 0 ? t.taxiBoatId : HERMAN_BOAT_ID
     const taxiName = boatMap.get(taxiId) || 'Taksi'
     const taxiSupplier = taxiId.replace(/^taxi-/, '') || 'herman'
-    const dilipCostAr = supplierCostAr(t.boatId, t.route)
-    const hermanCostAr = supplierCostAr(taxiId, t.hermanRouteId)
+    const dilipCostAr = supplierAmountAr(supplierCostAr(t.boatId, t.route), t.skipBoatPay ? null : t.dilipOverrideAr)
+    const hermanCostAr = supplierAmountAr(supplierCostAr(taxiId, t.hermanRouteId), t.taxiOverrideAr)
     const dilipRefKey = `transfer:${t.reservationId}:${t.type}:dilip`
     const hermanRefKey = `transfer:${t.reservationId}:${t.type}:${taxiSupplier}`
 
@@ -2906,8 +2940,8 @@ export async function getArchivedTransfers() {
     const routeName = rawName.replace(/\s*\|\s*coln:.*$/i, '').replace(/\s*-\s*\d+\s*pax.*$/i, '').trim()
     const matchedBoat = boatByName.get(boatNameFromName.toLowerCase())
     const matchedRoute = routeByName.get(routeName.toLowerCase())
-    const dilipCostAr = supplierCostAr(matchedBoat?.id, matchedRoute?.id)
-    const hermanCostAr = supplierCostAr(HERMAN_BOAT_ID, matchedRoute?.id)
+    const dilipCostAr = supplierAmountAr(supplierCostAr(matchedBoat?.id, matchedRoute?.id), o.dilipOverrideAr)
+    const hermanCostAr = supplierAmountAr(supplierCostAr(HERMAN_BOAT_ID, matchedRoute?.id), o.taxiOverrideAr)
     const arrDate = toDateStr(res.arrival)
     const depDate = toDateStr(res.departure)
     const evDate = o.eventDate ? String(o.eventDate).slice(0, 10) : ''
@@ -3047,7 +3081,8 @@ export async function getArchivedExcursions() {
 
     const isFanja = excursionName.trim().toLowerCase().startsWith('fanja')
     const fanjaGuestTotalEur = members.reduce((s, m) => s + (m.guestPrice ? Number(m.guestPrice) : 0), 0)
-    const fanjaPayment = Math.round(fanjaGuestTotalEur * 0.9 * rate)
+    const fanjaCatalog = Math.round(fanjaGuestTotalEur * 0.9 * rate)
+    const fanjaPayment = isFanja ? supplierAmountAr(fanjaCatalog, dilipOverride) : fanjaCatalog
 
     const isGroup = !!first.groupId && members.length > 1
     const isOrdered = members.every(m => !!m.dilipOrderedAt)
