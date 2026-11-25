@@ -40,34 +40,22 @@ export function lodgingShareLines(month: number): LodgingShareLine[] {
       amountEur: 1433.18,
     }]
   }
-  if (month === 4) {
-    return [
-      {
-        id: 'stay-benda-nina-april',
-        guestName: 'Benda Nina in Mark',
-        reference: 'Nina, 10 noči',
-        night: '2026-04-30',
-        amountEur: 200,
-      },
-      {
-        id: 'stay-benda-mark-april',
-        guestName: 'Benda Nina in Mark',
-        reference: 'Mark, nočitev',
-        night: '2026-04-21',
-        amountEur: 1,
-      },
-    ]
-  }
-  if (month === 5) {
-    return [{
-      id: 'stay-benda-nina-may',
-      guestName: 'Benda Nina in Mark',
-      reference: 'Nina, 4 noči',
-      night: '2026-05-04',
-      amountEur: 80,
-    }]
-  }
   return []
+}
+
+// One list row per month. April is the April nights plus the meals, drinks, and
+// arrival transfer dated in April. May keeps the May nights and the May lines.
+// The two months add up to the whole charge and do not overlap.
+export function bendaListRow(year: number, month: number): { amountEur: number; night: string } | null {
+  if (year !== 2026 || (month !== 4 && month !== 5)) return null
+  const lodging = namedLodgingForMonth(BENDA_STAY_ID, month)
+  const food = ninaInvoiceIncome(year, month)
+  const transfer = 105
+  const amountEur = Math.round(((lodging?.eur || 0) + food.hrana + food.pijaca + transfer) * 100) / 100
+  return {
+    amountEur,
+    night: month === 4 ? '2026-04-30' : '2026-05-04',
+  }
 }
 
 // Mayalen's card does not come through the night list, so the loop never

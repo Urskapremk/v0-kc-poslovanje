@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { bendaTransferInMonth, hannahOnInvoiceList, hiddenCheckoutInvoice, lodgingBesideTheNightList, lodgingShareLines, namedLodgingForMonth, ninaInvoiceIncome, BENDA_STAY_ID, HANNAH_STAY_ID, MAYALEN_STAY_ID } from './named-stay-income'
+import { bendaListRow, bendaTransferInMonth, hannahOnInvoiceList, hiddenCheckoutInvoice, lodgingBesideTheNightList, lodgingShareLines, namedLodgingForMonth, ninaInvoiceIncome, BENDA_STAY_ID, HANNAH_STAY_ID, MAYALEN_STAY_ID } from './named-stay-income'
 
 describe('Mayalen lodging', () => {
   it('puts all 1.433,18 in March and none in April', () => {
@@ -20,12 +20,13 @@ describe('Benda Nina and Mark', () => {
     assert.deepEqual(namedLodgingForMonth(BENDA_STAY_ID, 4), { eur: 201, nights: 10 })
     assert.deepEqual(namedLodgingForMonth(BENDA_STAY_ID, 5), { eur: 80, nights: 4 })
     assert.deepEqual(namedLodgingForMonth(BENDA_STAY_ID, 3), { eur: 0, nights: 0 })
-    const april = lodgingShareLines(4)
-    const may = lodgingShareLines(5)
-    assert.equal(april.reduce((sum, line) => sum + line.amountEur, 0), 201)
-    assert.equal(may.reduce((sum, line) => sum + line.amountEur, 0), 80)
-    assert.equal(april.find((line) => line.reference.startsWith('Nina'))?.amountEur, 200)
-    assert.equal(may[0].amountEur, 80)
+    assert.equal(lodgingShareLines(4).length, 0)
+    assert.equal(lodgingShareLines(5).length, 0)
+    assert.deepEqual(bendaListRow(2026, 4), { amountEur: 1289.33, night: '2026-04-30' })
+    assert.deepEqual(bendaListRow(2026, 5), { amountEur: 584.33, night: '2026-05-04' })
+    assert.equal(bendaListRow(2026, 3), null)
+    const both = (bendaListRow(2026, 4)?.amountEur || 0) + (bendaListRow(2026, 5)?.amountEur || 0)
+    assert.equal(Math.round(both * 100) / 100, 1873.66)
     assert.equal(bendaTransferInMonth('2026-04-21', 'arrival', 2026, 4), true)
     assert.equal(bendaTransferInMonth('2026-04-21', 'arrival', 2026, 5), false)
     assert.equal(bendaTransferInMonth('2026-05-05', 'departure', 2026, 5), true)

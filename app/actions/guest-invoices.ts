@@ -11,7 +11,7 @@ import {
   type IssuedInvoiceBarItem,
   type IssuedInvoiceOrder,
 } from '@/lib/issued-invoices'
-import { HANNAH_STAY_ID, hannahOnInvoiceList, hiddenCheckoutInvoice, lodgingShareLines } from '@/lib/named-stay-income'
+import { BENDA_STAY_ID, bendaListRow, HANNAH_STAY_ID, hannahOnInvoiceList, hiddenCheckoutInvoice, lodgingShareLines } from '@/lib/named-stay-income'
 
 export type IssuedGuestInvoice = {
   reservationId: string
@@ -75,6 +75,24 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
       isMainReservation: reservations.isMainReservation,
       sharedInvoice: reservations.sharedInvoice,
     }).from(reservations).where(eq(reservations.id, HANNAH_STAY_ID))
+    if (card) listed.push(card)
+  }
+
+  const benda = bendaListRow(year, month)
+  if (benda && !listed.some((row) => row.id === BENDA_STAY_ID)) {
+    const [card] = await db.select({
+      id: reservations.id,
+      guestName: reservations.guestName,
+      checkedOutAt: reservations.checkedOutAt,
+      totalAmount: reservations.totalAmount,
+      currency: reservations.currency,
+      bookingSource: reservations.bookingSource,
+      mealPlan: reservations.mealPlan,
+      mealPlanPaymentStatus: reservations.mealPlanPaymentStatus,
+      groupId: reservations.groupId,
+      isMainReservation: reservations.isMainReservation,
+      sharedInvoice: reservations.sharedInvoice,
+    }).from(reservations).where(eq(reservations.id, BENDA_STAY_ID))
     if (card) listed.push(card)
   }
 
@@ -193,16 +211,19 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     .map((row) => {
       const idsForInvoice = sourcesFor.get(row.id) || [row.id]
       const onAprilList = row.id === HANNAH_STAY_ID ? hannahOnInvoiceList(month) : null
-      const issuedAt = onAprilList
-        ? `${onAprilList.night}T12:00:00.000Z`
-        : row.checkedOutAt instanceof Date ? row.checkedOutAt.toISOString() : String(row.checkedOutAt)
+      const bendaRow = row.id === BENDA_STAY_ID ? benda : null
+      const issuedAt = bendaRow
+        ? `${bendaRow.night}T12:00:00.000Z`
+        : onAprilList
+          ? `${onAprilList.night}T12:00:00.000Z`
+          : row.checkedOutAt instanceof Date ? row.checkedOutAt.toISOString() : String(row.checkedOutAt)
       return {
         reservationId: row.id,
         guestName: row.guestName,
         reference: guestInvoiceReference(row.id),
         issuedAt,
         nights: onAprilList?.nights,
-        amountEur: chargedInvoiceAmountEur({
+        amountEur: bendaRow ? bendaRow.amountEur : chargedInvoiceAmountEur({
           totalAmount: Number(row.totalAmount) || 0,
           currency: row.currency,
           bookingSource: row.bookingSource,
