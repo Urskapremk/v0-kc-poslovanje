@@ -56,12 +56,13 @@ export default function LetniPregledTab({
     setError(null)
 
     const run = async () => {
+      // One month at a time. The monthly calculation reads many queries, and
+      // overlapping calls have returned another month's costs.
       const next: MonthFinanceSummary[] = []
-      for (let start = 1; start <= 12; start += 3) {
-        const batch = [start, start + 1, start + 2].filter((month) => month <= 12)
-        const part = await Promise.all(batch.map((month) => getMonthlyFinanceSummary(year, month)))
+      for (let month = 1; month <= 12; month++) {
+        const row = await getMonthlyFinanceSummary(year, month)
         if (cancelled) return
-        next.push(...part)
+        next.push(row)
         setLoaded(next.length)
       }
       if (!cancelled) setRows(next)
