@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import useSWR, { mutate } from 'swr'
-import { CalendarPlus, Printer, Trash2, X, Check, Upload, FileText, ChevronDown, Pencil } from 'lucide-react'
+import { CalendarPlus, ClipboardPaste, Printer, Trash2, X, Check, Upload, FileText, ChevronDown, Pencil } from 'lucide-react'
 import { getAllStaffMembers, setPriorLeaveYear } from '@/app/actions/statistics'
 import { formatAr, getCompany } from '@/lib/payroll'
 import {
@@ -14,6 +14,7 @@ import {
   setLeaveSignedDocument,
   setLeaveDoctorCertificate,
   setLeaveAdvancePay,
+  clearPastedLeaveDocument,
 } from '@/app/actions/leave'
 import {
   LeaveDepartment,
@@ -60,6 +61,23 @@ function dayLabel(iso: string, withWeekday = false): string {
   return `${base} (${WEEKDAYS_SL[new Date(y, m - 1, d).getDay()]})`
 }
 
+function pastedScreenshotFile(blob: Blob, type: string): File {
+  const ext = (type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+  return new File([blob], `posnetek-${Date.now()}.${ext}`, { type: type || 'image/png' })
+}
+
+function imageFileFromClipboard(data: DataTransfer | null): File | null {
+  if (!data) return null
+  const fromFiles = Array.from(data.files).find((file) => file.type.startsWith('image/'))
+  if (fromFiles) return pastedScreenshotFile(fromFiles, fromFiles.type)
+  for (const item of Array.from(data.items)) {
+    if (!item.type.startsWith('image/')) continue
+    const file = item.getAsFile()
+    if (file) return pastedScreenshotFile(file, item.type)
+  }
+  return null
+}
+
 function compactRanges(dates: string[]): string {
   const groups: string[][] = []
   for (const date of dates) {
@@ -92,6 +110,10 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   const [uploadingId, setUploadingId] = useState<string | null>(null)
   const [savingPrior, setSavingPrior] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const pasteTarget = useRef<{ id: string; kind: 'signed' | 'doctor' } | null>(null)
+  const uploadingRef = useRef<string | null>(null)
+  const uploadSignedRef = useRef<(id: string, file: File) => Promise<void>>(async () => {})
+  const uploadCertificateRef = useRef<(id: string, file: File) => Promise<void>>(async () => {})
 
   async function handleSavePriorLeave(staffId: string, yearKey: number, value: number) {
     setSavingPrior(true)
@@ -106,6 +128,8 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   }
 
   async function handleUploadSigned(leaveId: string, file: File) {
+    if (uploadingRef.current) return
+    uploadingRef.current = leaveId
     setUploadingId(leaveId)
     try {
       const fd = new FormData()
@@ -119,8 +143,37 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       console.error('[v0] leave signed upload error:', e)
       alert('Nalaganje podpisanega dokumenta ni uspelo.')
     } finally {
+      uploadingRef.current = null
       setUploadingId(null)
     }
+  }
+
+  uploadSignedRef.current = handleUploadSigned
+
+  async function readClipboardImage(): Promise<File | null> {
+    try {
+      if (!navigator.clipboard?.read) {
+        alert('Prilepi s Ctrl+V, ko je gumb Prilepi izbran.')
+        return null
+      }
+      const items = await navigator.clipboard.read()
+      for (const item of items) {
+        const type = item.types.find((entry) => entry.startsWith('image/'))
+        if (!type) continue
+        const blob = await item.getType(type)
+        return pastedScreenshotFile(blob, type)
+      }
+      alert('V odložišču ni slike. Najprej naredi posnetek zaslona (Print Screen).')
+      return null
+    } catch {
+      alert('Prilepi s Ctrl+V, ko je gumb Prilepi izbran, ali dovoli dostop do odložišča.')
+      return null
+    }
+  }
+
+  async function handlePasteSigned(leaveId: string) {
+    const file = await readClipboardImage()
+    if (file) await handleUploadSigned(leaveId, file)
   }
 
   async function refreshLeaves() {
@@ -134,6 +187,8 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
   }
 
   async function handleUploadCertificate(leaveId: string, file: File) {
+    if (uploadingRef.current) return
+    uploadingRef.current = leaveId
     setUploadingId(leaveId)
     try {
       const fd = new FormData()
@@ -148,8 +203,75 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
       console.error('[v0] doctor certificate upload error:', e)
       alert('Nalaganje potrdila zdravnika ni uspelo.')
     } finally {
+      uploadingRef.current = null
       setUploadingId(null)
     }
+  }
+
+  uploadCertificateRef.current = handleUploadCertificate
+
+  async function handlePasteCertificate(leaveId: string) {
+    const file = await readClipboardImage()
+    if (file) await handleUploadCertificate(leaveId, file)
+  }
+
+  async function handleClearPasted(leaveId: string, kind: 'signed' | 'doctor') {
+    await clearPastedLeaveDocument(leaveId, kind)
+    await refreshLeaves()
+  }
+
+  useEffect(() => {
+    function onPaste(event: ClipboardEvent) {
+      const el = event.target as HTMLElement | null
+      if (el?.closest('input, textarea, select, [contenteditable="true"]')) return
+      const armed = document.activeElement?.closest('[data-leave-paste]') as HTMLElement | null
+      const armedId = armed?.getAttribute('data-leave-paste')
+      const armedKind = armed?.getAttribute('data-leave-kind')
+      const target = armedId && (armedKind === 'signed' || armedKind === 'doctor')
+        ? { id: armedId, kind: armedKind }
+        : pasteTarget.current
+      if (!target) return
+      const file = imageFileFromClipboard(event.clipboardData)
+      if (!file) return
+      event.preventDefault()
+      if (target.kind === 'doctor') void uploadCertificateRef.current(target.id, file)
+      else void uploadSignedRef.current(target.id, file)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [])
+
+  function pasteControl(leaveId: string, kind: 'signed' | 'doctor', path?: string | null) {
+    const busy = uploadingId === leaveId
+    const pasted = Boolean(path?.includes('-posnetek-'))
+    return (
+      <>
+        <button
+          type="button"
+          data-leave-paste={leaveId}
+          data-leave-kind={kind}
+          title="Prilepi posnetek zaslona (Ctrl+V)"
+          disabled={busy}
+          onFocus={() => { pasteTarget.current = { id: leaveId, kind } }}
+          onBlur={() => { pasteTarget.current = null }}
+          onClick={() => void (kind === 'doctor' ? handlePasteCertificate(leaveId) : handlePasteSigned(leaveId))}
+          className="flex items-center gap-1 rounded-lg bg-[#8fae92]/15 px-3 py-2 text-xs text-[#8fae92] hover:bg-[#8fae92]/25 disabled:pointer-events-none disabled:opacity-60"
+        >
+          <ClipboardPaste className="h-3.5 w-3.5" />
+          {busy ? 'Nalagam…' : 'Prilepi'}
+        </button>
+        {pasted ? (
+          <button
+            type="button"
+            data-leave-clear={leaveId}
+            onClick={() => void handleClearPasted(leaveId, kind)}
+            className="flex items-center gap-1 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/60 hover:bg-white/10"
+          >
+            Odstrani
+          </button>
+        ) : null}
+      </>
+    )
   }
 
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -717,6 +839,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                         }}
                       />
                     </label>
+                    {pasteControl(l.id, 'doctor', l.doctorCertificatePath)}
                   </>
                 ) : (
                   <>
@@ -754,6 +877,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                         }}
                       />
                     </label>
+                    {pasteControl(l.id, 'signed', l.signedDocumentPath)}
                   </>
                 )}
                 <button
