@@ -24,6 +24,7 @@ import {
 import { eq, and, gte, lte, isNotNull, sql } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
+import { monthFinanceFromMonthly, type MonthFinanceSummary } from '@/lib/letni-pregled'
 import { getNabavaPurchasesForMonth, getAutoMassageOrderItemIds } from './nabava'
 import { ensureSupplierPaymentCostColumns } from './supplier-payment'
 import { transportCostTitle } from '@/lib/dilip-boat-cost'
@@ -2735,6 +2736,15 @@ export async function getYearlyStatistics(year: number) {
   }
   
   return { yearly, months }
+}
+
+// One month of the Finance yearly overview. Same figures as Kalkulacije → Pregled.
+export async function getMonthlyFinanceSummary(year: number, month: number): Promise<MonthFinanceSummary> {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    throw new Error('Neveljavno leto ali mesec')
+  }
+  const stats = await getMonthlyStatistics(year, month)
+  return monthFinanceFromMonthly(month, stats)
 }
 
 // ============ STAFF MEMBERS MANAGEMENT ============

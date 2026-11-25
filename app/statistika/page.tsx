@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
@@ -43,6 +43,8 @@ import MarketingTab from '@/components/marketing-tab'
 import BankaTab from '@/components/banka-tab'
 import OrangeMoneyTab from '@/components/orange-money-tab'
 import BlagajniskiDnevnik from '@/components/blagajniski-dnevnik'
+import LetniPregledTab from '@/components/letni-pregled-tab'
+import { monthFinanceFromMonthly } from '@/lib/letni-pregled'
 import KuhinjaRacuniRow, { type KuhinjaRacunLine } from '@/components/kuhinja-racuni-row'
 import LeaveDocument from '@/components/leave-document'
 import PayrollSettingsPanel from '@/components/payroll-settings'
@@ -83,7 +85,14 @@ function staffKindOf(staff: { isRegularEmployee: boolean; employmentType: string
 
 type Tab = 'kalkulacije' | 'kadri'
 type KalkulacijeView = 'pregled' | 'nastavitve' | 'prevozniki' | 'marketing' | 'finance'
-type FinanceView = 'banka' | 'orange' | 'dnevnik'
+type FinanceView = 'pregled' | 'banka' | 'orange' | 'dnevnik'
+
+const FINANCE_YEARS = [2024, 2025, 2026, 2027]
+
+function financeFromParam(value: string | null): FinanceView {
+  if (value === 'pregled' || value === 'banka' || value === 'orange' || value === 'dnevnik') return value
+  return 'banka'
+}
   type KadriView = 'seznam' | 'place' | 'obracun' | 'pogodbe' | 'razpored' | 'napitnina' | 'certifikat' | 'disciplina' | 'registre'
 
 function StatistikaContent() {
@@ -94,6 +103,7 @@ function StatistikaContent() {
   const searchParams = useSearchParams()
   const tabParam = searchParams.get('tab')
   const viewParam = searchParams.get('view')
+  const financeParam = searchParams.get('finance')
   const activeTab: Tab = tabParam === 'kadri' ? 'kadri' : 'kalkulacije'
   // Plače se vedno delajo za mesec nazaj → na Kadrovskem oddelku privzeto
   // prejšnji mesec (Kalkulacije ostanejo na tekočem mesecu). Date poskrbi za
@@ -105,7 +115,44 @@ function StatistikaContent() {
   const [year, setYear] = useState(defaultMonthDate.getFullYear())
   const [month, setMonth] = useState(defaultMonthDate.getMonth() + 1)
   const [kalkulacijeView, setKalkulacijeView] = useState<KalkulacijeView>(viewParam === 'finance' ? 'finance' : 'pregled')
-  const [financeView, setFinanceView] = useState<FinanceView>('banka')
+  const [financeView, setFinanceView] = useState<FinanceView>(financeFromParam(financeParam))
+
+  const writeKalkulacijeUrl = (next: KalkulacijeView, finance?: FinanceView) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('tab', 'kalkulacije')
+    if (next === 'pregled') {
+      params.delete('view')
+      params.delete('finance')
+    } else {
+      params.set('view', next)
+      if (next === 'finance' && finance) params.set('finance', finance)
+      else params.delete('finance')
+    }
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`)
+  }
+
+  const selectKalkulacije = (next: Exclude<KalkulacijeView, 'finance'>) => {
+    setKalkulacijeView(next)
+    writeKalkulacijeUrl(next)
+  }
+
+  const selectFinance = (next: FinanceView) => {
+    setFinanceView(next)
+    setKalkulacijeView('finance')
+    writeKalkulacijeUrl('finance', next)
+  }
+
+  // Menu links change the query while this page stays mounted.
+  useEffect(() => {
+    if (viewParam === 'finance') {
+      setKalkulacijeView('finance')
+      setFinanceView(financeFromParam(financeParam))
+      return
+    }
+    if (viewParam === 'prevozniki' || viewParam === 'marketing' || viewParam === 'nastavitve') {
+      setKalkulacijeView(viewParam)
+    }
+  }, [viewParam, financeParam])
   const [razporedView, setRazporedView] = useState<'sobarice' | 'vrtnarji' | 'kuhinja' | 'bar'>('sobarice')
   const [kadriView, setKadriView] = useState<KadriView>('seznam')
   // Quarter to open the payroll module on, set when coming from a deadline alert.
@@ -324,7 +371,9 @@ function StatistikaContent() {
                   <p className="text-white/40 text-sm hidden sm:block">
                     {activeTab === 'kadri'
                       ? 'Osebje, obračun plač, razporedi in registri'
-                      : 'Mesečni pregled prihodkov in stroškov'}
+                      : kalkulacijeView === 'finance' && financeView === 'pregled'
+                        ? 'Letni pregled prihodkov in stroškov'
+                        : 'Mesečni pregled prihodkov in stroškov'}
                   </p>
                 </div>
               </div>
@@ -346,7 +395,7 @@ function StatistikaContent() {
                 onChange={(e) => setYear(Number(e.target.value))}
                 className="px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-sm"
               >
-                {[2024, 2025, 2026, 2027].map(y => (
+                {FINANCE_YEARS.map(y => (
                   <option key={y} value={y} className="bg-[#0b2731]">{y}</option>
                 ))}
               </select>
@@ -367,7 +416,7 @@ function StatistikaContent() {
           {/* Sub-toggle: Pregled / Nastavitve */}
           <div className="flex gap-2 overflow-x-auto pb-1">
             <button
-              onClick={() => setKalkulacijeView('pregled')}
+              onClick={() => selectKalkulacije('pregled')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                 kalkulacijeView === 'pregled'
                   ? 'bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30'
@@ -378,7 +427,7 @@ function StatistikaContent() {
               Pregled
             </button>
             <button
-              onClick={() => setKalkulacijeView('prevozniki')}
+              onClick={() => selectKalkulacije('prevozniki')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                 kalkulacijeView === 'prevozniki'
                   ? 'bg-[#8fae92]/20 text-[#8fae92] border border-[#8fae92]/30'
@@ -389,7 +438,7 @@ function StatistikaContent() {
               Prevozniki
             </button>
             <button
-              onClick={() => setKalkulacijeView('marketing')}
+              onClick={() => selectKalkulacije('marketing')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                 kalkulacijeView === 'marketing'
                   ? 'bg-[#c59b5b]/20 text-[#c59b5b] border border-[#c59b5b]/30'
@@ -400,7 +449,7 @@ function StatistikaContent() {
               Stroški
             </button>
             <button
-              onClick={() => setKalkulacijeView('nastavitve')}
+              onClick={() => selectKalkulacije('nastavitve')}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                 kalkulacijeView === 'nastavitve'
                   ? 'bg-[#c59b5b]/20 text-[#c59b5b] border border-[#c59b5b]/30'
@@ -411,7 +460,7 @@ function StatistikaContent() {
               Nastavitve
             </button>
             <button
-              onClick={() => setKalkulacijeView('finance')}
+              onClick={() => selectFinance(financeView)}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                 kalkulacijeView === 'finance'
                   ? 'bg-[#c59b5b]/20 text-[#c59b5b] border border-[#c59b5b]/30'
@@ -1012,10 +1061,20 @@ function StatistikaContent() {
 
             {kalkulacijeView === 'finance' && (
               <div className="space-y-4">
-                {/* Finance sub-toggle: Banka / Orange Money */}
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   <button
-                    onClick={() => setFinanceView('banka')}
+                    onClick={() => selectFinance('pregled')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+                      financeView === 'pregled'
+                        ? 'bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30'
+                        : 'bg-white/5 text-white/60 hover:bg-white/10'
+                    }`}
+                  >
+                    <Calendar className="h-4 w-4" />
+                    Letni pregled
+                  </button>
+                  <button
+                    onClick={() => selectFinance('banka')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                       financeView === 'banka'
                         ? 'bg-[#c59b5b]/20 text-[#c59b5b] border border-[#c59b5b]/30'
@@ -1026,7 +1085,7 @@ function StatistikaContent() {
                     Banka
                   </button>
                   <button
-                    onClick={() => setFinanceView('orange')}
+                    onClick={() => selectFinance('orange')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                       financeView === 'orange'
                         ? 'bg-[#ff7900]/20 text-[#d09681] border border-[#ff7900]/30'
@@ -1037,7 +1096,7 @@ function StatistikaContent() {
                     Orange Money
                   </button>
                   <button
-                    onClick={() => setFinanceView('dnevnik')}
+                    onClick={() => selectFinance('dnevnik')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                       financeView === 'dnevnik'
                         ? 'bg-[#c59b5b]/20 text-[#c59b5b] border border-[#c59b5b]/30'
@@ -1049,6 +1108,15 @@ function StatistikaContent() {
                   </button>
                 </div>
 
+                {financeView === 'pregled' && (
+                  <LetniPregledTab
+                    year={year}
+                    years={FINANCE_YEARS}
+                    onYear={setYear}
+                    pinnedMonth={month}
+                    pinned={monthFinanceFromMonthly(month, stats)}
+                  />
+                )}
                 {financeView === 'banka' && <BankaTab year={year} />}
                 {financeView === 'orange' && <OrangeMoneyTab year={year} />}
                 {financeView === 'dnevnik' && <BlagajniskiDnevnik year={year} />}
