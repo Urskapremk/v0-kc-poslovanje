@@ -19,9 +19,11 @@ import {
   routes,
   boats,
   marketingExpenses,
-  hnaturaRepayments
+  hnaturaRepayments,
+  bentralReservations
 } from '@/lib/db/schema'
-import { eq, and, gte, lte, isNotNull, sql } from 'drizzle-orm'
+import { eq, and, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm'
+import { BENTRAL_INCOME_IDS, bentralIncomeForMonth } from '@/lib/bentral-income'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { monthFinanceFromMonthly, type MonthFinanceSummary } from '@/lib/letni-pregled'
@@ -1305,6 +1307,23 @@ export async function getMonthlyStatistics(year: number, month: number) {
     }
   })
   
+  // These Bentral rows are stored and still untransferred, so the guest-card
+  // loop above never sees them. Only the named ids are included. Drink rows
+  // stay out of nočitve. A later transfer copies the amount onto a card, so a
+  // transferred row is left to that card and is not added again.
+  const bentralStored = await db.select({
+    externalId: bentralReservations.externalId,
+    checkIn: bentralReservations.checkIn,
+    checkOut: bentralReservations.checkOut,
+    amount: bentralReservations.amount,
+    currency: bentralReservations.currency,
+    transferred: bentralReservations.transferred,
+    active: bentralReservations.active,
+  }).from(bentralReservations).where(inArray(bentralReservations.externalId, BENTRAL_INCOME_IDS))
+  const bentralIncome = bentralIncomeForMonth(bentralStored, year, month)
+  accommodationRevenue += bentralIncome.nocitve
+  totalNightsInMonth += bentralIncome.lodgingNights
+
   // Total nights in this month (already calculated above)
   const totalNights = totalNightsInMonth
   
@@ -1423,7 +1442,10 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const pijacaOrderItems = monthOrderItems.filter(o => pijacaCategories.includes(o.category || ''))
   const pijacaOrderRevenue = pijacaOrderItems.reduce((sum, o) => sum + (o.priceAr || 0), 0) / rate
   
-  const pijacaRevenue = pijacaDeliveryRevenue + pijacaOrderRevenue
+  // Bar sales keep their own purchase percentage. The Bentral drink rows are
+  // guest charges, not bar stock, so they do not raise nabava.
+  const pijacaSalesRevenue = pijacaDeliveryRevenue + pijacaOrderRevenue
+  const pijacaRevenue = pijacaSalesRevenue + bentralIncome.pijaca
   
   // Prehrana from delivery_note_items (bar daily orders).
   // Meals a paid pension already covers contribute quantity only — revenue 0 —
@@ -1509,7 +1531,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   }, {} as Record<string, { type: string, value: number }>)
   
   const barPijacaCost = costMap.bar_pijaca 
-    ? (costMap.bar_pijaca.type === 'percentage' ? pijacaRevenue * costMap.bar_pijaca.value / 100 : costMap.bar_pijaca.value)
+    ? (costMap.bar_pijaca.type === 'percentage' ? pijacaSalesRevenue * costMap.bar_pijaca.value / 100 : costMap.bar_pijaca.value)
     : 0
   
   const barPrehranaCost = costMap.bar_prehrana
