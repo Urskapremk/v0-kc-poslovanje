@@ -24,7 +24,7 @@ import {
 } from '@/lib/db/schema'
 import { eq, and, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm'
 import { BENTRAL_INCOME_IDS, bentralIncomeForMonth } from '@/lib/bentral-income'
-import { BENDA_STAY_ID, bendaTransferInMonth, lodgingBesideTheNightList, namedLodgingForMonth } from '@/lib/named-stay-income'
+import { BENDA_STAY_ID, bendaTransferInMonth, lodgingBesideTheNightList, namedLodgingForMonth, ninaInvoiceIncome } from '@/lib/named-stay-income'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { monthFinanceFromMonthly, type MonthFinanceSummary } from '@/lib/letni-pregled'
@@ -1472,7 +1472,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Bar sales keep their own purchase percentage. The Bentral drink rows are
   // guest charges, not bar stock, so they do not raise nabava.
   const pijacaSalesRevenue = pijacaDeliveryRevenue + pijacaOrderRevenue
-  const pijacaRevenue = pijacaSalesRevenue + bentralIncome.pijaca
+  // Nina's pasted drinks are guest charges, not bar stock, so they do not raise nabava.
+  const ninaFood = ninaInvoiceIncome(year, month)
+  const pijacaRevenue = pijacaSalesRevenue + bentralIncome.pijaca + ninaFood.pijaca
   
   // Prehrana from delivery_note_items (bar daily orders).
   // Meals a paid pension already covers contribute quantity only — revenue 0 —
@@ -1481,7 +1483,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const barPrehranaDeliveryRevenue = barPrehranaDeliveryItems.reduce((sum, i) => sum + deliveryFoodRevenueAr(i), 0) / rate
   
   // Note: Prehrana from order_items is counted separately as mealPlanRevenue (prepaid meal plans)
-  const barPrehranaRevenue = barPrehranaDeliveryRevenue
+  const barPrehranaRevenue = barPrehranaDeliveryRevenue + ninaFood.hrana
   
   // Wellness from delivery_note_items
   const wellnessDeliveryItems = allDeliveryItems.filter(i => (i as { costCategory?: string }).costCategory === 'wellness')
@@ -1562,7 +1564,7 @@ export async function getMonthlyStatistics(year: number, month: number) {
     : 0
   
   const barPrehranaCost = costMap.bar_prehrana
-    ? (costMap.bar_prehrana.type === 'percentage' ? barPrehranaRevenue * costMap.bar_prehrana.value / 100 : costMap.bar_prehrana.value)
+    ? (costMap.bar_prehrana.type === 'percentage' ? barPrehranaDeliveryRevenue * costMap.bar_prehrana.value / 100 : costMap.bar_prehrana.value)
     : 0
   
   const wellnessCountForCost = formulaWellnessDelivery.reduce((sum, i) => sum + (i.quantity || 0), 0) + formulaWellnessOrders.length

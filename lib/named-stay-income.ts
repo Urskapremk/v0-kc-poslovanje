@@ -72,6 +72,64 @@ export function lodgingShareLines(month: number): LodgingShareLine[] {
 // Mayalen's card does not come through the night list, so the loop never
 // adds her 1.433,18. Add it once, and only in March. If the card is already
 // in that list, the loop has added it and this stays at zero.
+// Nina's invoice lines. The guest card has no meal or drink rows. Amounts are cents.
+// Dates in April stay in April. Dates in May stay in May. Lodging is not here.
+const NINA_HRANA_CENTS: Array<[string, number]> = [
+  ['2026-04-21', 6300],
+  ['2026-04-22', 2700],
+  ['2026-04-22', 6300],
+  ['2026-04-23', 5400],
+  ['2026-04-23', 6300],
+  ['2026-04-24', 5400],
+  ['2026-04-24', 6300],
+  ['2026-04-25', 5400],
+  ['2026-04-25', 6300],
+  ['2026-04-26', 2700],
+  ['2026-04-27', 6300],
+  ['2026-04-28', 2700],
+  ['2026-04-28', 6300],
+  ['2026-04-29', 2700],
+  ['2026-04-29', 6300],
+  ['2026-04-30', 2700],
+  ['2026-04-30', 6300],
+  ['2026-05-01', 2700],
+  ['2026-05-01', 6300],
+  ['2026-05-02', 2700],
+  ['2026-05-02', 6300],
+  ['2026-05-03', 2700],
+  ['2026-05-03', 6300],
+  ['2026-05-04', 2700],
+  ['2026-05-04', 6300],
+]
+
+const NINA_PIJACA_CENTS: Array<[string, number]> = [
+  ['2026-04-21', 1595],
+  ['2026-04-22', 2085],
+  ['2026-04-23', 1702],
+  ['2026-04-24', 1170],
+  ['2026-04-25', 1702],
+  ['2026-04-27', 531],
+  ['2026-04-28', 2085],
+  ['2026-04-29', 744],
+  ['2026-04-30', 319],
+  ['2026-05-01', 531],
+  ['2026-05-02', 1276],
+  ['2026-05-03', 1063],
+  ['2026-05-04', 1063],
+]
+
+function centsInMonth(lines: Array<[string, number]>, year: number, month: number): number {
+  const prefix = `${year}-${String(month).padStart(2, '0')}`
+  return lines.reduce((sum, [date, cents]) => (date.startsWith(prefix) ? sum + cents : sum), 0)
+}
+
+export function ninaInvoiceIncome(year: number, month: number): { hrana: number; pijaca: number } {
+  return {
+    hrana: centsInMonth(NINA_HRANA_CENTS, year, month) / 100,
+    pijaca: centsInMonth(NINA_PIJACA_CENTS, year, month) / 100,
+  }
+}
+
 export function lodgingBesideTheNightList(reservationIds: string[], month: number): NamedLodging {
   if (month === 3 && !reservationIds.includes(MAYALEN_STAY_ID)) {
     return { eur: 1433.18, nights: 4 }
