@@ -360,23 +360,33 @@ function StatistikaContent() {
                 <ArrowLeft className="h-4 w-4" />
                 <span className="text-sm">Nazaj</span>
               </Link>
-              <div className="flex items-center gap-2">
-                {activeTab === 'kadri'
-                  ? <UserCog className="h-5 w-5 shrink-0 text-[#8fae92]" />
-                  : <BarChart3 className="h-5 w-5 shrink-0 text-[#7fa8b8]" />}
-                <div>
-                  <h1 className="text-xl font-bold text-[#c59b5b]">
-                    {activeTab === 'kadri' ? 'Kadrovski oddelek' : 'Kalkulacije'}
-                  </h1>
-                  <p className="text-white/40 text-sm hidden sm:block">
-                    {activeTab === 'kadri'
-                      ? 'Osebje, obračun plač, razporedi in registri'
-                      : kalkulacijeView === 'finance' && financeView === 'pregled'
+              {activeTab === 'kadri' ? (
+                <div className="flex items-center gap-2">
+                  <UserCog className="h-5 w-5 shrink-0 text-[#8fae92]" />
+                  <div>
+                    <h1 className="text-xl font-bold text-[#c59b5b]">Kadrovski oddelek</h1>
+                    <p className="text-white/40 text-sm hidden sm:block">Osebje, obračun plač, razporedi in registri</p>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  data-testid="osvezi-kalkulacije"
+                  aria-label="Osveži stran"
+                  className="flex items-center gap-2 text-left rounded-xl hover:bg-white/5 px-1 py-1 -mx-1"
+                >
+                  <BarChart3 className="h-5 w-5 shrink-0 text-[#7fa8b8]" />
+                  <div>
+                    <h1 className="text-xl font-bold text-[#c59b5b]">Kalkulacije</h1>
+                    <p className="text-white/40 text-sm hidden sm:block">
+                      {kalkulacijeView === 'finance' && financeView === 'pregled'
                         ? 'Letni pregled prihodkov in stroškov'
                         : 'Mesečni pregled prihodkov in stroškov'}
-                  </p>
-                </div>
-              </div>
+                    </p>
+                  </div>
+                </button>
+              )}
             </div>
             
             <div className="flex items-center gap-2">

@@ -1,6 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Link from 'next/link'
+import { getIssuedGuestInvoices, type IssuedGuestInvoice } from '@/app/actions/guest-invoices'
 import { getMonthlyFinanceSummary } from '@/app/actions/statistics'
 import {
   COST_TYPES,
@@ -23,6 +25,37 @@ function profitClass(value: number) {
   return value >= 0 ? 'text-[#8fae92]' : 'text-[#c8846b]'
 }
 
+function formatIssuedDate(iso: string) {
+  return new Intl.DateTimeFormat('sl-SI', {
+    timeZone: 'Indian/Antananarivo',
+    day: 'numeric',
+    month: 'numeric',
+    year: 'numeric',
+  }).format(new Date(iso))
+}
+
+function MonthName({
+  month,
+  selected,
+  onSelect,
+}: {
+  month: number
+  selected: boolean
+  onSelect: (month: number) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(month)}
+      aria-pressed={selected}
+      data-testid={`letni-mesec-gumb-${month}`}
+      className={`text-left font-medium whitespace-nowrap underline-offset-2 hover:text-[#c59b5b] ${selected ? 'text-[#c59b5b] underline' : 'text-white'}`}
+    >
+      {MONTHS[month - 1]}
+    </button>
+  )
+}
+
 export default function LetniPregledTab({
   year,
   years,
@@ -40,6 +73,10 @@ export default function LetniPregledTab({
   const [loaded, setLoaded] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [invoiceMonth, setInvoiceMonth] = useState<number | null>(null)
+  const [invoices, setInvoices] = useState<IssuedGuestInvoice[] | null>(null)
+  const [invoiceError, setInvoiceError] = useState<string | null>(null)
+  const invoiceListRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -69,6 +106,27 @@ export default function LetniPregledTab({
       cancelled = true
     }
   }, [year, attempt])
+
+  useEffect(() => {
+    if (invoiceMonth == null) return
+    let cancelled = false
+    setInvoices(null)
+    setInvoiceError(null)
+    getIssuedGuestInvoices(year, invoiceMonth)
+      .then((list) => {
+        if (!cancelled) setInvoices(list)
+      })
+      .catch(() => {
+        if (!cancelled) setInvoiceError('Računov ni bilo mogoče naložiti.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [year, invoiceMonth])
+
+  useEffect(() => {
+    if (invoiceMonth != null) invoiceListRef.current?.scrollIntoView({ block: 'start' })
+  }, [invoiceMonth, invoices])
 
   const shown = rows
     ?.slice()
@@ -143,6 +201,59 @@ export default function LetniPregledTab({
         )}
       </div>
 
+      {invoiceMonth != null && (
+        <div ref={invoiceListRef} className="rounded-2xl bg-white/[0.03] border border-white/10 overflow-hidden" data-testid="letni-racuni">
+          <div className="px-4 pt-4 sm:px-5 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-[#c59b5b]">Računi, {MONTHS[invoiceMonth - 1]} {year}</h2>
+              <p className="text-white/40 text-sm mt-1">Izdani računi gostov v tem mesecu.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setInvoiceMonth(null)}
+              className="px-3 py-1.5 rounded-lg bg-white/5 text-white/70 hover:bg-white/10 text-sm"
+            >
+              Zapri
+            </button>
+          </div>
+          {invoiceError && <p className="px-4 py-6 sm:px-5 text-sm text-[#c8846b]">{invoiceError}</p>}
+          {!invoiceError && !invoices && <p className="px-4 py-6 sm:px-5 text-sm text-white/50">Nalagam račune…</p>}
+          {invoices && invoices.length === 0 && (
+            <p className="px-4 py-6 sm:px-5 text-sm text-white/50" data-testid="letni-racuni-prazno">V tem mesecu ni izdanih računov.</p>
+          )}
+          {invoices && invoices.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wider text-white/40">
+                    <th className="px-4 py-3 font-medium sm:px-5">Gost</th>
+                    <th className="px-3 py-3 font-medium">Številka</th>
+                    <th className="px-3 py-3 font-medium">Datum</th>
+                    <th className="px-3 py-3 font-medium text-right">Znesek</th>
+                    <th className="px-4 py-3 font-medium text-right sm:px-5">Račun</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((invoice) => (
+                    <tr key={invoice.reservationId} className="border-t border-white/5" data-testid={`letni-racun-${invoice.reservationId}`}>
+                      <td className="px-4 py-2.5 sm:px-5 text-white">{invoice.guestName}</td>
+                      <td className="px-3 py-2.5 text-white/75 whitespace-nowrap">{invoice.reference}</td>
+                      <td className="px-3 py-2.5 text-white/75 whitespace-nowrap">{formatIssuedDate(invoice.issuedAt)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-[#7fa8b8] whitespace-nowrap" data-value={invoice.amountEur}>{formatEur(invoice.amountEur)}</td>
+                      <td className="px-4 py-2.5 sm:px-5 text-right whitespace-nowrap">
+                        <Link href={`/racun/${invoice.reservationId}?view=true`} className="text-[#c59b5b] hover:underline" data-testid={`letni-racun-odpri-${invoice.reservationId}`}>
+                          Odpri račun
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {shown && totals && (
         <div className="rounded-2xl bg-white/[0.03] border border-white/10 overflow-hidden">
           <div className="overflow-x-auto">
@@ -167,8 +278,8 @@ export default function LetniPregledTab({
               <tbody>
                 {shown.map((row) => (
                   <tr key={row.month} className="border-t border-white/5" data-testid={`letni-mesec-${row.month}`}>
-                    <th className="sticky left-0 z-10 bg-[#0c2430] px-3 py-2.5 text-left font-medium text-white whitespace-nowrap" scope="row">
-                      {MONTHS[row.month - 1]}
+                    <th className="sticky left-0 z-10 bg-[#0c2430] px-3 py-2.5 text-left whitespace-nowrap" scope="row">
+                      <MonthName month={row.month} selected={invoiceMonth === row.month} onSelect={setInvoiceMonth} />
                     </th>
                     <td className="px-3 py-2.5 text-right tabular-nums text-[#7fa8b8] font-medium whitespace-nowrap" data-testid={`letni-mesec-${row.month}-prihodki`} data-value={row.prihodki}>
                       {formatEur(row.prihodki)}
@@ -236,8 +347,8 @@ export default function LetniPregledTab({
               <tbody>
                 {shown.map((row) => (
                   <tr key={row.month} className="border-t border-white/5" data-testid={`letni-stroski-${row.month}`}>
-                    <th className="sticky left-0 z-10 bg-[#0c2430] px-3 py-2.5 text-left font-medium text-white whitespace-nowrap" scope="row">
-                      {MONTHS[row.month - 1]}
+                    <th className="sticky left-0 z-10 bg-[#0c2430] px-3 py-2.5 text-left whitespace-nowrap" scope="row">
+                      <MonthName month={row.month} selected={invoiceMonth === row.month} onSelect={setInvoiceMonth} />
                     </th>
                     <td className="px-3 py-2.5 text-right tabular-nums text-[#c8846b] font-medium whitespace-nowrap" data-testid={`letni-stroski-${row.month}-skupaj`} data-value={row.stroski}>
                       {formatEur(row.stroski)}
