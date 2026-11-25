@@ -1,12 +1,12 @@
 'use server'
 
 import { db } from '@/lib/db'
-import { deliveryNoteItems, deliveryNotes, invoiceDiscounts, orderItems, reservations } from '@/lib/db/schema'
+import { deliveryNoteItems, deliveryNotes, invoiceDiscounts, orderItems, reservations, transfers } from '@/lib/db/schema'
 import { and, eq, gte, inArray, isNotNull, lt } from 'drizzle-orm'
 import { getExchangeRate } from '@/app/actions/komba'
 import {
+  chargedInvoiceAmountEur,
   guestInvoiceReference,
-  issuedInvoiceAmountEur,
   issuedInvoiceRange,
   type IssuedInvoiceBarItem,
   type IssuedInvoiceOrder,
@@ -126,7 +126,7 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
   }
 
   const ids = [...sourceIds]
-  const [orders, notes, discounts, rate] = await Promise.all([
+  const [orders, notes, discounts, stayTransfers, rate] = await Promise.all([
     db.select({
       reservationId: orderItems.reservationId,
       name: orderItems.name,
@@ -144,6 +144,10 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
       reservationId: invoiceDiscounts.reservationId,
       amountAr: invoiceDiscounts.amountAr,
     }).from(invoiceDiscounts).where(inArray(invoiceDiscounts.reservationId, listed.map((row) => row.id))),
+    db.select({
+      reservationId: transfers.reservationId,
+      guestPrice: transfers.guestPrice,
+    }).from(transfers).where(inArray(transfers.reservationId, ids)),
     getExchangeRate(),
   ])
 
@@ -175,6 +179,11 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     list.push(line)
     barByStay.set(reservationId, list)
   }
+  const transferEurByStay = new Map<string, number>()
+  for (const transfer of stayTransfers) {
+    if (!transfer.reservationId) continue
+    transferEurByStay.set(transfer.reservationId, (transferEurByStay.get(transfer.reservationId) || 0) + Number(transfer.guestPrice || 0))
+  }
   const discountByStay = new Map<string, number>()
   for (const discount of discounts) {
     discountByStay.set(discount.reservationId, (discountByStay.get(discount.reservationId) || 0) + Number(discount.amountAr || 0))
@@ -193,7 +202,7 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
         reference: guestInvoiceReference(row.id),
         issuedAt,
         nights: onAprilList?.nights,
-        amountEur: issuedInvoiceAmountEur({
+        amountEur: chargedInvoiceAmountEur({
           totalAmount: Number(row.totalAmount) || 0,
           currency: row.currency,
           bookingSource: row.bookingSource,
@@ -203,6 +212,7 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
           orders: idsForInvoice.flatMap((id) => ordersByStay.get(id) || []),
           barItems: idsForInvoice.flatMap((id) => barByStay.get(id) || []),
           discountsAr: discountByStay.get(row.id) || 0,
+          transferEur: idsForInvoice.reduce((sum, id) => sum + (transferEurByStay.get(id) || 0), 0),
         }),
       }
     })

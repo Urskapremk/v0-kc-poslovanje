@@ -206,7 +206,7 @@ export default function LetniPregledTab({
           <div className="px-4 pt-4 sm:px-5 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-[#c59b5b]">Računi, {MONTHS[invoiceMonth - 1]} {year}</h2>
-              <p className="text-white/40 text-sm mt-1">Izdani računi gostov v tem mesecu.</p>
+              <p className="text-white/40 text-sm mt-1">Vsaka vrstica je celoten znesek, ki je gostu zaračunan na tem računu.</p>
             </div>
             <button
               type="button"

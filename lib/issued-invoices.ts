@@ -1,6 +1,8 @@
-// A guest invoice is issued at check-out. The amount follows the same lines as
-// the invoice page: stay in EUR, unpaid extras, separately paid excursions,
-// bar items that are actually charged, then discounts.
+// A guest invoice is issued at check-out. The printed amount follows the invoice
+// page: stay in EUR, unpaid extras, separately paid excursions, charged bar
+// items, then discounts. The month list uses the full charge instead, so a paid
+// meal, transfer, drink, trip, massage, or guest loan is still on the row.
+import { isCheckInPensionLump } from '@/lib/meal-plan'
 
 const LODGE_OFFSET_MS = 3 * 60 * 60 * 1000
 
@@ -31,6 +33,9 @@ export type IssuedInvoiceAmountInput = {
   orders: IssuedInvoiceOrder[]
   barItems: IssuedInvoiceBarItem[]
   discountsAr: number
+  // Arrival and departure charges already stored on the transfer records.
+  // EUR, not ariary. Extra transfer lines that exist only as order items stay there.
+  transferEur?: number
 }
 
 export function issuedInvoiceRange(year: number, month: number) {
@@ -97,4 +102,44 @@ export function issuedInvoiceAmountEur(input: IssuedInvoiceAmountInput) {
   }
   const grandAr = Math.max(0, Math.round(accommodationEur * rate) + servicesAr + barAr - Number(input.discountsAr || 0))
   return Math.round((grandAr / rate) * 100) / 100
+}
+
+function isStayTransferCopy(name?: string | null) {
+  const label = String(name || '')
+  return label.startsWith('Transfer ARRIVAL:') || label.startsWith('Transfer DEPARTURE:')
+}
+
+function chargedOrderAr(item: IssuedInvoiceOrder, plan: string, agency: boolean, transfersAlreadyCounted: boolean) {
+  if (item.isFree || item.category === 'Bivanje') return 0
+  // The prepaid board is already inside the stay price. The check-in lump is that same money.
+  if (plan && isCheckInPensionLump(item.name)) return 0
+  if (transfersAlreadyCounted && isStayTransferCopy(item.name)) return 0
+  const price = Number(item.priceAr || 0)
+  if (price > 0) return price
+  if (item.paymentStatus !== 'PAID') return 0
+  if (agency && item.category === 'Izlet') return 0
+  return Number(item.refPriceAr || 0)
+}
+
+// Everything charged on the invoice, including lines the printed total shows as
+// already paid, and including a guest loan. Income columns do not use this.
+export function chargedInvoiceAmountEur(input: IssuedInvoiceAmountInput) {
+  const rate = input.exchangeRate || 4800
+  const plan = paidPlan(input.mealPlan, input.mealPlanPaymentStatus)
+  const agency = input.bookingSource === 'Agency'
+  const foreignStay = (input.currency || 'EUR').trim().toUpperCase()
+  const accommodationEur = foreignStay && foreignStay !== 'EUR' ? 0 : Number(input.totalAmount || 0)
+  const transferEur = Number(input.transferEur || 0)
+  let servicesAr = 0
+  for (const item of input.orders) {
+    servicesAr += chargedOrderAr(item, plan, agency, transferEur > 0)
+  }
+  let barAr = 0
+  for (const item of input.barItems) {
+    const covered = Boolean(item.coveredByMealPlan) || (!item.isFree && isPaidPlanMeal(plan, item.productName))
+    if (covered || item.isFree) continue
+    barAr += Number(item.priceAr || 0) * Number(item.quantity || 0)
+  }
+  const grandAr = Math.max(0, Math.round(accommodationEur * rate) + servicesAr + barAr - Number(input.discountsAr || 0))
+  return Math.round((grandAr / rate + transferEur) * 100) / 100
 }
