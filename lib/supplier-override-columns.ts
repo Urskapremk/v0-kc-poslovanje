@@ -9,6 +9,7 @@ export function ensureSupplierOverrideColumns() {
     ready = (async () => {
       await db.execute(sql`ALTER TABLE excursion_bookings ADD COLUMN IF NOT EXISTS "dilipOverrideAr" integer`)
       await db.execute(sql`ALTER TABLE excursion_bookings ADD COLUMN IF NOT EXISTS "taxiOverrideAr" integer`)
+      await db.execute(sql`ALTER TABLE excursion_bookings ADD COLUMN IF NOT EXISTS "lunchOverrideAr" integer`)
       await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "dilipOverrideAr" integer`)
       await db.execute(sql`ALTER TABLE transfers ADD COLUMN IF NOT EXISTS "taxiOverrideAr" integer`)
       await db.execute(sql`ALTER TABLE order_items ADD COLUMN IF NOT EXISTS "dilipOverrideAr" integer`)

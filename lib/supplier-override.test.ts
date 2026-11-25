@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { parseSupplierAmountAr, readOverrideAr, supplierAmountAr } from './supplier-override'
+import { parseSupplierAmountAr, readOverrideAr, supplierAmountAr } from './supplier-override.ts'
 
 describe('supplier amount override', () => {
   it('reads a stored amount and treats a missing one as the catalog', () => {
@@ -13,7 +13,9 @@ describe('supplier amount override', () => {
   it('parses a typed ariary amount with dots or spaces', () => {
     assert.equal(parseSupplierAmountAr('300.000'), 300000)
     assert.equal(parseSupplierAmountAr('300 000'), 300000)
+    assert.equal(parseSupplierAmountAr('0'), 0)
     assert.equal(parseSupplierAmountAr(''), null)
     assert.equal(readOverrideAr(''), null)
+    assert.equal(supplierAmountAr(140000, 0), 0)
   })
 })

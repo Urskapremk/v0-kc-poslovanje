@@ -245,6 +245,7 @@ interface ExcursionBooking {
   dilipOrderedAt: string | null;
   dilipOverrideAr?: number | null;
   taxiOverrideAr?: number | null;
+  lunchOverrideAr?: number | null;
   groupId?: string | null;
   executed: boolean;
   status?: string; // 'ACTIVE' | 'CANCELLED' (cancelled → converted to credit)
@@ -10544,12 +10545,19 @@ function GuestCard() {
                   // ponudnika (pricePerPersonAr). Prej se je računalo iz shranjene EUR cene ×
                   // tečaj, kar je zaradi round-tripa Ar→EUR→Ar zaokroževalo (70.000 → 69.984 Ar).
                   const excRate = data?.exchangeRate || DEFAULT_RATE;
-                  const lunchTotal = members.reduce((sum, m) => {
+                  const lunchCatalog = members.reduce((sum, m) => {
                     const provider = dbLunchProviders.find((lp: { id: string; pricePerPersonAr: number }) => lp.id === m.excursion.lunchProviderId);
                     if (provider) return sum + provider.pricePerPersonAr * (m.excursion.pax || 0);
                     // Rezerva (star booking brez ponudnika): pretvori shranjeno EUR ceno.
                     return sum + Math.round((m.excursion.lunchPrice || 0) * excRate);
                   }, 0);
+                  // One amount for this card. A typed figure, including 0, replaces the price list.
+                  // It does not rewrite the recorded supplier payment.
+                  const lunchOverride = readOverrideAr(members.map(m => m.excursion.lunchOverrideAr).find(v => v != null));
+                  const lunchTotal = supplierAmountAr(lunchCatalog, lunchOverride);
+                  const excursionGroupKey = exc.groupId ? `g:${exc.groupId}` : `s:${exc.id}`;
+                  const lunchPayRef = `excursion:${excursionGroupKey}:lunch`;
+                  const lunchPaid = supplierPayByKey[lunchPayRef];
                   // Fanja organizira izlet (ime se začne s "Fanja"): plačamo JI 90 % cene izleta
                   // za gosta (ona nam pusti 10 %). Zamenja vrstico "Dilipu (čoln + vodič)".
                   const isFanjaExcursion = (item.excursionName || '').trim().toLowerCase().startsWith('fanja');
@@ -10699,11 +10707,20 @@ function GuestCard() {
                                 </span>
                               </div>
                             )}
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] text-[#2b2622]/55">Vodiču za kosilo</span>
-                              <span className="text-[11px] font-semibold text-[#8f6d3a] whitespace-nowrap">
-                                {lunchTotal > 0 ? ar(lunchTotal) : '—'}
-                              </span>
+                            <div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[10px] text-[#2b2622]/55">Vodiču za kosilo</span>
+                                <span className="text-[11px] font-semibold text-[#8f6d3a] whitespace-nowrap">
+                                  {lunchOverride != null || lunchTotal > 0 ? ar(lunchTotal) : '—'}
+                                </span>
+                              </div>
+                              <SupplierAmountOverride
+                                overrideAr={lunchOverride}
+                                onSave={async (amount) => {
+                                  await Promise.all(members.map(m => updateExcursionBooking(m.excursion.id, { lunchOverrideAr: amount })));
+                                  refresh();
+                                }}
+                              />
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-[10px] text-[#2b2622]/55">Skiperju za vstopnino ({totalPax} os)</span>
@@ -10898,14 +10915,14 @@ function GuestCard() {
 
                           {/* Plačilo dobavitelju — NE-Fanjin izlet: Dilip / kosilo / vstopnina (vsak svoj panel) */}
                           {!isFanjaExcursion && (() => {
-                            const groupKey = exc.groupId ? `g:${exc.groupId}` : `s:${exc.id}`;
+                            const groupKey = excursionGroupKey;
                             const excLabel = (who: string) => `Izlet ${item.excursionName || ''} (${who}) — ${members.map(m => `${bungalowDisplayName(m.reservation.bungalow)} / ${m.reservation.guestName}`).join(', ')}`.slice(0, 200);
-                            const hasAny = dilipPayment > 0 || lunchTotal > 0 || entranceTotalAr > 0;
+                            const hasAny = dilipPayment > 0 || lunchTotal > 0 || entranceTotalAr > 0 || Boolean(lunchPaid);
                             if (!hasAny) return null;
                             return (
                               <div className="mt-2 space-y-1.5">
                                 {dilipPayment > 0 && renderSupplierPay(`excursion:${groupKey}:dilip`, 'dilip', dilipPayment, dilipPayLabel, excLabel('Dilip'), '#3f6b7d')}
-                                {lunchTotal > 0 && renderSupplierPay(`excursion:${groupKey}:lunch`, 'lunch', lunchTotal, 'Vodiču za kosilo', excLabel('kosilo'), '#8f6d3a')}
+                                {(lunchTotal > 0 || lunchPaid) && renderSupplierPay(lunchPayRef, 'lunch', lunchTotal, 'Vodiču za kosilo', excLabel('kosilo'), '#8f6d3a')}
                                 {entranceTotalAr > 0 && renderSupplierPay(`excursion:${groupKey}:entrance`, 'entrance', entranceTotalAr, `Skiperju za vstopnino (${totalPax} os)`, excLabel('vstopnina'), '#a8543a')}
                               </div>
                             );

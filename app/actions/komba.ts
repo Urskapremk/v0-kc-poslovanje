@@ -1240,6 +1240,7 @@ excursions: resExcursions.map(e => ({
   extraGuides: Number(e.extraGuides) || 0,
   dilipOverrideAr: readOverrideAr(e.dilipOverrideAr),
   taxiOverrideAr: readOverrideAr(e.taxiOverrideAr),
+  lunchOverrideAr: readOverrideAr(e.lunchOverrideAr),
   lunchPrice: e.lunchPrice ? Number(e.lunchPrice) : 0,
   lunchPax: e.lunchPax || 0,
   entrancePax: e.entrancePax == null ? null : Number(e.entrancePax),
@@ -2450,6 +2451,7 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   extraGuides: number
   dilipOverrideAr: number | null
   taxiOverrideAr: number | null
+  lunchOverrideAr: number | null
 }>) {
   await ensureExcursionPriceColumns()
   const touchesInvoice = data.excursionId !== undefined
@@ -2495,6 +2497,7 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   if (data.extraGuides !== undefined) updateData.extraGuides = Math.max(0, Math.round(data.extraGuides))
   if (data.dilipOverrideAr !== undefined) updateData.dilipOverrideAr = readOverrideAr(data.dilipOverrideAr)
   if (data.taxiOverrideAr !== undefined) updateData.taxiOverrideAr = readOverrideAr(data.taxiOverrideAr)
+  if (data.lunchOverrideAr !== undefined) updateData.lunchOverrideAr = readOverrideAr(data.lunchOverrideAr)
   
   await db.update(excursionBookings).set(updateData).where(eq(excursionBookings.id, id))
   if (previous) await syncExcursionInvoiceLine(id, previous)
@@ -3138,11 +3141,13 @@ export async function getArchivedExcursions() {
     const entranceTotalAr = Math.round((excType?.entranceFeeAr || 0) * totalPax)
     // Kosilo NEPOSREDNO v Ar iz cenika ponudnika (pricePerPersonAr × pax), da se izognemo
     // round-trip zaokroževanju Ar→EUR→Ar (70.000 → 69.984). Rezerva: stara EUR cena × tečaj.
-    const lunchTotal = members.reduce((s, m) => {
+    const lunchCatalog = members.reduce((s, m) => {
       const lp = m.lunchProviderId ? lunchMap.get(m.lunchProviderId) : undefined
       if (lp) return s + (lp.pricePerPersonAr || 0) * (m.pax || 0)
       return s + Math.round((m.lunchPrice ? Number(m.lunchPrice) : 0) * rate)
     }, 0)
+    const lunchOverride = readOverrideAr(members.find(m => m.lunchOverrideAr != null)?.lunchOverrideAr)
+    const lunchTotal = supplierAmountAr(lunchCatalog, lunchOverride)
 
     const isFanja = excursionName.trim().toLowerCase().startsWith('fanja')
     const fanjaGuestTotalEur = members.reduce((s, m) => s + (m.guestPrice ? Number(m.guestPrice) : 0), 0)
@@ -3175,6 +3180,7 @@ export async function getArchivedExcursions() {
       fanjaPayment,
       dilipPayment,
       lunchTotal,
+      lunchManual: lunchOverride != null,
       entranceTotalAr,
       boatName: first.boatId ? (boatMap.get(first.boatId) || '') : '',
       // Fanja payment status (from first member — one ledger per group)
@@ -3187,7 +3193,8 @@ export async function getArchivedExcursions() {
       lunchRefKey,
       entranceRefKey,
       dilipPaid: (!isFanja && dilipPayment > 0) ? paidFor(dilipRefKey) : null,
-      lunchPaid: (!isFanja && lunchTotal > 0) ? paidFor(lunchRefKey) : null,
+      // A recorded lunch payment stays visible after the owed amount is set to 0.
+      lunchPaid: (!isFanja && (lunchTotal > 0 || payByKey.has(lunchRefKey))) ? paidFor(lunchRefKey) : null,
       entrancePaid: (!isFanja && entranceTotalAr > 0) ? paidFor(entranceRefKey) : null,
     }]
   })

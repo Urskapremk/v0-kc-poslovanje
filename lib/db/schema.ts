@@ -493,6 +493,8 @@ export const excursionBookings = pgTable('excursion_bookings', {
   dilipOverrideAr: integer('dilipOverrideAr'),
   // One-off taxi amount on this excursion. Null keeps the shared taxi price cell.
   taxiOverrideAr: integer('taxiOverrideAr'),
+  // One-off amount owed to the guide for lunch. Null keeps the lunch price list. Zero means nothing is owed.
+  lunchOverrideAr: integer('lunchOverrideAr'),
   extraGuides: integer('extraGuides').notNull().default(0),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   })

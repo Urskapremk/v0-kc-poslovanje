@@ -421,7 +421,7 @@ export default function ArhivIzletiPage() {
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-[10px] text-white/50">Vodiču za kosilo</span>
-                              <span className="text-[11px] font-semibold text-[#e0a561] whitespace-nowrap">{e.lunchTotal > 0 ? ar(e.lunchTotal) : '—'}</span>
+                              <span className="text-[11px] font-semibold text-[#e0a561] whitespace-nowrap">{e.lunchManual || e.lunchTotal > 0 ? ar(e.lunchTotal) : '—'}</span>
                             </div>
                             <div className="flex items-center justify-between gap-2">
                               <span className="text-[10px] text-white/50">Skiperju za vstopnino ({e.totalPax} os)</span>
@@ -449,7 +449,7 @@ export default function ArhivIzletiPage() {
                                   label={`Izlet ${e.excursionName} (Dilip) — ${firstBungalow} / ${firstGuest}`.slice(0, 200)}
                                   paid={e.dilipPaid} onDone={() => mutate()} />
                               )}
-                              {e.lunchTotal > 0 && (
+                              {(e.lunchTotal > 0 || e.lunchPaid) && (
                                 <SupplierPayPanel
                                   refKey={e.lunchRefKey} supplier="lunch" amountAr={e.lunchTotal}
                                   supplierLabel="Vodiču za kosilo" accent="#8f6d3a"
@@ -463,7 +463,7 @@ export default function ArhivIzletiPage() {
                                   label={`Izlet ${e.excursionName} (vstopnina) — ${firstBungalow} / ${firstGuest}`.slice(0, 200)}
                                   paid={e.entrancePaid} onDone={() => mutate()} />
                               )}
-                              {e.dilipPayment <= 0 && e.lunchTotal <= 0 && e.entranceTotalAr <= 0 && (
+                              {e.dilipPayment <= 0 && e.lunchTotal <= 0 && e.entranceTotalAr <= 0 && !e.dilipPaid && !e.lunchPaid && !e.entrancePaid && (
                                 <p className="mt-2 text-[10px] text-white/40">Za ta izlet ni zabeleženih stroškov dobavitelja.</p>
                               )}
                             </div>
