@@ -6,7 +6,8 @@
 export type BentralIncomeKind = 'nocitve' | 'pijaca'
 
 export const BENTRAL_INCOME_KIND: Record<string, BentralIncomeKind> = {
-  '5555502819': 'nocitve', // Mayalen Darrigade Sallaberry, 28 Mar–1 Apr 2026
+  // 5555502819 is the same stay as guest card res-1788098277691-f69d9433c39eb8.
+  // The card is the lodging. Adding this row again would count it twice.
   'K-2026-47': 'pijaca', // Mayalen drinks, night of 31 Mar
   'K-2026-45': 'pijaca', // Sayaka Harada drinks
   'K-2025-265': 'pijaca', // Vinko in Mirjana Ivačić drinks

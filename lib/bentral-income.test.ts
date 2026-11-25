@@ -58,12 +58,12 @@ describe('stay nights', () => {
 describe('bentral income for the named rows', () => {
   const rows = [mayalenStay, ...drinks, otherGuest]
 
-  it('puts Mayalen lodging and every drink row into March, and nothing into April', () => {
+  it('keeps the drink rows in March and leaves Mayalen lodging to her guest card', () => {
     const march = bentralIncomeForMonth(rows, 2026, 3)
     const april = bentralIncomeForMonth(rows, 2026, 4)
-    assert.equal(cents(march.nocitve), 143318)
+    assert.equal(cents(march.nocitve), 0)
     assert.equal(cents(march.pijaca), 7464 + 22680 + 16039 + 42996)
-    assert.equal(march.lodgingNights, 4)
+    assert.equal(march.lodgingNights, 0)
     assert.equal(cents(april.nocitve), 0)
     assert.equal(cents(april.pijaca), 0)
     assert.equal(april.lodgingNights, 0)

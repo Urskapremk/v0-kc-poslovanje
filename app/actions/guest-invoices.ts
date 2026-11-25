@@ -11,6 +11,7 @@ import {
   type IssuedInvoiceBarItem,
   type IssuedInvoiceOrder,
 } from '@/lib/issued-invoices'
+import { lodgingShareLines } from '@/lib/named-stay-income'
 
 export type IssuedGuestInvoice = {
   reservationId: string
@@ -18,6 +19,9 @@ export type IssuedGuestInvoice = {
   reference: string
   issuedAt: string
   amountEur: number
+  // A lodging share is the part of a stay that belongs to this month.
+  // It is not a second issued invoice, so it has no guest-card link.
+  lodgingShare?: boolean
 }
 
 type Stay = {
@@ -54,7 +58,16 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     lt(reservations.checkedOutAt, end),
   ))
 
-  if (issued.length === 0) return []
+  const shares: IssuedGuestInvoice[] = lodgingShareLines(month).map((line) => ({
+    reservationId: line.id,
+    guestName: line.guestName,
+    reference: line.reference,
+    issuedAt: `${line.night}T12:00:00.000Z`,
+    amountEur: line.amountEur,
+    lodgingShare: true,
+  }))
+
+  if (issued.length === 0) return shares
 
   const groupIds = [...new Set(issued.map((row) => row.groupId).filter((id): id is string => Boolean(id)))]
   const grouped = groupIds.length
@@ -147,7 +160,7 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     discountByStay.set(discount.reservationId, (discountByStay.get(discount.reservationId) || 0) + Number(discount.amountAr || 0))
   }
 
-  return issued
+  const invoices = issued
     .map((row) => {
       const idsForInvoice = sourcesFor.get(row.id) || [row.id]
       const issuedAt = row.checkedOutAt instanceof Date ? row.checkedOutAt.toISOString() : String(row.checkedOutAt)
@@ -170,4 +183,5 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
       }
     })
     .sort((a, b) => a.issuedAt.localeCompare(b.issuedAt) || a.guestName.localeCompare(b.guestName, 'sl'))
+  return [...invoices, ...shares].sort((a, b) => a.issuedAt.localeCompare(b.issuedAt) || a.guestName.localeCompare(b.guestName, 'sl'))
 }

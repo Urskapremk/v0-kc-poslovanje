@@ -24,6 +24,7 @@ import {
 } from '@/lib/db/schema'
 import { eq, and, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm'
 import { BENTRAL_INCOME_IDS, bentralIncomeForMonth } from '@/lib/bentral-income'
+import { BENDA_STAY_ID, bendaTransferInMonth, namedLodgingForMonth } from '@/lib/named-stay-income'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { monthFinanceFromMonthly, type MonthFinanceSummary } from '@/lib/letni-pregled'
@@ -1230,6 +1231,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
   let mealPlanPrepaidRevenue = 0
   
   for (const r of reservationsWithNightsInMonth) {
+    const namedLodging = namedLodgingForMonth(r.id, month)
+    if (namedLodging) {
+      accommodationRevenue += namedLodging.eur
+      totalNightsInMonth += namedLodging.nights
+      continue
+    }
     const arrival = new Date(r.arrival!)
     const departure = new Date(r.departure!)
     const totalNights = Math.ceil((departure.getTime() - arrival.getTime()) / (1000 * 60 * 60 * 24))
@@ -1327,8 +1334,22 @@ export async function getMonthlyStatistics(year: number, month: number) {
   // Total nights in this month (already calculated above)
   const totalNights = totalNightsInMonth
   
-  // Transfers
-  const transferRevenue = allTransfers.reduce((sum, t) => sum + Number(t.guestPrice || 0), 0)
+  // Transfers. Benda checked out in May, so both of her transfers would land in May.
+  // The arrival is 21 April and the departure is 5 May. Only her rows move.
+  const transferRevenueFromCheckout = allTransfers.reduce((sum, t) => {
+    if (t.reservationId === BENDA_STAY_ID) return sum
+    return sum + Number(t.guestPrice || 0)
+  }, 0)
+  const bendaTransfers = await db.select({
+    type: transfers.type,
+    pickupDate: transfers.pickupDate,
+    guestPrice: transfers.guestPrice,
+  }).from(transfers).where(eq(transfers.reservationId, BENDA_STAY_ID))
+  const bendaTransferRevenue = bendaTransfers.reduce((sum, t) => {
+    if (!bendaTransferInMonth(t.pickupDate, t.type, year, month)) return sum
+    return sum + Number(t.guestPrice || 0)
+  }, 0)
+  const transferRevenue = transferRevenueFromCheckout + bendaTransferRevenue
   
   // Transfer costs - calculate from supplier_pricing based on boatId and route
   const transferCost = allTransfers.reduce((sum, t) => {
