@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react'
 import { getMonthlyFinanceSummary } from '@/app/actions/statistics'
 import {
+  COST_TYPES,
+  sumCostTypes,
   sumFinanceMonths,
-  type FinanceTotals,
+  type FinanceSumKey,
   type MonthFinanceSummary,
 } from '@/lib/letni-pregled'
 
@@ -13,7 +15,7 @@ const MONTHS = [
   'Julij', 'Avgust', 'September', 'Oktober', 'November', 'December',
 ]
 
-const CATEGORIES: { key: keyof FinanceTotals; label: string }[] = [
+const CATEGORIES: { key: FinanceSumKey; label: string }[] = [
   { key: 'nocitve', label: 'Nočitve' },
   { key: 'bar', label: 'Bar' },
   { key: 'kuhinja', label: 'Kuhinja' },
@@ -83,6 +85,9 @@ export default function LetniPregledTab({
     .sort((a, b) => a.month - b.month)
     .map((row) => (row.month === pinnedMonth ? { ...pinned, month: pinnedMonth } : row))
   const totals = shown && shown.length === 12 ? sumFinanceMonths(shown) : null
+  const costColumns = totals
+    ? COST_TYPES.filter((type) => type.parallel || totals.stroskiPoVrsti[type.key] !== 0)
+    : []
 
   return (
     <div className="space-y-4" data-testid="letni-pregled">
@@ -196,6 +201,69 @@ export default function LetniPregledTab({
                   {CATEGORIES.map((category) => (
                     <td key={category.key} className="px-3 py-3 text-right tabular-nums text-white whitespace-nowrap">
                       {formatEur(totals[category.key])}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {shown && totals && (
+        <div className="rounded-2xl bg-white/[0.03] border border-white/10 overflow-hidden">
+          <div className="px-4 pt-4 sm:px-5">
+            <h2 className="text-base font-bold text-[#c59b5b]">Stroški po vrstah</h2>
+            <p className="text-white/40 text-sm mt-1">Iste vrste kot na mesečnem pregledu. Vsota vrst je enaka stroškom.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[980px] text-sm border-collapse">
+              <caption className="absolute w-px h-px p-0 -m-px overflow-hidden whitespace-nowrap border-0">Stroški po vrstah {year}</caption>
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wider text-white/40">
+                  <th className="sticky left-0 z-10 bg-[#102833] px-3 py-3 font-medium">Mesec</th>
+                  <th className="px-3 py-3 font-medium text-right">Stroški</th>
+                  {costColumns.map((type) => (
+                    <th key={type.key} className="px-3 py-3 font-medium text-right">{type.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((row) => (
+                  <tr key={row.month} className="border-t border-white/5" data-testid={`letni-stroski-${row.month}`}>
+                    <th className="sticky left-0 z-10 bg-[#0c2430] px-3 py-2.5 text-left font-medium text-white whitespace-nowrap" scope="row">
+                      {MONTHS[row.month - 1]}
+                    </th>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-[#c8846b] font-medium whitespace-nowrap" data-testid={`letni-stroski-${row.month}-skupaj`} data-value={row.stroski}>
+                      {formatEur(row.stroski)}
+                    </td>
+                    {costColumns.map((type) => (
+                      <td
+                        key={type.key}
+                        className="px-3 py-2.5 text-right tabular-nums text-white/75 whitespace-nowrap"
+                        data-testid={`letni-stroski-${row.month}-${type.key}`}
+                        data-value={row.stroskiPoVrsti[type.key]}
+                      >
+                        {formatEur(row.stroskiPoVrsti[type.key])}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-[#c8846b]/30 bg-[#c8846b]/10 font-semibold" data-testid="letni-stroski-skupaj">
+                  <th className="sticky left-0 z-10 bg-[#3a2420] px-3 py-3 text-left text-white" scope="row">Skupaj</th>
+                  <td className="px-3 py-3 text-right tabular-nums text-[#c8846b] whitespace-nowrap" data-testid="letni-stroski-skupaj-sestevek" data-value={sumCostTypes(totals.stroskiPoVrsti)}>
+                    {formatEur(totals.stroski)}
+                  </td>
+                  {costColumns.map((type) => (
+                    <td
+                      key={type.key}
+                      className="px-3 py-3 text-right tabular-nums text-white whitespace-nowrap"
+                      data-testid={`letni-stroski-skupaj-${type.key}`}
+                      data-value={totals.stroskiPoVrsti[type.key]}
+                    >
+                      {formatEur(totals.stroskiPoVrsti[type.key])}
                     </td>
                   ))}
                 </tr>

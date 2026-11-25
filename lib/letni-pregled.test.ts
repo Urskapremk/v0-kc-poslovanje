@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { monthFinanceFromMonthly, sumFinanceMonths, type MonthFinanceSummary } from './letni-pregled'
+import { emptyCostTypes, monthFinanceFromMonthly, sumCostTypes, sumFinanceMonths, type MonthFinanceSummary, type MonthlyFinanceInput } from './letni-pregled'
 
-const novemberCard = {
+const novemberCard: MonthlyFinanceInput = {
   revenue: {
     accommodation: 16678.52,
     bar: { pijaca: 671.25, prehrana: 2000 },
@@ -13,12 +13,46 @@ const novemberCard = {
     ostalo: 20.83,
     total: 24211.4,
   },
-  costs: { total: 8123.45 },
+  costs: {
+    total: 8123.45,
+    barPijaca: 200,
+    barPrehrana: 500,
+    mealPlan: 300,
+    wellness: 80,
+    receiptsWellness: 40,
+    ostalo: 15,
+    receiptsOstalo: 5,
+    excursions: 900,
+    transfers: 700,
+    receiptsKuhinja: 100,
+    receiptsBar: 50,
+    receiptsNocitve: 60,
+    marketing: 400,
+    booking: 250,
+    optimaplus: 150,
+    starlink: 150,
+    receiptsReprezentanca: 30,
+    receiptsVzdrzevanje: 20,
+    najemninaHisa: 1000,
+    stipendija: 0,
+    racunovodstvo: 75,
+    prevozniki: 120,
+    porters: 10,
+    tuctuc: 8,
+    depreciation: 200,
+    reklama: 12.45,
+  },
+  salaryBreakdown: {
+    accommodation: 800,
+    bar: 600,
+    kuhinja: 700,
+    management: 648,
+  },
   profit: 16087.95,
 }
 
 describe('monthFinanceFromMonthly', () => {
-  it('uses the monthly card total and the same category split', () => {
+  it('uses the monthly card total and the same income split', () => {
     const row = monthFinanceFromMonthly(11, novemberCard)
     assert.equal(row.month, 11)
     assert.equal(row.prihodki, 24211.4)
@@ -38,6 +72,39 @@ describe('monthFinanceFromMonthly', () => {
     assert.equal(row.bar + row.kuhinja, 671.25 + 3878.5)
     assert.notEqual(row.kuhinja, novemberCard.revenue.bar.pijaca + novemberCard.revenue.bar.prehrana)
   })
+
+  it('splits costs into the monthly types and keeps their sum equal to stroški', () => {
+    const row = monthFinanceFromMonthly(11, novemberCard)
+    const costs = row.stroskiPoVrsti
+    assert.equal(costs.nocitve, 800 + 400 + 250 + 150 + 150 + 60)
+    assert.equal(costs.bar, 200 + 600 + 50)
+    assert.equal(costs.kuhinja, 500 + 300 + 100 + 700)
+    assert.equal(costs.prevozi, 700)
+    assert.equal(costs.izleti, 900)
+    assert.equal(costs.wellness, 80 + 40)
+    assert.equal(costs.ostalo, 15 + 5)
+    assert.equal(costs.reprezentanca, 30)
+    assert.equal(costs.vzdrzevanje, 20)
+    assert.equal(costs.najemnina, 1000)
+    assert.equal(costs.racunovodstvo, 75)
+    assert.equal(costs.prevozniki, 120)
+    assert.equal(costs.nosaci, 10)
+    assert.equal(costs.tuctuc, 8)
+    assert.equal(costs.amortizacija, 200)
+    assert.equal(costs.vodstvo, 648)
+    assert.equal(costs.reklama, 12.45)
+    assert.equal(sumCostTypes(costs), 8123.45)
+    assert.equal(sumCostTypes(costs), row.stroski)
+  })
+
+  it('moves a one-cent rounding gap onto the largest cost type', () => {
+    const row = monthFinanceFromMonthly(11, {
+      ...novemberCard,
+      costs: { ...novemberCard.costs, total: 8123.46 },
+    })
+    assert.equal(sumCostTypes(row.stroskiPoVrsti), 8123.46)
+    assert.equal(row.stroskiPoVrsti.nocitve, 1810.01)
+  })
 })
 
 describe('sumFinanceMonths', () => {
@@ -55,10 +122,12 @@ describe('sumFinanceMonths', () => {
       izleti: 0,
       wellness: 0,
       ostalo: 0,
+      stroskiPoVrsti: { ...emptyCostTypes(), nocitve: 0.1 },
     }))
     const total = sumFinanceMonths(rows)
     assert.equal(total.prihodki, 224352.81)
     assert.equal(total.stroski, 1.2)
-    assert.equal(total.prihodki, Math.round(prihodki.reduce((sum, value) => sum + Math.round(value * 100), 0)) / 100)
+    assert.equal(total.stroskiPoVrsti.nocitve, 1.2)
+    assert.equal(sumCostTypes(total.stroskiPoVrsti), 1.2)
   })
 })
