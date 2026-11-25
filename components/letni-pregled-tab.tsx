@@ -238,7 +238,7 @@ export default function LetniPregledTab({
                     <tr key={invoice.reservationId} className="border-t border-white/5" data-testid={`letni-racun-${invoice.reservationId}`}>
                       <td className="px-4 py-2.5 sm:px-5 text-white">{invoice.guestName}</td>
                       <td className="px-3 py-2.5 text-white/75 whitespace-nowrap">{invoice.reference}</td>
-                      <td className="px-3 py-2.5 text-white/75 whitespace-nowrap">{formatIssuedDate(invoice.issuedAt)}</td>
+                      <td className="px-3 py-2.5 text-white/75 whitespace-nowrap">{formatIssuedDate(invoice.issuedAt)}{invoice.nights ? ` · ${invoice.nights} noči` : ''}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-[#7fa8b8] whitespace-nowrap" data-value={invoice.amountEur}>{formatEur(invoice.amountEur)}</td>
                       <td className="px-4 py-2.5 sm:px-5 text-right whitespace-nowrap">
                         {invoice.lodgingShare ? (

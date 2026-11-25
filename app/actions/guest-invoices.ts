@@ -2,7 +2,7 @@
 
 import { db } from '@/lib/db'
 import { deliveryNoteItems, deliveryNotes, invoiceDiscounts, orderItems, reservations } from '@/lib/db/schema'
-import { and, gte, inArray, isNotNull, lt } from 'drizzle-orm'
+import { and, eq, gte, inArray, isNotNull, lt } from 'drizzle-orm'
 import { getExchangeRate } from '@/app/actions/komba'
 import {
   guestInvoiceReference,
@@ -11,7 +11,7 @@ import {
   type IssuedInvoiceBarItem,
   type IssuedInvoiceOrder,
 } from '@/lib/issued-invoices'
-import { lodgingShareLines } from '@/lib/named-stay-income'
+import { HANNAH_STAY_ID, hannahOnInvoiceList, hiddenCheckoutInvoice, lodgingShareLines } from '@/lib/named-stay-income'
 
 export type IssuedGuestInvoice = {
   reservationId: string
@@ -22,6 +22,7 @@ export type IssuedGuestInvoice = {
   // A lodging share is the part of a stay that belongs to this month.
   // It is not a second issued invoice, so it has no guest-card link.
   lodgingShare?: boolean
+  nights?: number
 }
 
 type Stay = {
@@ -58,6 +59,25 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     lt(reservations.checkedOutAt, end),
   ))
 
+  const hannah = hannahOnInvoiceList(month)
+  const listed = issued.filter((row) => !hiddenCheckoutInvoice(row.id, month))
+  if (hannah && !listed.some((row) => row.id === HANNAH_STAY_ID)) {
+    const [card] = await db.select({
+      id: reservations.id,
+      guestName: reservations.guestName,
+      checkedOutAt: reservations.checkedOutAt,
+      totalAmount: reservations.totalAmount,
+      currency: reservations.currency,
+      bookingSource: reservations.bookingSource,
+      mealPlan: reservations.mealPlan,
+      mealPlanPaymentStatus: reservations.mealPlanPaymentStatus,
+      groupId: reservations.groupId,
+      isMainReservation: reservations.isMainReservation,
+      sharedInvoice: reservations.sharedInvoice,
+    }).from(reservations).where(eq(reservations.id, HANNAH_STAY_ID))
+    if (card) listed.push(card)
+  }
+
   const shares: IssuedGuestInvoice[] = lodgingShareLines(month).map((line) => ({
     reservationId: line.id,
     guestName: line.guestName,
@@ -67,9 +87,9 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     lodgingShare: true,
   }))
 
-  if (issued.length === 0) return shares
+  if (listed.length === 0) return shares
 
-  const groupIds = [...new Set(issued.map((row) => row.groupId).filter((id): id is string => Boolean(id)))]
+  const groupIds = [...new Set(listed.map((row) => row.groupId).filter((id): id is string => Boolean(id)))]
   const grouped = groupIds.length
     ? await db.select({
       id: reservations.id,
@@ -96,7 +116,7 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
 
   const sourceIds = new Set<string>()
   const sourcesFor = new Map<string, string[]>()
-  for (const row of issued) {
+  for (const row of listed) {
     const group = row.groupId ? (byGroup.get(row.groupId) || []) : []
     const main = group.find((member) => member.isMainReservation)
     const shared = Boolean(row.sharedInvoice || main?.sharedInvoice)
@@ -123,7 +143,7 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     db.select({
       reservationId: invoiceDiscounts.reservationId,
       amountAr: invoiceDiscounts.amountAr,
-    }).from(invoiceDiscounts).where(inArray(invoiceDiscounts.reservationId, issued.map((row) => row.id))),
+    }).from(invoiceDiscounts).where(inArray(invoiceDiscounts.reservationId, listed.map((row) => row.id))),
     getExchangeRate(),
   ])
 
@@ -160,15 +180,19 @@ export async function getIssuedGuestInvoices(year: number, month: number): Promi
     discountByStay.set(discount.reservationId, (discountByStay.get(discount.reservationId) || 0) + Number(discount.amountAr || 0))
   }
 
-  const invoices = issued
+  const invoices = listed
     .map((row) => {
       const idsForInvoice = sourcesFor.get(row.id) || [row.id]
-      const issuedAt = row.checkedOutAt instanceof Date ? row.checkedOutAt.toISOString() : String(row.checkedOutAt)
+      const onAprilList = row.id === HANNAH_STAY_ID ? hannahOnInvoiceList(month) : null
+      const issuedAt = onAprilList
+        ? `${onAprilList.night}T12:00:00.000Z`
+        : row.checkedOutAt instanceof Date ? row.checkedOutAt.toISOString() : String(row.checkedOutAt)
       return {
         reservationId: row.id,
         guestName: row.guestName,
         reference: guestInvoiceReference(row.id),
         issuedAt,
+        nights: onAprilList?.nights,
         amountEur: issuedInvoiceAmountEur({
           totalAmount: Number(row.totalAmount) || 0,
           currency: row.currency,

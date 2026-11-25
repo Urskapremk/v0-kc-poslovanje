@@ -3,6 +3,7 @@
 
 export const MAYALEN_STAY_ID = 'res-1788098277691-f69d9433c39eb8'
 export const BENDA_STAY_ID = 'res-1788111600000-benda7'
+export const HANNAH_STAY_ID = 'res-1788110400000-hanchab74'
 
 export type NamedLodging = { eur: number; nights: number }
 
@@ -128,6 +129,17 @@ export function ninaInvoiceIncome(year: number, month: number): { hrana: number;
     hrana: centsInMonth(NINA_HRANA_CENTS, year, month) / 100,
     pijaca: centsInMonth(NINA_PIJACA_CENTS, year, month) / 100,
   }
+}
+
+// Hannah checked out on 1 May. That is not a night. Her three nights are 28–30 April,
+// so the invoice list shows KC-2026-CHAB74 in April and not in May.
+export function hannahOnInvoiceList(month: number): { nights: number; night: string } | null {
+  if (month === 4) return { nights: 3, night: '2026-04-30' }
+  return null
+}
+
+export function hiddenCheckoutInvoice(reservationId: string, month: number): boolean {
+  return reservationId === HANNAH_STAY_ID && month !== 4
 }
 
 export function lodgingBesideTheNightList(reservationIds: string[], month: number): NamedLodging {

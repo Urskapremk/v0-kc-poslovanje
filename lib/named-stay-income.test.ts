@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { bendaTransferInMonth, lodgingBesideTheNightList, lodgingShareLines, namedLodgingForMonth, ninaInvoiceIncome, BENDA_STAY_ID, MAYALEN_STAY_ID } from './named-stay-income'
+import { bendaTransferInMonth, hannahOnInvoiceList, hiddenCheckoutInvoice, lodgingBesideTheNightList, lodgingShareLines, namedLodgingForMonth, ninaInvoiceIncome, BENDA_STAY_ID, HANNAH_STAY_ID, MAYALEN_STAY_ID } from './named-stay-income'
 
 describe('Mayalen lodging', () => {
   it('puts all 1.433,18 in March and none in April', () => {
@@ -34,6 +34,14 @@ describe('Benda Nina and Mark', () => {
 
   it('leaves another guest on the generic split', () => {
     assert.equal(namedLodgingForMonth('res-someone-else', 4), null)
+  })
+
+  it('shows Hannah on the April invoice list and hides the May checkout row', () => {
+    assert.deepEqual(hannahOnInvoiceList(4), { nights: 3, night: '2026-04-30' })
+    assert.equal(hannahOnInvoiceList(5), null)
+    assert.equal(hiddenCheckoutInvoice(HANNAH_STAY_ID, 5), true)
+    assert.equal(hiddenCheckoutInvoice(HANNAH_STAY_ID, 4), false)
+    assert.equal(hiddenCheckoutInvoice('res-someone-else', 5), false)
   })
 
   it('puts pasted meals and drinks in the month of the date', () => {
