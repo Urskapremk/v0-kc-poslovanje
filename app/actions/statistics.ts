@@ -1462,6 +1462,40 @@ export async function getMonthlyStatistics(year: number, month: number) {
   const ostaloOrderItems = monthOrderItems.filter(o => !!o.name && ostaloProductByName.has(o.name) && !o.isFree)
   const ostaloOrderRevenue = ostaloOrderItems.reduce((sum, o) => sum + orderItemRevenueAr(o), 0) / rate
   const ostaloRevenue = ostaloDeliveryRevenue + ostaloOrderRevenue
+  // Same euros as ostaloRevenue, split by the category already stored on the item.
+  // Shop products use the Trgovina categories; laundry is Pranje; the rest stays Ostalo.
+  const shopCategories = new Set(['Trgovina', 'Izdelek', 'Izdelki', 'Spominki', 'Spominek', 'Shop'])
+  const productCategoryByName = new Map<string, string>()
+  allProducts.forEach(p => productCategoryByName.set(p.name, p.category || ''))
+  const ostaloKind = (source: 'order' | 'delivery', name?: string | null, category?: string | null) => {
+    const productCategory = name ? (productCategoryByName.get(name) || '') : ''
+    const storedCategory = category || productCategory
+    if ((name || '').toLowerCase().includes('pranje')) return 'laundry' as const
+    if (shopCategories.has(storedCategory) || shopCategories.has(productCategory)) return 'shop' as const
+    // Reception lines matched to an ostalo product are shop sales (Trgovina/Razno).
+    if (source === 'order') return 'shop' as const
+    return 'other' as const
+  }
+  let shopAr = 0
+  let laundryAr = 0
+  let otherOstaloAr = 0
+  for (const item of ostaloItems) {
+    const amount = item.totalAr || 0
+    const kind = ostaloKind('delivery', item.productName, item.category)
+    if (kind === 'shop') shopAr += amount
+    else if (kind === 'laundry') laundryAr += amount
+    else otherOstaloAr += amount
+  }
+  for (const item of ostaloOrderItems) {
+    const amount = orderItemRevenueAr(item)
+    const kind = ostaloKind('order', item.name, item.category)
+    if (kind === 'shop') shopAr += amount
+    else if (kind === 'laundry') laundryAr += amount
+    else otherOstaloAr += amount
+  }
+  const shopRevenue = shopAr / rate
+  const laundryRevenue = laundryAr / rate
+  const ostaloOtherRevenue = otherOstaloAr / rate
   
   const barTotal = pijacaRevenue + barPrehranaRevenue
   
@@ -2390,6 +2424,9 @@ export async function getMonthlyStatistics(year: number, month: number) {
       mealPlan: Math.round(mealPlanRevenue * 100) / 100,
       wellness: Math.round(wellnessRevenue * 100) / 100,
       ostalo: Math.round(ostaloRevenue * 100) / 100,
+      shop: Math.round(shopRevenue * 100) / 100,
+      laundry: Math.round(laundryRevenue * 100) / 100,
+      ostaloOther: Math.round(ostaloOtherRevenue * 100) / 100,
       total: Math.round(totalRevenue * 100) / 100
     },
     costs: {

@@ -12,6 +12,9 @@ export type MonthlyFinanceInput = {
     mealPlan: number
     wellness: number
     ostalo: number
+    shop?: number
+    laundry?: number
+    ostaloOther?: number
     total: number
   }
   costs: {
@@ -75,6 +78,23 @@ export const COST_TYPES = [
   { key: 'vodstvo', label: 'Vodstvo', parallel: false },
 ] as const
 
+export const INCOME_TYPES = [
+  { key: 'nocitve', label: 'Nočitve' },
+  { key: 'hrana', label: 'Hrana' },
+  { key: 'predplacilo', label: 'Predplačilo' },
+  { key: 'pijaca', label: 'Pijača' },
+  { key: 'izleti', label: 'Izleti' },
+  { key: 'transferji', label: 'Transferji' },
+  { key: 'masaze', label: 'Masaže' },
+  { key: 'izdelki', label: 'Izdelki' },
+  { key: 'pranje', label: 'Pranje' },
+  { key: 'ostalo', label: 'Ostalo' },
+] as const
+
+export type IncomeTypeKey = (typeof INCOME_TYPES)[number]['key']
+
+export type IncomeTypeAmounts = Record<IncomeTypeKey, number>
+
 export type CostTypeKey = (typeof COST_TYPES)[number]['key']
 
 export type CostTypeAmounts = Record<CostTypeKey, number>
@@ -91,6 +111,7 @@ export type MonthFinanceSummary = {
   izleti: number
   wellness: number
   ostalo: number
+  prihodkiPoVrsti: IncomeTypeAmounts
   stroskiPoVrsti: CostTypeAmounts
 }
 
@@ -110,6 +131,7 @@ export const FINANCE_SUM_KEYS = [
 export type FinanceSumKey = (typeof FINANCE_SUM_KEYS)[number]
 
 export type FinanceTotals = Record<FinanceSumKey, number> & {
+  prihodkiPoVrsti: IncomeTypeAmounts
   stroskiPoVrsti: CostTypeAmounts
 }
 
@@ -119,6 +141,29 @@ function cents(value: number | undefined) {
 
 function fromCents(value: number) {
   return value / 100
+}
+
+export function emptyIncomeTypes(): IncomeTypeAmounts {
+  return Object.fromEntries(INCOME_TYPES.map((type) => [type.key, 0])) as IncomeTypeAmounts
+}
+
+export function sumIncomeTypes(parts: IncomeTypeAmounts) {
+  return fromCents(INCOME_TYPES.reduce((sum, type) => sum + cents(parts[type.key]), 0))
+}
+
+function fitIncomeTypes(parts: Record<IncomeTypeKey, number>, targetCents: number): IncomeTypeAmounts {
+  const drift = targetCents - INCOME_TYPES.reduce((sum, type) => sum + parts[type.key], 0)
+  if (drift !== 0) {
+    const host = INCOME_TYPES.reduce((best, type) => {
+      const bestAbs = Math.abs(parts[best])
+      const nextAbs = Math.abs(parts[type.key])
+      if (nextAbs > bestAbs) return type.key
+      if (nextAbs === bestAbs && type.key === 'nocitve') return type.key
+      return best
+    }, 'nocitve' as IncomeTypeKey)
+    parts[host] += drift
+  }
+  return Object.fromEntries(INCOME_TYPES.map((type) => [type.key, fromCents(parts[type.key])])) as IncomeTypeAmounts
 }
 
 export function emptyCostTypes(): CostTypeAmounts {
@@ -145,6 +190,20 @@ function fitCostTypes(parts: Record<CostTypeKey, number>, targetCents: number): 
 }
 
 export function monthFinanceFromMonthly(month: number, stats: MonthlyFinanceInput): MonthFinanceSummary {
+  const revenue = stats.revenue
+  const hasOstaloSplit = revenue.shop != null || revenue.laundry != null || revenue.ostaloOther != null
+  const income: Record<IncomeTypeKey, number> = {
+    nocitve: cents(revenue.accommodation),
+    hrana: cents(revenue.bar.prehrana),
+    predplacilo: cents(revenue.mealPlan),
+    pijaca: cents(revenue.bar.pijaca),
+    izleti: cents(revenue.excursions),
+    transferji: cents(revenue.transfers),
+    masaze: cents(revenue.wellness),
+    izdelki: hasOstaloSplit ? cents(revenue.shop) : 0,
+    pranje: hasOstaloSplit ? cents(revenue.laundry) : 0,
+    ostalo: hasOstaloSplit ? cents(revenue.ostaloOther) : cents(revenue.ostalo),
+  }
   const costs = stats.costs
   const salary = stats.salaryBreakdown || {}
   const parts: Record<CostTypeKey, number> = {
@@ -181,18 +240,22 @@ export function monthFinanceFromMonthly(month: number, stats: MonthlyFinanceInpu
     izleti: fromCents(cents(stats.revenue.excursions)),
     wellness: fromCents(cents(stats.revenue.wellness)),
     ostalo: fromCents(cents(stats.revenue.ostalo)),
+    prihodkiPoVrsti: fitIncomeTypes(income, cents(revenue.total)),
     stroskiPoVrsti: fitCostTypes(parts, cents(costs.total)),
   }
 }
 
 export function sumFinanceMonths(rows: MonthFinanceSummary[]): FinanceTotals {
   const acc = Object.fromEntries(FINANCE_SUM_KEYS.map((key) => [key, 0])) as Record<FinanceSumKey, number>
+  const income = emptyIncomeTypes()
   const costs = emptyCostTypes()
   for (const row of rows) {
     for (const key of FINANCE_SUM_KEYS) acc[key] += cents(row[key])
+    for (const type of INCOME_TYPES) income[type.key] += cents(row.prihodkiPoVrsti[type.key])
     for (const type of COST_TYPES) costs[type.key] += cents(row.stroskiPoVrsti[type.key])
   }
   for (const key of FINANCE_SUM_KEYS) acc[key] = fromCents(acc[key])
+  for (const type of INCOME_TYPES) income[type.key] = fromCents(income[type.key])
   for (const type of COST_TYPES) costs[type.key] = fromCents(costs[type.key])
-  return { ...acc, stroskiPoVrsti: costs }
+  return { ...acc, prihodkiPoVrsti: income, stroskiPoVrsti: costs }
 }

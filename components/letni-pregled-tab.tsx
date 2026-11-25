@@ -4,25 +4,15 @@ import { useEffect, useState } from 'react'
 import { getMonthlyFinanceSummary } from '@/app/actions/statistics'
 import {
   COST_TYPES,
+  INCOME_TYPES,
   sumCostTypes,
   sumFinanceMonths,
-  type FinanceSumKey,
   type MonthFinanceSummary,
 } from '@/lib/letni-pregled'
 
 const MONTHS = [
   'Januar', 'Februar', 'Marec', 'April', 'Maj', 'Junij',
   'Julij', 'Avgust', 'September', 'Oktober', 'November', 'December',
-]
-
-const CATEGORIES: { key: FinanceSumKey; label: string }[] = [
-  { key: 'nocitve', label: 'Nočitve' },
-  { key: 'bar', label: 'Bar' },
-  { key: 'kuhinja', label: 'Kuhinja' },
-  { key: 'prevozi', label: 'Prevozi' },
-  { key: 'izleti', label: 'Izleti' },
-  { key: 'wellness', label: 'Wellness' },
-  { key: 'ostalo', label: 'Ostalo' },
 ]
 
 function formatEur(value: number) {
@@ -85,6 +75,9 @@ export default function LetniPregledTab({
     .sort((a, b) => a.month - b.month)
     .map((row) => (row.month === pinnedMonth ? { ...pinned, month: pinnedMonth } : row))
   const totals = shown && shown.length === 12 ? sumFinanceMonths(shown) : null
+  const incomeColumns = totals
+    ? INCOME_TYPES.filter((type) => totals.prihodkiPoVrsti[type.key] !== 0)
+    : []
   const costColumns = totals
     ? COST_TYPES.filter((type) => type.parallel || totals.stroskiPoVrsti[type.key] !== 0)
     : []
@@ -161,11 +154,13 @@ export default function LetniPregledTab({
                   <th className="px-3 py-3 font-medium text-right" rowSpan={2}>Prihodki</th>
                   <th className="px-3 py-3 font-medium text-right" rowSpan={2}>Stroški</th>
                   <th className="px-3 py-3 font-medium text-right" rowSpan={2}>Dobiček</th>
-                  <th className="px-3 pt-3 pb-1 font-medium text-center" colSpan={CATEGORIES.length}>Prihodki po kategorijah</th>
+                  {incomeColumns.length > 0 && (
+                    <th className="px-3 pt-3 pb-1 font-medium text-center" colSpan={incomeColumns.length}>Prihodki po vrstah</th>
+                  )}
                 </tr>
                 <tr className="text-[11px] uppercase tracking-wider text-white/40">
-                  {CATEGORIES.map((category) => (
-                    <th key={category.key} className="px-3 pb-3 font-medium text-right">{category.label}</th>
+                  {incomeColumns.map((type) => (
+                    <th key={type.key} className="px-3 pb-3 font-medium text-right">{type.label}</th>
                   ))}
                 </tr>
               </thead>
@@ -184,9 +179,14 @@ export default function LetniPregledTab({
                     <td className={`px-3 py-2.5 text-right tabular-nums whitespace-nowrap ${profitClass(row.dobicek)}`}>
                       {formatEur(row.dobicek)}
                     </td>
-                    {CATEGORIES.map((category) => (
-                      <td key={category.key} className="px-3 py-2.5 text-right tabular-nums text-white/75 whitespace-nowrap">
-                        {formatEur(row[category.key])}
+                    {incomeColumns.map((type) => (
+                      <td
+                        key={type.key}
+                        className="px-3 py-2.5 text-right tabular-nums text-white/75 whitespace-nowrap"
+                        data-testid={`letni-mesec-${row.month}-prihodek-${type.key}`}
+                        data-value={row.prihodkiPoVrsti[type.key]}
+                      >
+                        {formatEur(row.prihodkiPoVrsti[type.key])}
                       </td>
                     ))}
                   </tr>
@@ -198,9 +198,14 @@ export default function LetniPregledTab({
                   <td className="px-3 py-3 text-right tabular-nums text-[#7fa8b8] whitespace-nowrap" data-testid="letni-skupaj-prihodki-vrstica" data-value={totals.prihodki}>{formatEur(totals.prihodki)}</td>
                   <td className="px-3 py-3 text-right tabular-nums text-[#c8846b] whitespace-nowrap" data-testid="letni-skupaj-stroski-vrstica" data-value={totals.stroski}>{formatEur(totals.stroski)}</td>
                   <td className={`px-3 py-3 text-right tabular-nums whitespace-nowrap ${profitClass(totals.dobicek)}`}>{formatEur(totals.dobicek)}</td>
-                  {CATEGORIES.map((category) => (
-                    <td key={category.key} className="px-3 py-3 text-right tabular-nums text-white whitespace-nowrap">
-                      {formatEur(totals[category.key])}
+                  {incomeColumns.map((type) => (
+                    <td
+                      key={type.key}
+                      className="px-3 py-3 text-right tabular-nums text-white whitespace-nowrap"
+                      data-testid={`letni-skupaj-prihodek-${type.key}`}
+                      data-value={totals.prihodkiPoVrsti[type.key]}
+                    >
+                      {formatEur(totals.prihodkiPoVrsti[type.key])}
                     </td>
                   ))}
                 </tr>

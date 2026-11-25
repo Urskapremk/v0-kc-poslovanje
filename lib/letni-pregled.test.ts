@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { emptyCostTypes, monthFinanceFromMonthly, sumCostTypes, sumFinanceMonths, type MonthFinanceSummary, type MonthlyFinanceInput } from './letni-pregled'
+import { emptyCostTypes, emptyIncomeTypes, monthFinanceFromMonthly, sumCostTypes, sumIncomeTypes, sumFinanceMonths, type MonthFinanceSummary, type MonthlyFinanceInput } from './letni-pregled'
 
 const novemberCard: MonthlyFinanceInput = {
   revenue: {
@@ -73,6 +73,43 @@ describe('monthFinanceFromMonthly', () => {
     assert.notEqual(row.kuhinja, novemberCard.revenue.bar.pijaca + novemberCard.revenue.bar.prehrana)
   })
 
+  it('splits income into the stored categories and keeps their sum equal to prihodki', () => {
+    const row = monthFinanceFromMonthly(11, novemberCard)
+    const income = row.prihodkiPoVrsti
+    assert.equal(income.nocitve, 16678.52)
+    assert.equal(income.hrana, 2000)
+    assert.equal(income.predplacilo, 1878.5)
+    assert.equal(income.pijaca, 671.25)
+    assert.equal(income.izleti, 1382.3)
+    assert.equal(income.transferji, 1195)
+    assert.equal(income.masaze, 385)
+    assert.equal(income.izdelki, 0)
+    assert.equal(income.pranje, 0)
+    assert.equal(income.ostalo, 20.83)
+    assert.equal(sumIncomeTypes(income), 24211.4)
+    assert.equal(sumIncomeTypes(income), row.prihodki)
+  })
+
+  it('keeps shop products and laundry out of one ostalo column', () => {
+    const row = monthFinanceFromMonthly(11, {
+      ...novemberCard,
+      revenue: { ...novemberCard.revenue, shop: 12.5, laundry: 8.33, ostaloOther: 0 },
+    })
+    assert.equal(row.prihodkiPoVrsti.izdelki, 12.5)
+    assert.equal(row.prihodkiPoVrsti.pranje, 8.33)
+    assert.equal(row.prihodkiPoVrsti.ostalo, 0)
+    assert.equal(sumIncomeTypes(row.prihodkiPoVrsti), row.prihodki)
+  })
+
+  it('moves a one-cent income rounding gap onto the largest category', () => {
+    const row = monthFinanceFromMonthly(11, {
+      ...novemberCard,
+      revenue: { ...novemberCard.revenue, total: 24211.41 },
+    })
+    assert.equal(sumIncomeTypes(row.prihodkiPoVrsti), 24211.41)
+    assert.equal(row.prihodkiPoVrsti.nocitve, 16678.53)
+  })
+
   it('splits costs into the monthly types and keeps their sum equal to stroški', () => {
     const row = monthFinanceFromMonthly(11, novemberCard)
     const costs = row.stroskiPoVrsti
@@ -122,11 +159,14 @@ describe('sumFinanceMonths', () => {
       izleti: 0,
       wellness: 0,
       ostalo: 0,
+      prihodkiPoVrsti: { ...emptyIncomeTypes(), nocitve: 0.1 },
       stroskiPoVrsti: { ...emptyCostTypes(), nocitve: 0.1 },
     }))
     const total = sumFinanceMonths(rows)
     assert.equal(total.prihodki, 224352.81)
     assert.equal(total.stroski, 1.2)
+    assert.equal(total.prihodkiPoVrsti.nocitve, 1.2)
+    assert.equal(sumIncomeTypes(total.prihodkiPoVrsti), 1.2)
     assert.equal(total.stroskiPoVrsti.nocitve, 1.2)
     assert.equal(sumCostTypes(total.stroskiPoVrsti), 1.2)
   })
