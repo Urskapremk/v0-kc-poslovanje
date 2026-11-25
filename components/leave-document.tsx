@@ -14,7 +14,6 @@ import {
   setLeaveSignedDocument,
   setLeaveDoctorCertificate,
   setLeaveAdvancePay,
-  clearPastedLeaveDocument,
 } from '@/app/actions/leave'
 import {
   LeaveDepartment,
@@ -215,11 +214,6 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     if (file) await handleUploadCertificate(leaveId, file)
   }
 
-  async function handleClearPasted(leaveId: string, kind: 'signed' | 'doctor') {
-    await clearPastedLeaveDocument(leaveId, kind)
-    await refreshLeaves()
-  }
-
   useEffect(() => {
     function onPaste(event: ClipboardEvent) {
       const el = event.target as HTMLElement | null
@@ -241,36 +235,23 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
     return () => window.removeEventListener('paste', onPaste)
   }, [])
 
-  function pasteControl(leaveId: string, kind: 'signed' | 'doctor', path?: string | null) {
+  function pasteControl(leaveId: string, kind: 'signed' | 'doctor') {
     const busy = uploadingId === leaveId
-    const pasted = Boolean(path?.includes('-posnetek-'))
     return (
-      <>
-        <button
-          type="button"
-          data-leave-paste={leaveId}
-          data-leave-kind={kind}
-          title="Prilepi posnetek zaslona (Ctrl+V)"
-          disabled={busy}
-          onFocus={() => { pasteTarget.current = { id: leaveId, kind } }}
-          onBlur={() => { pasteTarget.current = null }}
-          onClick={() => void (kind === 'doctor' ? handlePasteCertificate(leaveId) : handlePasteSigned(leaveId))}
-          className="flex items-center gap-1 rounded-lg bg-[#8fae92]/15 px-3 py-2 text-xs text-[#8fae92] hover:bg-[#8fae92]/25 disabled:pointer-events-none disabled:opacity-60"
-        >
-          <ClipboardPaste className="h-3.5 w-3.5" />
-          {busy ? 'Nalagam…' : 'Prilepi'}
-        </button>
-        {pasted ? (
-          <button
-            type="button"
-            data-leave-clear={leaveId}
-            onClick={() => void handleClearPasted(leaveId, kind)}
-            className="flex items-center gap-1 rounded-lg bg-white/5 px-3 py-2 text-xs text-white/60 hover:bg-white/10"
-          >
-            Odstrani
-          </button>
-        ) : null}
-      </>
+      <button
+        type="button"
+        data-leave-paste={leaveId}
+        data-leave-kind={kind}
+        title="Prilepi posnetek zaslona (Ctrl+V)"
+        disabled={busy}
+        onFocus={() => { pasteTarget.current = { id: leaveId, kind } }}
+        onBlur={() => { pasteTarget.current = null }}
+        onClick={() => void (kind === 'doctor' ? handlePasteCertificate(leaveId) : handlePasteSigned(leaveId))}
+        className="flex items-center gap-1 rounded-lg bg-[#8fae92]/15 px-3 py-2 text-xs text-[#8fae92] hover:bg-[#8fae92]/25 disabled:pointer-events-none disabled:opacity-60"
+      >
+        <ClipboardPaste className="h-3.5 w-3.5" />
+        {busy ? 'Nalagam…' : 'Prilepi'}
+      </button>
     )
   }
 
@@ -839,7 +820,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                         }}
                       />
                     </label>
-                    {pasteControl(l.id, 'doctor', l.doctorCertificatePath)}
+                    {pasteControl(l.id, 'doctor')}
                   </>
                 ) : (
                   <>
@@ -877,7 +858,7 @@ export default function LeaveDocument({ department }: { department: LeaveDepartm
                         }}
                       />
                     </label>
-                    {pasteControl(l.id, 'signed', l.signedDocumentPath)}
+                    {pasteControl(l.id, 'signed')}
                   </>
                 )}
                 <button

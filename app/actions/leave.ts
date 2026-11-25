@@ -193,22 +193,6 @@ export async function setLeaveSignedDocument(id: string, pathname: string) {
   revalidatePath('/statistika')
 }
 
-// Clears only a screenshot pasted onto this row (filename posnetek-). Dates, quota and signedAt stay.
-export async function clearPastedLeaveDocument(id: string, kind: 'signed' | 'doctor') {
-  if (kind === 'doctor') {
-    await db.execute(
-      sql`UPDATE leave_requests SET "doctorCertificatePath" = NULL
-          WHERE id = ${id} AND "doctorCertificatePath" LIKE '%-posnetek-%'`
-    )
-  } else {
-    await db.execute(
-      sql`UPDATE leave_requests SET "signedDocumentPath" = NULL
-          WHERE id = ${id} AND "signedDocumentPath" LIKE '%-posnetek-%'`
-    )
-  }
-  revalidatePath('/statistika')
-}
-
 // Potrdilo zdravnika. Ne nastavi podpisa in ne šteje kot redni dopust.
 export async function setLeaveDoctorCertificate(id: string, pathname: string) {
   await ensureLeaveColumns()
