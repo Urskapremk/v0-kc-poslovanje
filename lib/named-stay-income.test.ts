@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { bendaTransferInMonth, lodgingShareLines, namedLodgingForMonth, BENDA_STAY_ID, MAYALEN_STAY_ID } from './named-stay-income'
+import { bendaTransferInMonth, lodgingBesideTheNightList, lodgingShareLines, namedLodgingForMonth, BENDA_STAY_ID, MAYALEN_STAY_ID } from './named-stay-income'
 
 describe('Mayalen lodging', () => {
   it('puts all 1.433,18 in March and none in April', () => {
@@ -9,6 +9,9 @@ describe('Mayalen lodging', () => {
     assert.equal(lodgingShareLines(3)[0].guestName, 'Mayalen Darrigade Sallaberry')
     assert.equal(lodgingShareLines(3)[0].amountEur, 1433.18)
     assert.equal(lodgingShareLines(4).some((line) => line.guestName.includes('Mayalen')), false)
+    assert.deepEqual(lodgingBesideTheNightList([], 3), { eur: 1433.18, nights: 4 })
+    assert.deepEqual(lodgingBesideTheNightList([MAYALEN_STAY_ID], 3), { eur: 0, nights: 0 })
+    assert.deepEqual(lodgingBesideTheNightList([], 4), { eur: 0, nights: 0 })
   })
 })
 

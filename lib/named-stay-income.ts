@@ -69,6 +69,16 @@ export function lodgingShareLines(month: number): LodgingShareLine[] {
   return []
 }
 
+// Mayalen's card does not come through the night list, so the loop never
+// adds her 1.433,18. Add it once, and only in March. If the card is already
+// in that list, the loop has added it and this stays at zero.
+export function lodgingBesideTheNightList(reservationIds: string[], month: number): NamedLodging {
+  if (month === 3 && !reservationIds.includes(MAYALEN_STAY_ID)) {
+    return { eur: 1433.18, nights: 4 }
+  }
+  return { eur: 0, nights: 0 }
+}
+
 export function bendaTransferInMonth(pickupDate: string | null, type: string | null, year: number, month: number): boolean {
   const fallback = type === 'departure' ? '2026-05-05' : '2026-04-21'
   const date = (pickupDate || fallback).slice(0, 10)

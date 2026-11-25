@@ -24,7 +24,7 @@ import {
 } from '@/lib/db/schema'
 import { eq, and, gte, lte, inArray, isNotNull, sql } from 'drizzle-orm'
 import { BENTRAL_INCOME_IDS, bentralIncomeForMonth } from '@/lib/bentral-income'
-import { BENDA_STAY_ID, bendaTransferInMonth, namedLodgingForMonth } from '@/lib/named-stay-income'
+import { BENDA_STAY_ID, bendaTransferInMonth, lodgingBesideTheNightList, namedLodgingForMonth } from '@/lib/named-stay-income'
 import { revalidatePath } from 'next/cache'
 import { parseCategories } from '@/lib/stroski-categories'
 import { monthFinanceFromMonthly, type MonthFinanceSummary } from '@/lib/letni-pregled'
@@ -1258,6 +1258,12 @@ export async function getMonthlyStatistics(year: number, month: number) {
     mealPlanPrepaidRevenue += mealMonth
     totalNightsInMonth += nightsInMonth
   }
+
+  // Mayalen's 1.433,18 is March lodging. Her card is outside the night list,
+  // so the loop above never sees it. This does not touch costs.
+  const beside = lodgingBesideTheNightList(reservationsWithNightsInMonth.map((r) => r.id), month)
+  accommodationRevenue += beside.eur
+  totalNightsInMonth += beside.nights
   
   // Agency/platform commissions - also proportional to nights in month
   let agencyCommissions = 0
