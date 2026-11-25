@@ -21,6 +21,7 @@ import { toEnglishItemName } from "@/lib/item-name";
 import { combinedRouteLabel, transferLineName } from "@/lib/combined-route";
 import { hideCompletedDepartureFromList } from "@/lib/hidden-departure";
 import { guestBillLineAmount } from "@/lib/guest-bill-amount";
+import { excursionLineParts, excursionLineTotalAr, matchExcursionLineBooking, parseExcursionEur, type ExcursionLinePartKey } from "@/lib/excursion-line-price";
 import { LineNoteControl } from "@/components/line-note-control";
 import { shownLineNote, type PendingLineNote } from "@/lib/line-note";
 import { capturePaymentListPlace, restorePaymentListPlace, type PaymentListPlace } from "@/lib/payment-list-place";
@@ -7449,6 +7450,9 @@ function GuestCard() {
     // Note text she just saved. Kept here so a refresh of the delivery note
     // cannot put the empty line back before the database value arrives.
     const [lineNotes, setLineNotes] = React.useState<Record<string, PendingLineNote & { asking: boolean }>>({});
+    const [priceEditId, setPriceEditId] = React.useState<string | null>(null);
+    const [priceDraft, setPriceDraft] = React.useState<Record<string, string>>({});
+    const [priceSaving, setPriceSaving] = React.useState(false);
     const lineNoteDrafts = React.useRef<Record<string, string>>({});
     const lineNoteEdit = React.useRef<Record<string, boolean>>({});
     const lineNoteError = React.useRef<Record<string, string>>({});
@@ -7478,6 +7482,8 @@ function GuestCard() {
       setSelProductBaseAr(0);
       setBalanceDueEur(null);
       setLineNotes({});
+      setPriceEditId(null);
+      setPriceDraft({});
       lineNoteDrafts.current = {};
       lineNoteEdit.current = {};
       lineNoteError.current = {};
@@ -7529,6 +7535,105 @@ function GuestCard() {
       staffName?: string;
       /** When the entry was made (bar or reception). Absent on synthesized transfers. */
       createdAt?: string;
+    }
+
+    function excursionPartsFor(item: { name?: string; category?: string; eventDate?: string | null; serviceDate?: string; priceAr?: number | null; paymentStatus?: string | null; refPriceAr?: number | null }) {
+      if (item.category !== "Izlet") return [];
+      const booking = matchExcursionLineBooking(
+        { name: item.name, eventDate: item.eventDate || item.serviceDate, priceAr: item.paymentStatus === "PAID" ? item.refPriceAr : item.priceAr },
+        (reservation.excursions || []).filter((exc) => exc.status !== "CANCELLED"),
+        (id) => dbExcursions.find((exc: { id: string; name: string }) => exc.id === id)?.name || "",
+        exchangeRate,
+      );
+      return booking ? excursionLineParts(booking) : [];
+    }
+
+    function openExcursionPrice(item: OrderItemWithDate) {
+      const parts = excursionPartsFor(item);
+      if (parts.length === 0) return;
+      setPriceEditId(item.id);
+      setPriceDraft(Object.fromEntries(parts.map((part) => [part.key, part.eur.toFixed(2)])));
+    }
+
+    function draftPriceAr(item: OrderItemWithDate) {
+      if (priceEditId !== item.id || item.isFree || item.paymentStatus === "PAID") return item.priceAr;
+      const parts = excursionPartsFor(item);
+      if (parts.length === 0) return item.priceAr;
+      const euros = parts.map((part) => {
+        const parsed = parseExcursionEur(priceDraft[part.key] ?? "");
+        return parsed == null ? part.eur : parsed;
+      });
+      const unchanged = parts.every((part, index) => Math.abs(euros[index] - part.eur) < 0.001);
+      if (unchanged) return item.priceAr;
+      return excursionLineTotalAr(euros, exchangeRate);
+    }
+
+    async function saveExcursionPrice(item: OrderItemWithDate) {
+      const parts = excursionPartsFor(item);
+      const amounts: Partial<Record<ExcursionLinePartKey, number>> = {};
+      for (const part of parts) {
+        const parsed = parseExcursionEur(priceDraft[part.key] ?? "");
+        if (parsed == null) {
+          showMsg("Vnesi veljaven znesek.");
+          return;
+        }
+        amounts[part.key] = parsed;
+      }
+      setPriceSaving(true);
+      try {
+        const { updateExcursionInvoiceParts } = await import("@/app/actions/komba");
+        const result = await updateExcursionInvoiceParts(item.id, amounts);
+        if (!result.ok) {
+          showMsg(result.error);
+          return;
+        }
+        setPriceEditId(null);
+        refresh();
+      } catch {
+        showMsg("Cene ni bilo mogoce shraniti.");
+      } finally {
+        setPriceSaving(false);
+      }
+    }
+
+    function excursionPriceFields(item: OrderItemWithDate, tone: "light" | "dark") {
+      if (priceEditId !== item.id) return null;
+      const parts = excursionPartsFor(item);
+      if (parts.length === 0) return null;
+      const light = tone === "light";
+      return (
+        <div className={`mt-3 flex flex-wrap items-center gap-2 border-t pt-3 ${light ? "border-[#0f2e3a]/10" : "border-white/10"}`} data-excursion-price-parts="">
+          {parts.map((part) => (
+            <label key={part.key} className="flex items-center gap-1.5">
+              <span className={`text-[11px] font-medium uppercase tracking-[0.1em] ${light ? "text-[#2b2622]/55" : "text-white/50"}`}>{part.label}</span>
+              <input
+                aria-label={part.label}
+                inputMode="decimal"
+                value={priceDraft[part.key] ?? ""}
+                onChange={(e) => setPriceDraft((prev) => ({ ...prev, [part.key]: e.target.value }))}
+                className={light
+                  ? "w-24 rounded-lg border border-[#0f2e3a]/20 bg-white/60 px-2.5 py-1 text-[13px] tabular-nums text-[#0f2e3a]"
+                  : "w-24 rounded-lg border border-white/15 bg-white/5 px-2.5 py-1 text-[13px] tabular-nums text-white"}
+              />
+              <span className={`text-[11px] ${light ? "text-[#2b2622]/55" : "text-white/45"}`}>EUR</span>
+            </label>
+          ))}
+          <span className={`text-[11px] font-semibold tabular-nums ${light ? "text-[#0f2e3a]" : "text-white/80"}`}>
+            Skupaj: {guestBillLineAmount("Izlet", item.paymentStatus === "PAID" || item.isFree ? excursionLineTotalAr(parts.map((part) => parseExcursionEur(priceDraft[part.key] ?? "") ?? part.eur), exchangeRate) : draftPriceAr(item), exchangeRate)}
+          </span>
+          <button
+            type="button"
+            disabled={priceSaving}
+            onClick={() => saveExcursionPrice(item)}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-[#4f7a54]/40 bg-[#4f7a54]/15 px-3 py-1 text-[11px] font-semibold text-[#4f7a54] transition-colors hover:bg-[#4f7a54]/25 disabled:opacity-50"
+          >Shrani</button>
+          <button
+            type="button"
+            onClick={() => setPriceEditId(null)}
+            className={`inline-flex cursor-pointer items-center gap-1 rounded-lg border px-3 py-1 text-[11px] font-medium transition-colors ${light ? "border-[#0f2e3a]/20 text-[#2b2622]/70 hover:bg-[#0f2e3a]/5" : "border-white/15 text-white/60 hover:bg-white/5"}`}
+          >Prekliči</button>
+        </div>
+      );
     }
     
     const itemsWithDates: OrderItemWithDate[] = [];
@@ -8072,7 +8177,7 @@ function GuestCard() {
                    <div className="flex items-center justify-between">
                     <div>
                       <p className="text-[#0f2e3a]">{toEnglishItemName(item.name)}</p>
-                      <p className="mt-1 text-xs text-[#2b2622]/60">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
+                      <p className="mt-1 text-xs text-[#2b2622]/60">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, draftPriceAr(item), exchangeRate)}</p>
                       {!item.isTransfer && (
                         <p className="mt-0.5 text-[10px] text-[#2b2622]/45">
                           {item.isBarItem ? `Served by: ${item.staffName || 'Bar'}` : `Added by: ${item.addedBy || 'Urska'}`}
@@ -8096,6 +8201,13 @@ function GuestCard() {
                             setDateEditVal(/^\d{4}-\d{2}-\d{2}$/.test(item.serviceDate || '') ? item.serviceDate! : '');
                           }}
                         ><Calendar className="h-2.5 w-2.5" />Popravi datum</button>
+                      )}
+                      {item.category === "Izlet" && !item.isBarItem && excursionPartsFor(item).length > 0 && (
+                        <button
+                          type="button"
+                          className="inline-flex min-w-[96px] cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-full border border-[#3f6b7d]/30 bg-[#3f6b7d]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#3f6b7d] transition-colors hover:bg-[#3f6b7d]/20"
+                          onClick={() => openExcursionPrice(item)}
+                        ><Pencil className="h-2.5 w-2.5" />Popravi ceno</button>
                       )}
                       {item.isBarItem && (
                         <button
@@ -8162,6 +8274,7 @@ function GuestCard() {
                        >Preklici</button>
                      </div>
                    )}
+                   {excursionPriceFields(item, "light")}
                    {lineNote(item, "light")}
                   </div>
                 ))}
@@ -8213,7 +8326,7 @@ function GuestCard() {
                         <div className="flex items-center justify-between">
                         <div>
                           <p className="text-white/60">{toEnglishItemName(item.name)}</p>
-                          <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, item.priceAr, exchangeRate)}</p>
+                          <p className="mt-1 text-xs text-white/30">{item.category} | Qty {item.qty} | {guestBillLineAmount(item.category, draftPriceAr(item), exchangeRate)}</p>
                           {!item.isTransfer && (
                             <p className="mt-0.5 text-[10px] text-white/30">
                               {item.isBarItem ? `Served by: ${item.staffName || 'Bar'}` : `Added by: ${item.addedBy || 'Urska'}`}
@@ -8241,9 +8354,13 @@ function GuestCard() {
                           {item.isFree && (
                             <button className="cursor-pointer text-white/50 transition-colors hover:text-white/80" onClick={() => handleToggleFree(item, false)}>Placljivo</button>
                           )}
+                          {item.category === "Izlet" && !item.isBarItem && excursionPartsFor(item).length > 0 && (
+                            <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-[#7fa8b8] transition-colors hover:text-[#7fa8b8]/70" onClick={() => openExcursionPrice(item)}><Pencil className="h-4 w-4" />Popravi ceno</button>
+                          )}
                           <button type="button" className="inline-flex cursor-pointer items-center gap-1 text-[#bc7d67] transition-colors hover:text-[#bc7d67]/70" onMouseDown={(e) => e.preventDefault()} onClick={(e) => removePaymentLine(e, item)}><Trash2 className="h-4 w-4" />Odstrani</button>
                         </div>
                         </div>
+                        {excursionPriceFields(item, "dark")}
                         {lineNote(item, "dark")}
                       </div>
                     ))}

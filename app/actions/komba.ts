@@ -9,6 +9,7 @@ import { revalidatePath } from 'next/cache'
 import { unpaySupplier } from './supplier-payment'
 import { unpayFanja } from './fanja-payment'
 import { dilipFullBoatAr, dilipOwesFullBoatPrice } from '@/lib/dilip-excursion'
+import { excursionLineParts, excursionLineTotalAr, matchExcursionLineBooking, type ExcursionLinePartKey } from '@/lib/excursion-line-price'
 import { readOverrideAr, supplierAmountAr } from '@/lib/supplier-override'
 import { ensureSupplierOverrideColumns } from '@/lib/supplier-override-columns'
 import { cashAriaryToEurAmount } from '@/lib/cash-payment'
@@ -2498,6 +2499,70 @@ export async function updateExcursionBooking(id: string, data: Partial<{
   await db.update(excursionBookings).set(updateData).where(eq(excursionBookings.id, id))
   if (previous) await syncExcursionInvoiceLine(id, previous)
   revalidatePath('/')
+}
+
+// Edit the parts of one excursion invoice line. The shared price list is not touched,
+// and no other guest's line is rewritten. Only parts this booking already uses are accepted.
+export async function updateExcursionInvoiceParts(
+  orderItemId: string,
+  amounts: Partial<Record<ExcursionLinePartKey, number>>,
+): Promise<{ ok: true; totalAr: number } | { ok: false; error: string }> {
+  const [item] = await db.select().from(orderItems).where(eq(orderItems.id, orderItemId)).limit(1)
+  if (!item || item.category !== 'Izlet') return { ok: false, error: 'To ni vrstica izleta.' }
+
+  const bookings = await db
+    .select()
+    .from(excursionBookings)
+    .where(eq(excursionBookings.reservationId, item.reservationId))
+  const names = await db.select({ id: excursions.id, name: excursions.name }).from(excursions)
+  const nameOf = new Map(names.map((row) => [row.id, row.name]))
+  const booking = matchExcursionLineBooking(
+    { name: item.name, eventDate: item.eventDate, priceAr: item.paymentStatus === 'PAID' ? item.refPriceAr : item.priceAr },
+    bookings.map((row) => ({
+      ...row,
+      guestPrice: Number(row.guestPrice) || 0,
+      entranceFee: Number(row.entranceFee) || 0,
+      lunchPrice: Number(row.lunchPrice) || 0,
+      boatPriceEur: row.boatPriceEur == null || row.boatPriceEur === '' ? null : Number(row.boatPriceEur),
+      entrancePax: row.entrancePax == null ? null : Number(row.entrancePax),
+    })),
+    (id) => nameOf.get(id) || '',
+  )
+  if (!booking || !booking.id) return { ok: false, error: 'Vrstica nima sestavin cene.' }
+
+  const parts = excursionLineParts(booking)
+  if (parts.length === 0) return { ok: false, error: 'Vrstica nima sestavin cene.' }
+  const allowed = new Set(parts.map((part) => part.key))
+
+  const next = {
+    transport: Number(booking.guestPrice) || 0,
+    entrance: Number(booking.entranceFee) || 0,
+    lunch: Number(booking.lunchPrice) || 0,
+  }
+  for (const key of ['transport', 'entrance', 'lunch'] as const) {
+    if (!allowed.has(key) || amounts[key] == null) continue
+    const value = Number(amounts[key])
+    if (!Number.isFinite(value) || value < 0) return { ok: false, error: 'Znesek ni veljaven.' }
+    next[key] = Math.round(value * 100) / 100
+  }
+
+  await db.update(excursionBookings).set({
+    guestPrice: String(next.transport),
+    entranceFee: String(next.entrance),
+    lunchPrice: String(next.lunch),
+  }).where(eq(excursionBookings.id, booking.id))
+
+  const rate = await getExchangeRate()
+  const totalAr = excursionLineTotalAr([next.transport, next.entrance, next.lunch], rate)
+  const keepEvidence = item.isFree || item.paymentStatus === 'PAID'
+  await db.update(orderItems).set({
+    refPriceAr: totalAr,
+    priceAr: keepEvidence ? item.priceAr : totalAr,
+  }).where(eq(orderItems.id, item.id))
+
+  revalidatePath('/')
+  revalidatePath(`/racun/${item.reservationId}`)
+  return { ok: true, totalAr }
 }
 
 export async function deleteExcursionBooking(id: string) {
