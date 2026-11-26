@@ -44,6 +44,7 @@ import BankaTab from '@/components/banka-tab'
 import OrangeMoneyTab from '@/components/orange-money-tab'
 import BlagajniskiDnevnik from '@/components/blagajniski-dnevnik'
 import LetniPregledTab from '@/components/letni-pregled-tab'
+import RacuniBancniRacunTab from '@/components/racuni-bancni-racun-tab'
 import { monthFinanceFromMonthly } from '@/lib/letni-pregled'
 import KuhinjaRacuniRow, { type KuhinjaRacunLine } from '@/components/kuhinja-racuni-row'
 import LeaveDocument from '@/components/leave-document'
@@ -85,12 +86,12 @@ function staffKindOf(staff: { isRegularEmployee: boolean; employmentType: string
 
 type Tab = 'kalkulacije' | 'kadri'
 type KalkulacijeView = 'pregled' | 'nastavitve' | 'prevozniki' | 'marketing' | 'finance'
-type FinanceView = 'pregled' | 'banka' | 'orange' | 'dnevnik'
+type FinanceView = 'pregled' | 'racuni' | 'banka' | 'orange' | 'dnevnik'
 
 const FINANCE_YEARS = [2024, 2025, 2026, 2027]
 
 function financeFromParam(value: string | null): FinanceView {
-  if (value === 'pregled' || value === 'banka' || value === 'orange' || value === 'dnevnik') return value
+  if (value === 'pregled' || value === 'racuni' || value === 'banka' || value === 'orange' || value === 'dnevnik') return value
   return 'banka'
 }
   type KadriView = 'seznam' | 'place' | 'obracun' | 'pogodbe' | 'razpored' | 'napitnina' | 'certifikat' | 'disciplina' | 'registre'
@@ -382,7 +383,9 @@ function StatistikaContent() {
                     <p className="text-white/40 text-sm hidden sm:block">
                       {kalkulacijeView === 'finance' && financeView === 'pregled'
                         ? 'Letni pregled prihodkov in stroškov'
-                        : 'Mesečni pregled prihodkov in stroškov'}
+                        : kalkulacijeView === 'finance' && financeView === 'racuni'
+                          ? 'Izdani računi na bančnem računu SARL'
+                          : 'Mesečni pregled prihodkov in stroškov'}
                     </p>
                   </div>
                 </button>
@@ -1084,6 +1087,17 @@ function StatistikaContent() {
                     Letni pregled
                   </button>
                   <button
+                    onClick={() => selectFinance('racuni')}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
+                      financeView === 'racuni'
+                        ? 'bg-[#7fa8b8]/20 text-[#7fa8b8] border border-[#7fa8b8]/30'
+                        : 'bg-white/5 text-white/60 hover:bg-white/10'
+                    }`}
+                  >
+                    <FileText className="h-4 w-4" />
+                    Računi na SARL
+                  </button>
+                  <button
                     onClick={() => selectFinance('banka')}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-colors whitespace-nowrap ${
                       financeView === 'banka'
@@ -1126,6 +1140,9 @@ function StatistikaContent() {
                     pinnedMonth={month}
                     pinned={monthFinanceFromMonthly(month, stats)}
                   />
+                )}
+                {financeView === 'racuni' && (
+                  <RacuniBancniRacunTab year={year} years={FINANCE_YEARS} onYear={setYear} />
                 )}
                 {financeView === 'banka' && <BankaTab year={year} />}
                 {financeView === 'orange' && <OrangeMoneyTab year={year} />}
