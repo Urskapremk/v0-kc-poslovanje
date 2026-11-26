@@ -2,7 +2,6 @@
 
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
-import { guestInvoiceReference } from '@/lib/issued-invoices'
 import {
   listSarlBankInvoices,
   lodgeDay,
@@ -13,7 +12,40 @@ import {
 
 export type { SarlBankInvoiceRow }
 
+function invoiceNumber(reservationId: string) {
+  const tail = reservationId.slice(-6).toUpperCase()
+  const year = new Intl.DateTimeFormat('en-CA', { timeZone: 'Indian/Antananarivo', year: 'numeric' }).format(new Date())
+  return tail ? `KC-${year}-${tail}` : ''
+}
+
+function safeError(error: unknown) {
+  const message = error instanceof Error ? error.message : 'unknown'
+  return message.replace(/postgres(?:ql)?:\/\/\S+/gi, 'postgres://***').slice(0, 500)
+}
+
+export async function explainSarlBankInvoices(year: number) {
+  const out: { sarl: string; stats: string } = { sarl: '', stats: '' }
+  try {
+    const rows = await loadSarlBankInvoices(year)
+    out.sarl = `rows ${rows.length} total ${rows.reduce((sum, row) => sum + row.amountEur, 0)}`
+  } catch (error) {
+    out.sarl = safeError(error)
+  }
+  try {
+    const { getMonthlyStatistics } = await import('@/app/actions/statistics')
+    await getMonthlyStatistics(year, 11)
+    out.stats = 'ok'
+  } catch (error) {
+    out.stats = safeError(error)
+  }
+  return out
+}
+
 export async function getSarlBankInvoices(year: number): Promise<SarlBankInvoiceRow[]> {
+  return loadSarlBankInvoices(year)
+}
+
+async function loadSarlBankInvoices(year: number): Promise<SarlBankInvoiceRow[]> {
   const [paymentRows, lineRows, emailRows] = await Promise.all([
     db.execute(sql`
       SELECT p.id, p."reservationId" AS "reservationId", p.amount, p.method, p."paidAt" AS "paidAt", p.notes,
@@ -48,7 +80,7 @@ export async function getSarlBankInvoices(year: number): Promise<SarlBankInvoice
       paymentId: String(row.id || ''),
       reservationId,
       guestName: String(row.guestName || ''),
-      invoiceNumber: guestInvoiceReference(reservationId),
+      invoiceNumber: invoiceNumber(reservationId),
       method: String(row.method || ''),
       amountEur: Number(row.amount || 0),
       paidAt: lodgeDay(row.paidAt as string | Date | null),

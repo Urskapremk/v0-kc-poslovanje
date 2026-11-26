@@ -339,6 +339,16 @@ function StatistikaContent() {
     }))
   }
 
+  if (!stats && kalkulacijeView === 'finance' && financeView === 'racuni') {
+    return (
+      <div className="min-h-screen bg-[#0a2029] text-white">
+        <div className="max-w-6xl mx-auto px-4 py-6">
+          <RacuniBancniRacunTab year={year} years={FINANCE_YEARS} onYear={setYear} />
+        </div>
+      </div>
+    )
+  }
+
   if (!stats) {
     return (
       <div className="min-h-screen bg-[#0a2029] flex items-center justify-center">
