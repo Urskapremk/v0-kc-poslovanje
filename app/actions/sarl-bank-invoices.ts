@@ -41,8 +41,12 @@ export async function explainSarlBankInvoices(year: number) {
   return out
 }
 
-export async function getSarlBankInvoices(year: number): Promise<SarlBankInvoiceRow[]> {
-  return loadSarlBankInvoices(year)
+export async function getSarlBankInvoices(year: number): Promise<{ rows: SarlBankInvoiceRow[]; error: string | null }> {
+  try {
+    return { rows: await loadSarlBankInvoices(year), error: null }
+  } catch (error) {
+    return { rows: [], error: safeError(error) }
+  }
 }
 
 async function loadSarlBankInvoices(year: number): Promise<SarlBankInvoiceRow[]> {

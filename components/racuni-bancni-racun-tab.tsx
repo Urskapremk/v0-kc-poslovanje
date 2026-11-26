@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getSarlBankInvoices, type SarlBankInvoiceRow } from '@/app/actions/sarl-bank-invoices'
+import { sarlBankHealth } from '@/app/actions/sarl-bank-health'
 
 function formatEur(value: number) {
   return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(value)
@@ -36,12 +37,15 @@ export default function RacuniBancniRacunTab({
     let cancelled = false
     setRows(null)
     setError(null)
-    getSarlBankInvoices(year)
-      .then((list) => {
-        if (!cancelled) setRows(list)
+    sarlBankHealth()
+      .then((health) => getSarlBankInvoices(year).then((result) => ({ health, result })))
+      .then(({ health, result }) => {
+        if (cancelled) return
+        setRows(result.rows)
+        if (health !== 'ok' || result.error) setError([health, result.error].filter(Boolean).join(' · '))
       })
-      .catch(() => {
-        if (!cancelled) setError('Računov ni bilo mogoče naložiti.')
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Računov ni bilo mogoče naložiti.')
       })
     return () => {
       cancelled = true
